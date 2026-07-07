@@ -1,0 +1,1014 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ── Flash banner (driven by ?msg= query param) ─────────────────────────────── #}
+<div id="flash" class="flash-banner hidden"></div>
+
+<div class="t-wrapper">
+
+    {# ═══════════════════════════════════════════════════════════════════════════
+    TOURNAMENT HEADER CARD
+    ═══════════════════════════════════════════════════════════════════════════ #}
+    <div class="card-panel">
+
+        {# Header row #}
+        <div class="panel-header">
+            <div class="panel-title-group">
+                <span class="panel-eyebrow">Tournament</span>
+                <h1 id="view-title" class="panel-title">{{ tournament.title }}</h1>
+            </div>
+            <div class="panel-header-actions">
+                <button id="edit-btn" class="btn btn-ghost" onclick="toggleEdit(true)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    Edit
+                </button>
+                <a href="/dashboard" class="btn btn-ghost">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 18l-6-6 6-6" />
+                    </svg>
+                    Dashboard
+                </a>
+            </div>
+        </div>
+
+        {# ── READ VIEW ──────────────────────────────────────────────────────────── #}
+        <div id="read-view">
+            <dl class="info-grid">
+                <div class="info-cell">
+                    <dt>Location</dt>
+                    <dd>{{ tournament.location }}</dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Date & Time</dt>
+                    <dd>{{ tournament.dateTime.strftime("%d %b %Y — %H:%M") }}</dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Courts</dt>
+                    <dd>{{ tournament.courtNum }}</dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Discipline</dt>
+                    <dd>{{ tournament.discipline }}</dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Venue</dt>
+                    <dd>{{ tournament.settings.get('venueName') or '—' }}</dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Court Numbering</dt>
+                    <dd>{{ tournament.settings.get('numbering') or 'Court' }}</dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Streaming</dt>
+                    <dd>
+                        {% if tournament.settings.get('isStream') %}
+                        <span class="badge badge-green">Enabled</span>
+                        {% else %}
+                        <span class="badge badge-grey">Disabled</span>
+                        {% endif %}
+                    </dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Tournament ID</dt>
+                    <dd class="mono text-muted">{{ tournament.id }}</dd>
+                </div>
+            </dl>
+        </div>
+
+        {# ── EDIT FORM ──────────────────────────────────────────────────────────── #}
+        <form id="edit-form" class="edit-form hidden" onsubmit="submitEdit(event)">
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="f-title">Title</label>
+                    <input id="f-title" type="text" name="title" value="{{ tournament.title }}" required>
+                </div>
+                <div class="form-field">
+                    <label for="f-location">Location</label>
+                    <input id="f-location" type="text" name="location" value="{{ tournament.location }}" required>
+                </div>
+                <div class="form-field">
+                    <label for="f-datetime">Date & Time</label>
+                    <input id="f-datetime" type="datetime-local" name="dateTime"
+                        value="{{ tournament.dateTime.strftime('%Y-%m-%dT%H:%M') }}" required>
+                </div>
+                <div class="form-field">
+                    <label for="f-courts">Number of Courts</label>
+                    <input id="f-courts" type="number" name="courtNum" value="{{ tournament.courtNum }}" min="1"
+                        required>
+                </div>
+                <div class="form-field">
+                    <label for="f-discipline">Discipline</label>
+                    <input id="f-discipline" type="text" name="discipline" value="{{ tournament.discipline }}" required>
+                </div>
+                <div class="form-field">
+                    <label for="f-venue">Venue Name</label>
+                    <input id="f-venue" type="text" name="venueName"
+                        value="{{ tournament.settings.get('venueName', '') }}">
+                </div>
+                <div class="form-field">
+                    <label for="f-numbering">Court Numbering Prefix</label>
+                    <input id="f-numbering" type="text" name="numbering"
+                        value="{{ tournament.settings.get('numbering', 'Court') }}"
+                        placeholder="e.g. Court, Field, Table">
+                </div>
+                <div class="form-field form-field--checkbox">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="isStream" {% if tournament.settings.get('isStream') %}checked{%
+                            endif %}>
+                        <span>Enable Streaming</span>
+                    </label>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="save-btn">Save Changes</button>
+                <button type="button" class="btn btn-ghost" onclick="toggleEdit(false)">Cancel</button>
+                <span id="save-status" class="save-status"></span>
+            </div>
+        </form>
+
+    </div>{# /card-panel #}
+
+    {# ═══════════════════════════════════════════════════════════════════════════
+    YOUTUBE STREAMING CARD (only shown if isStream is enabled)
+    ═══════════════════════════════════════════════════════════════════════════ #}
+    {% if tournament.settings.get('isStream') %}
+    <div class="card-panel yt-panel">
+
+        <div class="panel-header" style="margin-bottom:1.5rem">
+            <div class="panel-title-group">
+                <span class="panel-eyebrow">Live Streaming</span>
+                <h2 class="panel-title" style="font-size:1.4rem">YouTube Schedule</h2>
+            </div>
+            <div id="yt-status-badge" class="yt-badge yt-badge--loading">
+                <span class="yt-badge-dot"></span>
+                <span class="yt-badge-text">Checking…</span>
+            </div>
+        </div>
+
+        {# Not connected state #}
+        <div id="yt-disconnected" class="yt-state hidden">
+            <p class="yt-hint">Connect a YouTube account to schedule live streams for each court.</p>
+            <a href="/youtube/auth?tournament_id={{ tournament.id }}" class="btn btn-yt">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                </svg>
+                Connect YouTube Account
+            </a>
+        </div>
+
+        {# Connected state #}
+        <div id="yt-connected" class="yt-state hidden">
+
+            <div class="yt-info-row">
+                <div class="yt-info-item">
+                    <span class="yt-info-label">Courts to schedule</span>
+                    <span class="yt-info-value">{{ tournament.courtNum }}</span>
+                </div>
+                <div class="yt-info-item">
+                    <span class="yt-info-label">Stream date</span>
+                    <span class="yt-info-value">{{ tournament.dateTime.strftime("%d %b %Y") }}</span>
+                </div>
+                <div class="yt-info-item">
+                    <span class="yt-info-label">Numbering</span>
+                    <span class="yt-info-value">{{ tournament.settings.get('numbering', 'Court') }} 1…{{
+                        tournament.courtNum }}</span>
+                </div>
+            </div>
+
+            {# ── Thumbnail Upload Section ── #}
+            <div class="form-field" style="margin-bottom: 1.5rem;">
+                {% for i in range(1, tournament.courtNum + 1) %}
+                <label>
+                    Stream {{ i }} Thumbnails (Optional)
+                </label>
+                <input id="thumbnail-upload-{{ i }}" type="file" accept="image/jpeg, image/png" multiple
+                    onchange="previewThumbnails()" style="padding: 0.35rem;">
+                {% endfor %}
+                <div id="thumbnail-preview-container" class="thumbnail-preview-grid hidden"></div>
+                <p id="thumbnail-help-text" class="text-muted" style="font-size: 0.8rem; margin-top: 0.25rem;">
+                    Upload the courts in sequential order (Court 1, Court 2, etc.).
+                </p>
+            </div>
+
+            <div class="yt-action-row">
+                <button id="schedule-btn" class="btn btn-primary" onclick="scheduleStreams()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <polygon points="10 8 16 12 10 16 10 8" />
+                    </svg>
+                    Schedule {{ tournament.courtNum }} Stream{{ 's' if tournament.courtNum != 1 }}
+                </button>
+                <button class="btn btn-ghost btn-sm" onclick="disconnectYT()">Disconnect</button>
+            </div>
+
+            <div id="schedule-error" class="alert alert-error hidden"></div>
+
+        </div>
+
+        {# Scheduled broadcasts table #}
+        <div id="broadcasts-panel" class="hidden">
+            <div class="divider"></div>
+            <h3 class="sub-heading">Scheduled Broadcasts</h3>
+            <a id="playlist-link" href="#" target="_blank" class="playlist-pill hidden">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                </svg>
+                View Full Playlist
+            </a>
+            <div id="broadcasts-grid" class="broadcasts-grid"></div>
+        </div>
+
+    </div>
+    {% endif %}
+
+</div>{# /t-wrapper #}
+
+
+{# ═══════════════════════════════════════════════════════════════════════════
+STYLES
+═══════════════════════════════════════════════════════════════════════════ #}
+<style>
+    :root {
+        --yt-red: #ff0000;
+        --green: #16a34a;
+        --green-bg: #dcfce7;
+        --red-bg: #fef2f2;
+        --red-border: #fca5a5;
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --muted: #64748b;
+        --text: #0f172a;
+        --accent: #4f46e5;
+        --radius: 14px;
+    }
+
+    .t-wrapper {
+        max-width: 860px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    /* ── Card panel ─────────────────────────────────────────────── */
+    .card-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 2rem;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .04);
+    }
+
+    /* ── Panel header ───────────────────────────────────────────── */
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+
+    .panel-header-actions {
+        display: flex;
+        gap: .5rem;
+        flex-shrink: 0;
+    }
+
+    .panel-eyebrow {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--muted);
+        display: block;
+        margin-bottom: .25rem;
+    }
+
+    .panel-title {
+        margin: 0;
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--text);
+        line-height: 1.2;
+    }
+
+    /* ── Info grid ──────────────────────────────────────────────── */
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 1.25rem;
+        margin-top: 1.5rem;
+        list-style: none;
+        padding: 0;
+    }
+
+    .info-cell dt {
+        font-size: .72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--muted);
+        margin-bottom: .3rem;
+    }
+
+    .info-cell dd {
+        margin: 0;
+        font-size: .95rem;
+        color: var(--text);
+        font-weight: 500;
+    }
+
+    .mono {
+        font-family: 'Courier New', monospace;
+        font-size: .8rem !important;
+    }
+
+    .text-muted {
+        color: var(--muted) !important;
+    }
+
+    /* ── Badges ─────────────────────────────────────────────────── */
+    .badge {
+        display: inline-block;
+        font-size: .72rem;
+        font-weight: 600;
+        padding: .2rem .55rem;
+        border-radius: 99px;
+    }
+
+    .badge-green {
+        background: var(--green-bg);
+        color: var(--green);
+    }
+
+    .badge-grey {
+        background: #f1f5f9;
+        color: var(--muted);
+    }
+
+    /* ── Buttons ────────────────────────────────────────────────── */
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .5rem 1rem;
+        border-radius: 8px;
+        font-size: .875rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        text-decoration: none;
+        transition: all .15s;
+        white-space: nowrap;
+    }
+
+    .btn:disabled {
+        opacity: .5;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #4338ca;
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+        background: #f8fafc;
+        color: var(--text);
+    }
+
+    .btn-yt {
+        background: var(--yt-red);
+        color: #fff;
+    }
+
+    .btn-yt:hover {
+        background: #cc0000;
+    }
+
+    .btn-sm {
+        font-size: .8rem;
+        padding: .35rem .8rem;
+    }
+
+    /* ── Edit form ──────────────────────────────────────────────── */
+    .edit-form {
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border);
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 1rem;
+    }
+
+    .form-field {
+        display: flex;
+        flex-direction: column;
+        gap: .35rem;
+    }
+
+    .form-field--checkbox {
+        justify-content: flex-end;
+    }
+
+    .form-field label {
+        font-size: .75rem;
+        font-weight: 600;
+        color: var(--muted);
+        letter-spacing: .04em;
+    }
+
+    .form-field input[type="text"],
+    .form-field input[type="number"],
+    .form-field input[type="datetime-local"],
+    .form-field input[type="file"] {
+        padding: .55rem .75rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: .9rem;
+        color: var(--text);
+        background: #fff;
+        outline: none;
+        transition: border-color .15s, box-shadow .15s;
+    }
+
+    .form-field input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
+    }
+
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: .6rem;
+        cursor: pointer;
+        font-size: .9rem;
+        font-weight: 500;
+    }
+
+    .checkbox-label input {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+        cursor: pointer;
+    }
+
+    .form-actions {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        margin-top: 1.25rem;
+        flex-wrap: wrap;
+    }
+
+    .save-status {
+        font-size: .85rem;
+        font-weight: 600;
+    }
+
+    .save-status.ok {
+        color: var(--green);
+    }
+
+    .save-status.err {
+        color: #dc2626;
+    }
+
+    /* ── YouTube panel ──────────────────────────────────────────── */
+    .yt-panel {
+        border-top: 3px solid var(--yt-red);
+    }
+
+    .yt-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .3rem .75rem;
+        border-radius: 99px;
+        font-size: .78rem;
+        font-weight: 700;
+        letter-spacing: .04em;
+    }
+
+    .yt-badge--loading {
+        background: #f1f5f9;
+        color: var(--muted);
+    }
+
+    .yt-badge--connected {
+        background: var(--green-bg);
+        color: var(--green);
+    }
+
+    .yt-badge--disconnected {
+        background: #fef2f2;
+        color: #dc2626;
+    }
+
+    .yt-badge-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+
+    .yt-badge--loading .yt-badge-dot {
+        animation: blink 1.2s infinite;
+    }
+
+    @keyframes blink {
+
+        0%,
+        100% {
+            opacity: .3
+        }
+
+        50% {
+            opacity: 1
+        }
+    }
+
+    .yt-state {}
+
+    .yt-hint {
+        color: var(--muted);
+        font-size: .9rem;
+        margin: 0 0 1.25rem;
+    }
+
+    .yt-info-row {
+        display: flex;
+        gap: 2rem;
+        flex-wrap: wrap;
+        margin-bottom: 1.5rem;
+    }
+
+    .yt-info-item {
+        display: flex;
+        flex-direction: column;
+        gap: .25rem;
+    }
+
+    .yt-info-label {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .07em;
+        color: var(--muted);
+    }
+
+    .yt-info-value {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .yt-action-row {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        flex-wrap: wrap;
+    }
+
+    /* ── Thumbnail Upload ───────────────────────────────────────── */
+    .thumbnail-preview-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .thumb-preview-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        align-items: center;
+    }
+
+    .thumb-preview-item img {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+    }
+
+    .thumb-preview-item span {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    /* ── Alerts ─────────────────────────────────────────────────── */
+    .alert {
+        padding: .75rem 1rem;
+        border-radius: 8px;
+        font-size: .875rem;
+        font-weight: 500;
+        margin-top: 1rem;
+    }
+
+    .alert-error {
+        background: var(--red-bg);
+        color: #dc2626;
+        border: 1px solid var(--red-border);
+    }
+
+    /* ── Broadcasts grid ────────────────────────────────────────── */
+    .divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.5rem 0;
+    }
+
+    .sub-heading {
+        margin: 0 0 1rem;
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+
+    .playlist-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        background: #fff0f0;
+        color: var(--yt-red);
+        border: 1px solid #ffc9c9;
+        padding: .3rem .85rem;
+        border-radius: 99px;
+        font-size: .8rem;
+        font-weight: 700;
+        text-decoration: none;
+        margin-bottom: 1rem;
+        transition: background .15s;
+    }
+
+    .playlist-pill:hover {
+        background: #ffe0e0;
+    }
+
+    .broadcasts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: .85rem;
+    }
+
+    .bc-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1rem 1.1rem;
+        background: #fafafa;
+        transition: box-shadow .15s;
+    }
+
+    .bc-card:hover {
+        box-shadow: 0 2px 10px rgba(15, 23, 42, .08);
+    }
+
+    .bc-card a {
+        text-decoration: none;
+    }
+
+    .bc-court {
+        font-size: .72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .07em;
+        color: var(--muted);
+        margin-bottom: .3rem;
+    }
+
+    .bc-title {
+        font-size: .88rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: .6rem;
+        line-height: 1.3;
+    }
+
+    .bc-link {
+        display: inline-flex;
+        align-items: center;
+        gap: .3rem;
+        font-size: .8rem;
+        color: var(--yt-red);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+    .bc-link:hover {
+        text-decoration: underline;
+    }
+
+    /* ── Flash banner ───────────────────────────────────────────── */
+    .flash-banner {
+        padding: .8rem 1.25rem;
+        border-radius: 10px;
+        font-size: .875rem;
+        font-weight: 600;
+        margin-bottom: .5rem;
+    }
+
+    .flash-banner.ok {
+        background: var(--green-bg);
+        color: var(--green);
+        border: 1px solid #bbf7d0;
+    }
+
+    .flash-banner.err {
+        background: var(--red-bg);
+        color: #dc2626;
+        border: 1px solid var(--red-border);
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    @media (max-width: 600px) {
+        .card-panel {
+            padding: 1.25rem;
+        }
+
+        .panel-header {
+            flex-direction: column;
+        }
+
+        .panel-title {
+            font-size: 1.3rem;
+        }
+
+        .info-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+    }
+</style>
+
+
+{# ═══════════════════════════════════════════════════════════════════════════
+JAVASCRIPT
+═══════════════════════════════════════════════════════════════════════════ #}
+<script>
+    "use strict";
+
+    const TOURNAMENT_ID = "{{ tournament.id }}";
+    const COURT_COUNT = {{ tournament.courtNum }};
+    const COURT_PREFIX = "{{ tournament.settings.get('numbering', 'Court') }}";
+
+    // ── Flash message from ?msg= ───────────────────────────────────────────────
+    (function () {
+        const p = new URLSearchParams(window.location.search);
+        const msg = p.get("msg");
+        if (!msg) return;
+        const el = document.getElementById("flash");
+        el.textContent = decodeURIComponent(msg.replace(/\+/g, " "));
+        el.className = "flash-banner " + (msg.toLowerCase().includes("error") ? "err" : "ok");
+        setTimeout(() => { el.className = "flash-banner hidden"; }, 6000);
+        // Clean URL
+        const url = new URL(window.location);
+        url.searchParams.delete("msg");
+        window.history.replaceState({}, "", url);
+    })();
+
+
+    // ── Edit toggle ────────────────────────────────────────────────────────────
+    function toggleEdit(on) {
+        document.getElementById("read-view").classList.toggle("hidden", on);
+        document.getElementById("edit-form").classList.toggle("hidden", !on);
+        document.getElementById("edit-btn").classList.toggle("hidden", on);
+        document.getElementById("save-status").textContent = "";
+    }
+
+    async function submitEdit(evt) {
+        evt.preventDefault();
+        const btn = document.getElementById("save-btn");
+        const status = document.getElementById("save-status");
+        const form = evt.target;
+        const fd = new FormData(form);
+
+        btn.disabled = true;
+        btn.textContent = "Saving…";
+        status.textContent = "";
+        status.className = "save-status";
+
+        const payload = {
+            title: fd.get("title"),
+            location: fd.get("location"),
+            dateTime: new Date(fd.get("dateTime")).toISOString(),
+            courtNum: parseInt(fd.get("courtNum"), 10),
+            discipline: fd.get("discipline"),
+            venueName: fd.get("venueName") || "",
+            numbering: fd.get("numbering") || "Court",
+            isStream: form.querySelector('[name="isStream"]').checked,
+        };
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                const err = await res.json();
+                status.textContent = "⚠ " + (err.detail || "Update failed.");
+                status.className = "save-status err";
+                btn.disabled = false;
+                btn.textContent = "Save Changes";
+            }
+        } catch (e) {
+            status.textContent = "⚠ Network error.";
+            status.className = "save-status err";
+            btn.disabled = false;
+            btn.textContent = "Save Changes";
+        }
+    }
+
+
+    // ── YouTube ────────────────────────────────────────────────────────────────
+    {% if tournament.settings.get('isStream') %}
+    async function checkYouTubeStatus() {
+        try {
+            const res = await fetch("/api/youtube/status");
+            const data = await res.json();
+            const badge = document.getElementById("yt-status-badge");
+
+            if (data.connected) {
+                badge.className = "yt-badge yt-badge--connected";
+                badge.innerHTML = '<span class="yt-badge-dot"></span><span class="yt-badge-text">Connected</span>';
+                document.getElementById("yt-connected").classList.remove("hidden");
+                await loadBroadcasts();
+            } else {
+                badge.className = "yt-badge yt-badge--disconnected";
+                badge.innerHTML = '<span class="yt-badge-dot"></span><span class="yt-badge-text">Not connected</span>';
+                document.getElementById("yt-disconnected").classList.remove("hidden");
+            }
+        } catch {
+            document.getElementById("yt-status-badge").innerHTML =
+                '<span class="yt-badge-dot"></span><span class="yt-badge-text">Error</span>';
+        }
+    }
+
+    async function loadBroadcasts() {
+        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/broadcasts`);
+        const list = await res.json();
+        if (!list.length) return;
+
+        const panel = document.getElementById("broadcasts-panel");
+        panel.classList.remove("hidden");
+
+        // Playlist link
+        const playlistId = list[0]?.playlist_id;
+        if (playlistId) {
+            const link = document.getElementById("playlist-link");
+            link.href = `https://www.youtube.com/playlist?list=${playlistId}`;
+            link.classList.remove("hidden");
+        }
+
+        // Court cards
+        const grid = document.getElementById("broadcasts-grid");
+        grid.innerHTML = list.map(b => `
+            <div class="bc-card">
+                <a href="https://studio.youtube.com/video/${b.broadcast_id}/livestreaming" target="_blank">
+                    <div class="bc-court">Court ${b.court_number}</div>
+                    <div class="bc-title">${b.title}</div>
+                    <a class="bc-link" href="${b.youtube_url}" target="_blank">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                    </svg>
+                    Watch on YouTube
+                    </a>
+                </a>
+            </div>
+        `).join("");
+    }
+
+    function previewThumbnails() {
+        const container = document.getElementById('thumbnail-preview-container');
+        const files = new Array();
+
+        for (let i = 0; i < COURT_COUNT; i++) {
+            let fileReader = document.getElementById("thumbnail-upload-" + (i + 1));
+            if (fileReader.files.length > 0) {
+                files.push(fileReader.files[0]);
+            }
+        }
+
+        container.innerHTML = '';
+
+        if (files.length === 0) {
+            container.classList.add('hidden');
+            return;
+        }
+
+        container.classList.remove('hidden');
+
+        Array.from(files).forEach((file, index) => {
+            const reader = new FileReader();
+
+            const previewItem = document.createElement('div');
+            previewItem.className = 'thumb-preview-item';
+
+            const img = document.createElement('img');
+            const label = document.createElement('span');
+            label.textContent = `${COURT_PREFIX} ${index + 1}`;
+
+            reader.onload = function (e) {
+                img.src = e.target.result;
+            };
+
+            reader.readAsDataURL(file);
+
+            previewItem.appendChild(img);
+            previewItem.appendChild(label);
+            container.appendChild(previewItem);
+        });
+    }
+
+    async function scheduleStreams() {
+        const btn = document.getElementById("schedule-btn");
+        const errEl = document.getElementById("schedule-error");
+        const fileInput = document.getElementById("thumbnail-upload");
+        const files = new Array();
+
+        for (let i = 0; i < COURT_COUNT; i++) {
+            let fileReader = document.getElementById("thumbnail-upload-" + (i + 1));
+            if (fileReader.files.length > 0) {
+                files.push(fileReader.files[0]);
+            }
+        }
+
+        // Prevent submission if thumbnails are provided but the count doesn't match courts
+        if (files.length > 0 && files.length !== COURT_COUNT) {
+            errEl.textContent = `Please select exactly ${COURT_COUNT} thumbnails (you selected ${files.length}).`;
+            errEl.classList.remove("hidden");
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> Scheduling…`;
+        errEl.classList.add("hidden");
+
+        // Prepare multipart form data payload
+        const formData = new FormData();
+        if (files.length > 0) {
+            for (let i = 0; i < files.length; i++) {
+                formData.append("thumbnails", files[i]);
+            }
+        }
+
+        try {
+            const res = await fetch(`/api/youtube/schedule/${TOURNAMENT_ID}`, {
+                method: "POST",
+                body: formData
+                // Note: Do not set Content-Type header manually, 
+                // fetch will automatically set it to multipart/form-data with the correct boundary
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                btn.innerHTML = "✓ Scheduled";
+                await loadBroadcasts();
+            } else {
+                throw new Error(data.detail || "Scheduling failed.");
+            }
+        } catch (e) {
+            errEl.textContent = e.message;
+            errEl.classList.remove("hidden");
+            btn.disabled = false;
+            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg> Retry Scheduling`;
+        }
+    }
+
+    async function disconnectYT() {
+        if (!confirm("Disconnect YouTube account?")) return;
+        await fetch("/api/youtube/disconnect", { method: "DELETE" });
+        window.location.reload();
+    }
+
+    // @keyframes spin { to { transform: rotate(360deg); } }
+
+    checkYouTubeStatus();
+    {% endif %}
+</script>
+
+{% endblock %}

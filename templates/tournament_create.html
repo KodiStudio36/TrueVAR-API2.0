@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Create New Tournament</h2>
+
+<form id="createTournamentForm" class="form-container">
+    <div class="form-group">
+        <label for="title">Tournament Title:</label>
+        <input type="text" id="title" name="title" required>
+    </div>
+
+    <div class="form-group">
+        <label for="location">Location:</label>
+        <input type="text" id="location" name="location" required>
+    </div>
+
+    <div class="form-group">
+        <label for="courtNum">Number of Courts:</label>
+        <input type="number" id="courtNum" name="courtNum" required min="1">
+    </div>
+
+    <div class="form-group">
+        <label for="dateTime">Date and Time:</label>
+        <input type="datetime-local" id="dateTime" name="dateTime" required>
+    </div>
+
+    <div class="form-group">
+        <label for="discipline">Discipline:</label>
+        <select id="discipline" name="discipline" required>
+            <option value="" disabled selected>-- Select a Discipline --</option>
+            <option value="Kyorugi TkStrike">Kyorugi TkStrike</option>
+            <option value="Poomsae Fitofan">Poomsae Fitofan</option>
+            <option value="Boxing Manual">Boxing Manual</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="venueName">Name of the Venues:</label>
+        <select id="venueName" name="venueName" required>
+            <option value="Court" selected>Court</option>
+            <option value="Area">Area</option>
+            <option value="Ring">Ring</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="numbering">Numbering System:</label>
+        <select id="numbering" name="numbering" required>
+            <option value="Numbers" selected>Numbers</option>
+            <option value="Alphabet">Alphabet</option>
+        </select>
+    </div>
+
+    <div class="form-group checkbox-group">
+        <input type="checkbox" id="isStream" name="isStream" checked>
+        <label for="isStream">This tournament will be streamed on YouTube</label>
+    </div>
+
+    <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">Create Tournament</button>
+</form>
+
+<script>
+    document.getElementById('createTournamentForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        // Grab the datetime value and convert it to a standard ISO format that Pydantic loves
+        const rawDateTime = document.getElementById('dateTime').value;
+        const formattedDateTime = new Date(rawDateTime).toISOString();
+
+        const formData = {
+            title: document.getElementById('title').value,
+            location: document.getElementById('location').value,
+            courtNum: parseInt(document.getElementById('courtNum').value),
+            dateTime: formattedDateTime,
+            discipline: document.getElementById('discipline').value,
+            isStream: document.getElementById('isStream').checked, // .checked returns a boolean
+            venueName: document.getElementById('venueName').value,
+            numbering: document.getElementById('numbering').value,
+        };
+
+        try {
+            const response = await fetch('/api/tournaments', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+
+            if (response.ok) {
+                alert('Tournament created successfully!');
+                window.location.href = '/dashboard';
+            } else {
+                const errorData = await response.json();
+                alert('Error creating tournament: ' + JSON.stringify(errorData));
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An unexpected error occurred.');
+        }
+    });
+</script>
+{% endblock %}

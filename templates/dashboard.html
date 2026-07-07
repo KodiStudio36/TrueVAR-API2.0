@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>All Tournaments</h2>
+
+<div class="tournament-grid">
+    {% if tournaments %}
+    {% for tournament in tournaments %}
+    <div class="card">
+        <h3>{{ tournament.title }}</h3>
+        <p><strong>Location:</strong> {{ tournament.location }}</p>
+        <p><strong>Courts:</strong> {{ tournament.courtNum }}</p>
+        <a href="/dashboard/tournaments/{{ tournament.id }}" class="btn">View Details</a>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p>No tournaments found. <a href="/dashboard/tournaments/create">Create one now!</a></p>
+    {% endif %}
+</div>
+
+<hr style="margin: 3rem 0; border: none; border-top: 1px solid #cbd5e1;">
+
+<div class="cases-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h2>All Cases</h2>
+    <button id="addCaseBtn" class="btn btn-secondary">+ Add Case</button>
+</div>
+
+<ul class="case-list">
+    {% if cases %}
+    {% for case in cases %}
+    <li class="case-item">
+        <strong>{{ case.name }}</strong>
+        {% if case.id %}
+        <span style="color: #64748b; font-size: 0.85em; margin-left: 10px;">(ID: {{ case.id }})</span>
+        {% endif %}
+    </li>
+    {% endfor %}
+    {% else %}
+    <li class="case-item" style="border-left-color: transparent;">No cases found.</li>
+    {% endif %}
+</ul>
+
+<script>
+    document.getElementById('addCaseBtn').addEventListener('click', async function () {
+        // This triggers the browser's built-in input alert box
+        const caseName = prompt("Enter the name for the new case:");
+
+        // If the user clicked "Cancel" or left it blank, do nothing
+        if (!caseName || caseName.trim() === "") {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/cases', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: caseName.trim() })
+            });
+
+            if (response.ok) {
+                // Reload the page instantly so the new case appears in the list
+                window.location.reload();
+            } else {
+                const errorData = await response.json();
+                alert('Error creating case: ' + JSON.stringify(errorData));
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An unexpected error occurred.');
+        }
+    });
+</script>
+{% endblock %}
