@@ -21,7 +21,7 @@ class FirebaseTournamentRepository(TournamentPort):
         doc_ref.set(tournament.toJson())
 
     def getTournaments(self) -> List[Tournament]:
-        docs = self.collection.where("dateTime", ">=", datetime.now(timezone.utc)).stream()
+        docs = self.collection.stream()
         tournaments = []
         for doc in docs:
             data = doc.to_dict()
@@ -35,4 +35,29 @@ class FirebaseTournamentRepository(TournamentPort):
             
         data = doc_ref.to_dict()
         return Tournament.fromJson(doc_ref.id, data)
+    
+    def getTournamentsPaginated(
+        self, status: str, limit: int = 10, offset: int = 0
+    ) -> List[Tournament]:
+        """
+        Simple offset pagination, ordered newest-first. Fine for the
+        volumes a single-org dashboard deals with; if this collection
+        grows into the thousands, swap .offset() for a cursor
+        (start_after on the last doc snapshot) since Firestore still
+        reads+discards the skipped docs under the hood.
+        """
+        query = (
+            self.collection
+            .where("status", "==", status)
+            .order_by("dateTime", direction="DESCENDING")
+            .offset(offset)
+            .limit(limit)
+        )
+        docs = query.stream()
+        return [Tournament.fromJson(doc.id, doc.to_dict()) for doc in docs]
+
+    def setTournamentStatus(self, tournament_id: str, status: str) -> None:
+        self.collection.document(tournament_id).update({"status": status})
         
+    def deleteTournament(self, tournament_id: str) -> None:
+        self.collection.document(tournament_id).delete()

@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from adapters.database.firebase_stream_key_repository import FirebaseStreamKeyRepository
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
 from domain.entities import StreamKey
+from domain.ports.tournament_port import TournamentPort
 from infrastructure.firebase_client import init_firestore
 from services.youtube_service import YouTubeService, build_auth_url, exchange_code_for_tokens
 from usecases.youtube_usecase import (
@@ -158,9 +159,15 @@ async def schedule_tournament_streams(
     tournament_id: str,
     thumbnails: Optional[List[UploadFile]] = File(None),
     stream_key_repo=Depends(get_stream_key_repo),
-    tournament_repo=Depends(get_tournament_repo),
+    tournament_repo: TournamentPort=Depends(get_tournament_repo),
     db=Depends(_db),
 ):
+    tournament = tournament_repo.getTournament(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    if tournament.status == "archived":
+        raise HTTPException(status_code=409, detail="Cannot schedule streams for an archived tournament.")
+
     creds_doc = db.collection("youtube_auth").document("credentials").get()
     if not creds_doc.exists or not (creds_doc.to_dict() or {}).get("refresh_token"):
         raise HTTPException(status_code=401, detail="YouTube account is not connected.")

@@ -6,18 +6,24 @@ from typing import List, Optional
 class Tournament:
     id: str | None
     title: str
+    isExternalPublic: Optional[bool]
     location: str
     courtNum: int
     dateTime: datetime
+    sport: str
     discipline: str
     settings: dict
+    status: str = "active"
 
     def toJson(self):
         return {
             "title": self.title,
+            "isExternalPublic": self.isExternalPublic,
+            "status": self.status,
             "location": self.location,
             "courtNum": self.courtNum,
             "dateTime": self.dateTime,
+            "sport": self.sport,
             "discipline": self.discipline,
             "settings": self.settings,
         }
@@ -26,11 +32,14 @@ class Tournament:
         return Tournament(
             id=id,
             title=data["title"],
+            isExternalPublic=data.get("isExternalPublic"),
             location=data["location"],
             courtNum=data["courtNum"],
             dateTime=data["dateTime"],
+            sport=data["sport"],
             discipline=data["discipline"],
             settings=data["settings"],
+            status=data["status"],
         )
 
 @dataclass

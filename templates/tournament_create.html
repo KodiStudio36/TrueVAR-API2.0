@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Create New Tournament</h2>
+<h2 id="page-heading">Create New Tournament</h2>
 
 <form id="createTournamentForm" class="form-container">
     <div class="form-group">
@@ -25,13 +25,23 @@
     </div>
 
     <div class="form-group">
+        <label for="sport">Sport:</label>
+        <select id="sport" name="sport" required></select>
+    </div>
+
+    <div class="form-group">
         <label for="discipline">Discipline:</label>
-        <select id="discipline" name="discipline" required>
-            <option value="" disabled selected>-- Select a Discipline --</option>
-            <option value="Kyorugi TkStrike">Kyorugi TkStrike</option>
-            <option value="Poomsae Fitofan">Poomsae Fitofan</option>
-            <option value="Boxing Manual">Boxing Manual</option>
-        </select>
+        <select id="discipline" name="discipline" required></select>
+    </div>
+
+    <div class="form-group">
+        <label for="provider">Scoring Provider:</label>
+        <select id="provider" name="provider" required></select>
+    </div>
+
+    <div class="form-group">
+        <label for="mode">Mode:</label>
+        <select id="mode" name="mode" required></select>
     </div>
 
     <div class="form-group">
@@ -56,14 +66,125 @@
         <label for="isStream">This tournament will be streamed on YouTube</label>
     </div>
 
+    <div class="form-group checkbox-group">
+        <input type="checkbox" id="isExternalPublic" name="isExternalPublic" checked>
+        <label for="isExternalPublic">This is a public event</label>
+    </div>
+
     <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">Create Tournament</button>
 </form>
 
 <script>
+    // ── Sport → Discipline → Provider → Mode cascade config ──────────────
+    // ★ marks the default at each level (most-used option, pre-selected).
+    const SPORT_DATA = {
+        "Taekwondo": {
+            defaultDiscipline: "Kyorugi",
+            disciplines: {
+                "Kyorugi": {
+                    defaultProvider: "DAEDO",
+                    providers: {
+                        "DAEDO": {
+                            defaultMode: "Integrated TkStrike",
+                            modes: ["Integrated TkStrike", "External TkStrike"],
+                        },
+                    },
+                },
+                "Poomsae": {
+                    defaultProvider: "FitoFan",
+                    providers: {
+                        "FitoFan": {
+                            defaultMode: "Integrated FitoFan",
+                            modes: ["Integrated FitoFan"],
+                        },
+                    },
+                },
+            },
+        },
+        "Boxing": {
+            defaultDiscipline: "Olympic Boxing",
+            disciplines: {
+                "Olympic Boxing": {
+                    defaultProvider: "Bout Cntrl",
+                    providers: {
+                        "Custom": {
+                            defaultMode: "Integrated Bout Cntrl",
+                            modes: ["Integrated Bout Cntrl", "External Bout Cntrl"],
+                        },
+                    },
+                },
+            },
+        },
+    };
+    const DEFAULT_SPORT = "Taekwondo";
+
+    function fillSelect(selectEl, options, selectedValue) {
+        selectEl.innerHTML = "";
+        options.forEach(opt => {
+            const o = document.createElement("option");
+            o.value = opt;
+            o.textContent = opt;
+            if (opt === selectedValue) o.selected = true;
+            selectEl.appendChild(o);
+        });
+    }
+
+    function populateSports(selectedSport) {
+        const sportSelect = document.getElementById("sport");
+        fillSelect(sportSelect, Object.keys(SPORT_DATA), selectedSport || DEFAULT_SPORT);
+    }
+
+    function populateDisciplines(sport, selectedDiscipline) {
+        const sportData = SPORT_DATA[sport];
+        const disciplineSelect = document.getElementById("discipline");
+        const disciplines = Object.keys(sportData.disciplines);
+        fillSelect(disciplineSelect, disciplines, selectedDiscipline || sportData.defaultDiscipline);
+    }
+
+    function populateProviders(sport, discipline, selectedProvider) {
+        const disciplineData = SPORT_DATA[sport].disciplines[discipline];
+        const providerSelect = document.getElementById("provider");
+        const providers = Object.keys(disciplineData.providers);
+        fillSelect(providerSelect, providers, selectedProvider || disciplineData.defaultProvider);
+    }
+
+    function populateModes(sport, discipline, provider, selectedMode) {
+        const providerData = SPORT_DATA[sport].disciplines[discipline].providers[provider];
+        const modeSelect = document.getElementById("mode");
+        fillSelect(modeSelect, providerData.modes, selectedMode || providerData.defaultMode);
+    }
+
+    // Full cascade rebuild from the top — used on initial load and whenever
+    // the sport changes (discipline/provider/mode reset to that sport's defaults).
+    function cascadeFromSport(sport) {
+        populateDisciplines(sport);
+        const discipline = document.getElementById("discipline").value;
+        populateProviders(sport, discipline);
+        const provider = document.getElementById("provider").value;
+        populateModes(sport, discipline, provider);
+    }
+
+    document.getElementById("sport").addEventListener("change", (e) => cascadeFromSport(e.target.value));
+    document.getElementById("discipline").addEventListener("change", (e) => {
+        const sport = document.getElementById("sport").value;
+        populateProviders(sport, e.target.value);
+        const provider = document.getElementById("provider").value;
+        populateModes(sport, e.target.value, provider);
+    });
+    document.getElementById("provider").addEventListener("change", (e) => {
+        const sport = document.getElementById("sport").value;
+        const discipline = document.getElementById("discipline").value;
+        populateModes(sport, discipline, e.target.value);
+    });
+
+    // ── Initial population (defaults) ─────────────────────────────────────
+    populateSports();
+    cascadeFromSport(DEFAULT_SPORT);
+
+    // ── Submit ───────────────────────────────────────────────────────────
     document.getElementById('createTournamentForm').addEventListener('submit', async function (e) {
         e.preventDefault();
 
-        // Grab the datetime value and convert it to a standard ISO format that Pydantic loves
         const rawDateTime = document.getElementById('dateTime').value;
         const formattedDateTime = new Date(rawDateTime).toISOString();
 
@@ -72,8 +193,12 @@
             location: document.getElementById('location').value,
             courtNum: parseInt(document.getElementById('courtNum').value),
             dateTime: formattedDateTime,
+            sport: document.getElementById('sport').value,
             discipline: document.getElementById('discipline').value,
-            isStream: document.getElementById('isStream').checked, // .checked returns a boolean
+            provider: document.getElementById('provider').value,
+            mode: document.getElementById('mode').value,
+            isStream: document.getElementById('isStream').checked,
+            isExternalPublic: document.getElementById('isExternalPublic').checked,
             venueName: document.getElementById('venueName').value,
             numbering: document.getElementById('numbering').value,
         };
@@ -81,9 +206,7 @@
         try {
             const response = await fetch('/api/tournaments', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
             });
 
@@ -99,5 +222,52 @@
             alert('An unexpected error occurred.');
         }
     });
+
+    // ── Copy prefill ─────────────────────────────────────────────────────
+    async function prefillFromCopy() {
+        const params = new URLSearchParams(window.location.search);
+        const copyFrom = params.get("copy_from");
+        if (!copyFrom) return;
+
+        try {
+            const res = await fetch(`/api/tournaments/${copyFrom}`);
+            if (!res.ok) return;
+            const t = await res.json();
+
+            document.getElementById("title").value = t.title ? `${t.title} (Copy)` : "";
+            document.getElementById("location").value = t.location || "";
+            document.getElementById("courtNum").value = t.courtNum || "";
+            document.getElementById("venueName").value = t.settings?.venueName || "Court";
+            document.getElementById("numbering").value = t.settings?.numbering || "Numbers";
+            document.getElementById("isStream").checked = !!t.settings?.isStream;
+            document.getElementById("isExternalPublic").checked = t.settings?.isExternalPublic !== false;
+
+            // Re-run the cascade using the copied source's actual values,
+            // falling back to defaults at each level if a value is missing
+            // or no longer valid (e.g. an old doc predating this feature).
+            const sport = SPORT_DATA[t.sport] ? t.sport : DEFAULT_SPORT;
+            populateSports(sport);
+
+            const sportData = SPORT_DATA[sport];
+            const discipline = sportData.disciplines[t.discipline] ? t.discipline : sportData.defaultDiscipline;
+            populateDisciplines(sport, discipline);
+
+            const disciplineData = sportData.disciplines[discipline];
+            const provider = disciplineData.providers[t.settings?.provider] ? t.settings.provider : disciplineData.defaultProvider;
+            populateProviders(sport, discipline, provider);
+
+            const providerData = disciplineData.providers[provider];
+            const mode = providerData.modes.includes(t.settings?.mode) ? t.settings.mode : providerData.defaultMode;
+            populateModes(sport, discipline, provider, mode);
+
+            // Deliberately NOT copying dateTime — see earlier note.
+            document.getElementById("dateTime").focus();
+
+            document.getElementById("page-heading").textContent = "Create New Tournament (copied from " + t.title + ")";
+        } catch (e) {
+            console.error("Failed to prefill from copy_from:", e);
+        }
+    }
+    prefillFromCopy();
 </script>
 {% endblock %}

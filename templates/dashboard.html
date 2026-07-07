@@ -1,12 +1,10 @@
 {% extends "base.html" %}
-
 {% block content %}
 <h2>All Tournaments</h2>
-
-<div class="tournament-grid">
+<div id="tournament-grid" class="tournament-grid">
     {% if tournaments %}
     {% for tournament in tournaments %}
-    <div class="card">
+    <div class="card" data-tournament-id="{{ tournament.id }}">
         <h3>{{ tournament.title }}</h3>
         <p><strong>Location:</strong> {{ tournament.location }}</p>
         <p><strong>Courts:</strong> {{ tournament.courtNum }}</p>
@@ -14,8 +12,14 @@
     </div>
     {% endfor %}
     {% else %}
-    <p>No tournaments found. <a href="/dashboard/tournaments/create">Create one now!</a></p>
+    <p id="no-tournaments-msg">No tournaments found. <a href="/dashboard/tournaments/create">Create one now!</a></p>
     {% endif %}
+</div>
+<div style="text-align:center; margin-top:1.5rem;">
+    <button id="load-more-tournaments" class="btn btn-secondary" data-offset="{{ tournaments|length }}" {% if
+        tournaments|length < 10 %}style="display:none;" {% endif %}>
+        Load 10 More
+    </button>
 </div>
 
 <hr style="margin: 3rem 0; border: none; border-top: 1px solid #cbd5e1;">
@@ -24,7 +28,6 @@
     <h2>All Cases</h2>
     <button id="addCaseBtn" class="btn btn-secondary">+ Add Case</button>
 </div>
-
 <ul class="case-list">
     {% if cases %}
     {% for case in cases %}
@@ -40,27 +43,30 @@
     {% endif %}
 </ul>
 
+<hr style="margin: 3rem 0; border: none; border-top: 1px solid #cbd5e1;">
+
+<div class="cases-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h2>Archived Tournaments</h2>
+</div>
+<ul id="archived-list" class="case-list">
+    <li class="case-item" style="border-left-color: transparent;" id="archived-empty">Loading…</li>
+</ul>
+<div style="text-align:center; margin-top:1rem;">
+    <button id="load-more-archived" class="btn btn-secondary" data-offset="0">Load 10 More</button>
+</div>
+
 <script>
+    // ── Add Case (unchanged) ─────────────────────────────────────────────
     document.getElementById('addCaseBtn').addEventListener('click', async function () {
-        // This triggers the browser's built-in input alert box
         const caseName = prompt("Enter the name for the new case:");
-
-        // If the user clicked "Cancel" or left it blank, do nothing
-        if (!caseName || caseName.trim() === "") {
-            return;
-        }
-
+        if (!caseName || caseName.trim() === "") return;
         try {
             const response = await fetch('/api/cases', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: caseName.trim() })
             });
-
             if (response.ok) {
-                // Reload the page instantly so the new case appears in the list
                 window.location.reload();
             } else {
                 const errorData = await response.json();
@@ -71,5 +77,87 @@
             alert('An unexpected error occurred.');
         }
     });
+
+    // ── Load more ACTIVE tournaments (card grid) ─────────────────────────
+    function tournamentCardHtml(t) {
+        return `
+        <div class="card" data-tournament-id="${t.id}">
+            <h3>${t.title}</h3>
+            <p><strong>Location:</strong> ${t.location}</p>
+            <p><strong>Courts:</strong> ${t.courtNum}</p>
+            <a href="/dashboard/tournaments/${t.id}" class="btn">View Details</a>
+        </div>`;
+    }
+
+    document.getElementById("load-more-tournaments").addEventListener("click", async function () {
+        const btn = this;
+        const offset = parseInt(btn.dataset.offset, 10);
+        btn.disabled = true;
+        btn.textContent = "Loading…";
+
+        try {
+            const res = await fetch(`/api/tournaments/paginated?status=active&limit=10&offset=${offset}`);
+            const data = await res.json();
+
+            document.getElementById("no-tournaments-msg")?.remove();
+            const grid = document.getElementById("tournament-grid");
+            data.tournaments.forEach(t => grid.insertAdjacentHTML("beforeend", tournamentCardHtml(t)));
+
+            btn.dataset.offset = data.next_offset;
+            btn.style.display = data.has_more ? "" : "none";
+        } catch (e) {
+            alert("Failed to load more tournaments.");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Load 10 More";
+        }
+    });
+
+    // ── Load more ARCHIVED tournaments (case-list style) ──────────────────
+    function archivedItemHtml(t) {
+        const dt = t.dateTime ? new Date(t.dateTime).toLocaleDateString() : "";
+        return `
+        <li class="case-item" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <strong>${t.title}</strong>
+                <span style="color:#64748b; font-size:0.85em; margin-left:10px;">
+                    (${t.location}${dt ? " — " + dt : ""})
+                </span>
+            </div>
+            <a href="/dashboard/tournaments/${t.id}" class="btn btn-primary btn-sm">View Details</a>
+        </li>`;
+    }
+
+    async function loadArchivedPage() {
+        const btn = document.getElementById("load-more-archived");
+        const list = document.getElementById("archived-list");
+        const offset = parseInt(btn.dataset.offset, 10);
+        btn.disabled = true;
+        btn.textContent = "Loading…";
+
+        try {
+            const res = await fetch(`/api/tournaments/paginated?status=archived&limit=10&offset=${offset}`);
+            const data = await res.json();
+
+            document.getElementById("archived-empty")?.remove();
+
+            if (offset === 0 && data.tournaments.length === 0) {
+                list.innerHTML = '<li class="case-item" style="border-left-color: transparent;">No archived tournaments.</li>';
+            } else {
+                data.tournaments.forEach(t => list.insertAdjacentHTML("beforeend", archivedItemHtml(t)));
+            }
+
+            btn.dataset.offset = data.next_offset;
+            btn.style.display = data.has_more ? "" : "none";
+            btn.textContent = "Load 10 More";
+            btn.disabled = false;
+        } catch (e) {
+            btn.textContent = "Load 10 More";
+            btn.disabled = false;
+        }
+    }
+
+    document.getElementById("load-more-archived").addEventListener("click", loadArchivedPage);
+    loadArchivedPage(); // initial load on page ready, since archived isn't server-rendered
 </script>
 {% endblock %}

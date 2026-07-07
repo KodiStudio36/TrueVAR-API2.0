@@ -22,3 +22,11 @@ class TournamentPort(ABC):
     @abstractmethod
     def getTournament(self, tournament_id: str) -> Optional[Tournament]:
         pass
+
+    @abstractmethod
+    def getTournamentsPaginated(
+        self, status: str, limit: int, offset: int
+    ) -> List[Tournament]: ...
+
+    @abstractmethod
+    def setTournamentStatus(self, tournament_id: str, status: str) -> None: ...

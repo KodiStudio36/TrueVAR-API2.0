@@ -25,12 +25,39 @@
                     </svg>
                     Edit
                 </button>
-                <a href="/dashboard" class="btn btn-ghost">
+                <a href="/dashboard/tournaments/create?copy_from={{ tournament.id }}" class="btn btn-ghost">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M15 18l-6-6 6-6" />
+                        <rect x="9" y="9" width="13" height="13" rx="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                     </svg>
-                    Dashboard
+                    Copy
                 </a>
+                {% if tournament.status != 'archived' %}
+                <button id="archive-btn" class="btn btn-ghost" onclick="setStatus('archived')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 8v13H3V8" />
+                        <path d="M1 3h22v5H1z" />
+                        <path d="M10 12h4" />
+                    </svg>
+                    Archive
+                </button>
+                {% else %}
+                <button id="restore-btn" class="btn btn-ghost" onclick="setStatus('active')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                        <path d="M3 3v5h5" />
+                    </svg>
+                    Restore
+                </button>
+                {% endif %}
+                <button id="delete-btn" class="btn btn-ghost" style="color:#dc2626; border-color:#fca5a5;"
+                    onclick="deleteTournament()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                </button>
             </div>
         </div>
 
@@ -50,8 +77,20 @@
                     <dd>{{ tournament.courtNum }}</dd>
                 </div>
                 <div class="info-cell">
+                    <dt>Sport</dt>
+                    <dd>{{ tournament.sport }}</dd>
+                </div>
+                <div class="info-cell">
                     <dt>Discipline</dt>
                     <dd>{{ tournament.discipline }}</dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Provider</dt>
+                    <dd>{{ tournament.settings.get('provider') or '—' }}</dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Mode</dt>
+                    <dd>{{ tournament.settings.get('mode') or '—' }}</dd>
                 </div>
                 <div class="info-cell">
                     <dt>Venue</dt>
@@ -68,6 +107,16 @@
                         <span class="badge badge-green">Enabled</span>
                         {% else %}
                         <span class="badge badge-grey">Disabled</span>
+                        {% endif %}
+                    </dd>
+                </div>
+                <div class="info-cell">
+                    <dt>Public Event</dt>
+                    <dd>
+                        {% if tournament.settings.get('isExternalPublic', True) %}
+                        <span class="badge badge-green">Public</span>
+                        {% else %}
+                        <span class="badge badge-grey">Private</span>
                         {% endif %}
                     </dd>
                 </div>
@@ -100,8 +149,20 @@
                         required>
                 </div>
                 <div class="form-field">
+                    <label for="f-sport">Sport</label>
+                    <select id="f-sport" name="sport" required></select>
+                </div>
+                <div class="form-field">
                     <label for="f-discipline">Discipline</label>
-                    <input id="f-discipline" type="text" name="discipline" value="{{ tournament.discipline }}" required>
+                    <select id="f-discipline" name="discipline" required></select>
+                </div>
+                <div class="form-field">
+                    <label for="f-provider">Scoring Provider</label>
+                    <select id="f-provider" name="provider" required></select>
+                </div>
+                <div class="form-field">
+                    <label for="f-mode">Mode</label>
+                    <select id="f-mode" name="mode" required></select>
                 </div>
                 <div class="form-field">
                     <label for="f-venue">Venue Name</label>
@@ -119,6 +180,13 @@
                         <input type="checkbox" name="isStream" {% if tournament.settings.get('isStream') %}checked{%
                             endif %}>
                         <span>Enable Streaming</span>
+                    </label>
+                </div>
+                <div class="form-field form-field--checkbox">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="isExternalPublic" {% if tournament.settings.get('isExternalPublic',
+                            True) %}checked{% endif %}>
+                        <span>Public Event</span>
                     </label>
                 </div>
             </div>
@@ -142,11 +210,18 @@
                 <span class="panel-eyebrow">Live Streaming</span>
                 <h2 class="panel-title" style="font-size:1.4rem">YouTube Schedule</h2>
             </div>
+            {% if tournament.status != 'archived' %}
             <div id="yt-status-badge" class="yt-badge yt-badge--loading">
                 <span class="yt-badge-dot"></span>
                 <span class="yt-badge-text">Checking…</span>
             </div>
+            {% endif %}
         </div>
+
+        {% if tournament.status == 'archived' %}
+        <p class="yt-hint">This tournament is archived, so YouTube scheduling is disabled. Restore it first if you need
+            to schedule streams.</p>
+        {% else %}
 
         {# Not connected state #}
         <div id="yt-disconnected" class="yt-state hidden">
@@ -206,6 +281,7 @@
             </div>
 
             <div id="schedule-error" class="alert alert-error hidden"></div>
+            {% endif %}
 
         </div>
 
@@ -773,6 +849,127 @@ JAVASCRIPT
     const COURT_COUNT = {{ tournament.courtNum }};
     const COURT_PREFIX = "{{ tournament.settings.get('numbering', 'Court') }}";
 
+    // ── Sport → Discipline → Provider → Mode cascade config ──────────────
+    // ★ marks the default at each level (most-used option, pre-selected).
+    const SPORT_DATA = {
+        "Taekwondo": {
+            defaultDiscipline: "Kyorugi",
+            disciplines: {
+                "Kyorugi": {
+                    defaultProvider: "DAEDO",
+                    providers: {
+                        "DAEDO": {
+                            defaultMode: "Integrated TkStrike",
+                            modes: ["Integrated TkStrike", "External TkStrike"],
+                        },
+                    },
+                },
+                "Poomsae": {
+                    defaultProvider: "FitoFan",
+                    providers: {
+                        "FitoFan": {
+                            defaultMode: "Integrated FitoFan",
+                            modes: ["Integrated FitoFan"],
+                        },
+                    },
+                },
+            },
+        },
+        "Boxing": {
+            defaultDiscipline: "Olympic Boxing",
+            disciplines: {
+                "Olympic Boxing": {
+                    defaultProvider: "Bout Cntrl",
+                    providers: {
+                        "Custom": {
+                            defaultMode: "Integrated Bout Cntrl",
+                            modes: ["Integrated Bout Cntrl", "External Bout Cntrl"],
+                        },
+                    },
+                },
+            },
+        },
+    };
+    const DEFAULT_SPORT = "Taekwondo";
+
+    // Original values from the server, used to pre-select the edit form
+    // correctly instead of always falling back to defaults.
+    const TOURNAMENT_SPORT = "{{ tournament.sport }}";
+    const TOURNAMENT_DISCIPLINE = "{{ tournament.discipline }}";
+    const TOURNAMENT_PROVIDER = "{{ tournament.settings.get('provider', '') }}";
+    const TOURNAMENT_MODE = "{{ tournament.settings.get('mode', '') }}";
+
+    function fillSelect(selectEl, options, selectedValue) {
+        selectEl.innerHTML = "";
+        options.forEach(opt => {
+            const o = document.createElement("option");
+            o.value = opt;
+            o.textContent = opt;
+            if (opt === selectedValue) o.selected = true;
+            selectEl.appendChild(o);
+        });
+    }
+
+    function populateSports(selectedSport) {
+        fillSelect(document.getElementById("f-sport"), Object.keys(SPORT_DATA), selectedSport || DEFAULT_SPORT);
+    }
+
+    function populateDisciplines(sport, selectedDiscipline) {
+        const sportData = SPORT_DATA[sport];
+        fillSelect(document.getElementById("f-discipline"), Object.keys(sportData.disciplines), selectedDiscipline || sportData.defaultDiscipline);
+    }
+
+    function populateProviders(sport, discipline, selectedProvider) {
+        const disciplineData = SPORT_DATA[sport].disciplines[discipline];
+        fillSelect(document.getElementById("f-provider"), Object.keys(disciplineData.providers), selectedProvider || disciplineData.defaultProvider);
+    }
+
+    function populateModes(sport, discipline, provider, selectedMode) {
+        const providerData = SPORT_DATA[sport].disciplines[discipline].providers[provider];
+        fillSelect(document.getElementById("f-mode"), providerData.modes, selectedMode || providerData.defaultMode);
+    }
+
+    function cascadeFromSport(sport) {
+        populateDisciplines(sport);
+        const discipline = document.getElementById("f-discipline").value;
+        populateProviders(sport, discipline);
+        const provider = document.getElementById("f-provider").value;
+        populateModes(sport, discipline, provider);
+    }
+
+    document.getElementById("f-sport").addEventListener("change", (e) => cascadeFromSport(e.target.value));
+    document.getElementById("f-discipline").addEventListener("change", (e) => {
+        const sport = document.getElementById("f-sport").value;
+        populateProviders(sport, e.target.value);
+        const provider = document.getElementById("f-provider").value;
+        populateModes(sport, e.target.value, provider);
+    });
+    document.getElementById("f-provider").addEventListener("change", (e) => {
+        const sport = document.getElementById("f-sport").value;
+        const discipline = document.getElementById("f-discipline").value;
+        populateModes(sport, discipline, e.target.value);
+    });
+
+    // ── Initial population — use the tournament's real values, falling back
+    // to sport/discipline/provider/mode defaults if a value is missing or
+    // no longer valid (e.g. a doc created before this feature existed). ──
+    (function initCascade() {
+        const sport = SPORT_DATA[TOURNAMENT_SPORT] ? TOURNAMENT_SPORT : DEFAULT_SPORT;
+        populateSports(sport);
+
+        const sportData = SPORT_DATA[sport];
+        const discipline = sportData.disciplines[TOURNAMENT_DISCIPLINE] ? TOURNAMENT_DISCIPLINE : sportData.defaultDiscipline;
+        populateDisciplines(sport, discipline);
+
+        const disciplineData = sportData.disciplines[discipline];
+        const provider = disciplineData.providers[TOURNAMENT_PROVIDER] ? TOURNAMENT_PROVIDER : disciplineData.defaultProvider;
+        populateProviders(sport, discipline, provider);
+
+        const providerData = disciplineData.providers[provider];
+        const mode = providerData.modes.includes(TOURNAMENT_MODE) ? TOURNAMENT_MODE : providerData.defaultMode;
+        populateModes(sport, discipline, provider, mode);
+    })();
+
     // ── Flash message from ?msg= ───────────────────────────────────────────────
     (function () {
         const p = new URLSearchParams(window.location.search);
@@ -788,6 +985,68 @@ JAVASCRIPT
         window.history.replaceState({}, "", url);
     })();
 
+    async function setStatus(newStatus) {
+        const isArchiving = newStatus === "archived";
+        const label = isArchiving ? "Archive" : "Restore";
+        const confirmMsg = isArchiving
+            ? `Archive "${document.getElementById("view-title").textContent}"? This also removes its scheduled broadcasts and frees up its date on stream keys.`
+            : `Restore "${document.getElementById("view-title").textContent}"?`;
+
+        if (!confirm(confirmMsg)) return;
+
+        const btn = document.getElementById(isArchiving ? "archive-btn" : "restore-btn");
+        btn.disabled = true;
+        btn.textContent = label + "ing…";
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/status`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: newStatus }),
+            });
+            if (res.ok) {
+                window.location.href = "/dashboard?msg=" + encodeURIComponent(`Tournament ${newStatus === "archived" ? "archived" : "restored"}.`);
+            } else {
+                const err = await res.json();
+                alert(`Failed to ${label.toLowerCase()}: ` + (err.detail || "Unknown error"));
+                btn.disabled = false;
+                btn.textContent = label;
+            }
+        } catch (e) {
+            alert("Network error.");
+            btn.disabled = false;
+            btn.textContent = label;
+        }
+    }
+
+    async function deleteTournament() {
+        const title = document.getElementById("view-title").textContent;
+        const typed = prompt(`This permanently deletes "${title}" and all its scheduled broadcasts. This cannot be undone.\n\nType the tournament title to confirm:`);
+        if (typed !== title) {
+            if (typed !== null) alert("Title didn't match — nothing was deleted.");
+            return;
+        }
+
+        const btn = document.getElementById("delete-btn");
+        btn.disabled = true;
+        btn.textContent = "Deleting…";
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}`, { method: "DELETE" });
+            if (res.ok) {
+                window.location.href = "/dashboard?msg=" + encodeURIComponent("Tournament deleted.");
+            } else {
+                const err = await res.json();
+                alert("Failed to delete: " + (err.detail || "Unknown error"));
+                btn.disabled = false;
+                btn.textContent = "Delete";
+            }
+        } catch (e) {
+            alert("Network error.");
+            btn.disabled = false;
+            btn.textContent = "Delete";
+        }
+    }
 
     // ── Edit toggle ────────────────────────────────────────────────────────────
     function toggleEdit(on) {
@@ -814,10 +1073,14 @@ JAVASCRIPT
             location: fd.get("location"),
             dateTime: new Date(fd.get("dateTime")).toISOString(),
             courtNum: parseInt(fd.get("courtNum"), 10),
+            sport: fd.get("sport"),
             discipline: fd.get("discipline"),
+            provider: fd.get("provider"),
+            mode: fd.get("mode"),
             venueName: fd.get("venueName") || "",
             numbering: fd.get("numbering") || "Court",
             isStream: form.querySelector('[name="isStream"]').checked,
+            isExternalPublic: form.querySelector('[name="isExternalPublic"]').checked,
         };
 
         try {
@@ -1005,9 +1268,9 @@ JAVASCRIPT
         window.location.reload();
     }
 
-    // @keyframes spin { to { transform: rotate(360deg); } }
-
+    {% if tournament.status != 'archived' %}
     checkYouTubeStatus();
+    {% endif %}
     {% endif %}
 </script>
 

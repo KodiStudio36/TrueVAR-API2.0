@@ -23,21 +23,17 @@ async def dashboard_page(
     """Renders the main dashboard with all tournaments and cases."""
     # Fetch Tournaments
     tournament_use_case = GetAllTournamentsUseCase(tournament_repo)
-    tournaments = tournament_use_case.execute()
+    tournaments = tournament_repo.getTournamentsPaginated(status="active", limit=10, offset=0)
     
     # Fetch Cases
     case_use_case = GetAllCasesUseCase(case_repo)
     cases = case_use_case.execute()
     
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html", 
-        {
-            "request": request, 
-            "tournaments": tournaments,
-            "cases": cases
-        }
-    )
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "request": request,
+        "tournaments": tournaments,
+        "cases": cases,
+    })
 
 @router.get("/tournaments/create")
 async def create_tournament_page(request: Request):

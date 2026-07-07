@@ -31,3 +31,6 @@ class StreamKeyPort(ABC):
     def getAvailableKeysForDate(self, date_str: str) -> List[StreamKey]:
         """Return only keys whose used_dates list does NOT contain date_str."""
         pass
+
+    @abstractmethod
+    def releaseDate(self, date_str: str) -> None: ...

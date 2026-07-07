@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from google.cloud.firestore import Client
+from google.cloud.firestore import ArrayRemove
 
 from domain.entities import StreamKey
 from domain.ports.stream_key_port import StreamKeyPort
@@ -37,3 +38,13 @@ class FirebaseStreamKeyRepository(StreamKeyPort):
 
     def getAvailableKeysForDate(self, date_str: str) -> List[StreamKey]:
         return [k for k in self.getStreamKeys() if k.is_available_on(date_str)]
+    
+    def releaseDate(self, date_str: str) -> None:
+        """
+        Removes date_str from every key's booked-dates array using
+        Firestore's ArrayRemove sentinel — atomic per-doc, no read-modify-write.
+        """
+        for doc in self.col.stream():
+            self.col.document(doc.id).update({
+                "used_dates": ArrayRemove([date_str])
+            })
