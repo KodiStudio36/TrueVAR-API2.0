@@ -30,3 +30,6 @@ class TournamentPort(ABC):
 
     @abstractmethod
     def setTournamentStatus(self, tournament_id: str, status: str) -> None: ...
+
+    @abstractmethod
+    def deleteTournament(self, tournament_id: str) -> None: ...

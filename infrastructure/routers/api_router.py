@@ -87,8 +87,8 @@ def create_tournament_endpoint(payload: CreateTournamentRequest, repo=Depends(ge
         location=payload.location,
         courtNum=payload.courtNum,
         dateTime=payload.dateTime,
-        sport=payload.sport,
-        discipline=payload.discipline,
+        sport=payload.sport.lower(),
+        discipline=payload.discipline.lower(),
         isExternalPublic=payload.isExternalPublic,
         settings={
             "isStream": payload.isStream,
@@ -170,8 +170,8 @@ def update_tournament_endpoint(
             location=payload.location,
             courtNum=payload.courtNum,
             dateTime=payload.dateTime,
-            sport=payload.sport,
-            discipline=payload.discipline,
+            sport=payload.sport.lower(),
+            discipline=payload.discipline.lower(),
             isExternalPublic=payload.isExternalPublic,
             settings={
                 "isStream": payload.isStream,
