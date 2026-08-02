@@ -192,6 +192,10 @@ async def schedule_tournament_streams(
 
     db.collection("youtube_auth").document("credentials").update(yt.get_updated_credentials())
 
+    # 1. Save detailed records in scheduled_broadcasts (for admin / stream keys)
+    streams_map = {}
+    playlist_id = None
+
     for b in result["broadcasts"]:
         db.collection("scheduled_broadcasts").add({
             "tournament_id": tournament_id,
@@ -202,6 +206,20 @@ async def schedule_tournament_streams(
             "title": b["title"],
             "youtube_url": b["youtube_url"],
         })
+
+        # Build public stream object for court_N
+        court_key = f"court_{b['court_number']}"
+        streams_map[court_key] = {
+            "youtubeUrl": b["youtube_url"]
+        }
+        if not playlist_id and b.get("playlist_id"):
+            playlist_id = b["playlist_id"]
+
+    # 2. Denormalize streams & playlistId into the tournament document
+    db.collection("tournaments").document(tournament_id).update({
+        "playlistId": playlist_id,
+        "streams": streams_map
+    })
 
     return result
 

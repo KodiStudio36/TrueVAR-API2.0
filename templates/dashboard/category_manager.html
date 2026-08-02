@@ -1,0 +1,900 @@
+{% extends "dashboard/base.html" %}
+{% block content %}
+
+<div id="flash" class="flash-banner hidden"></div>
+
+<div class="cm-wrapper">
+
+    <div class="cm-topbar">
+        <a href="/dashboard/tournaments/{{ tournament.id }}" class="btn btn-ghost btn-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5" />
+                <path d="M12 19l-7-7 7-7" />
+            </svg>
+            Back to Tournament
+        </a>
+        <div class="cm-topbar-title">
+            <span class="panel-eyebrow">{{ tournament.title }}</span>
+            <h1 class="panel-title" style="font-size:1.5rem;">Manage Categories</h1>
+        </div>
+        <span id="totalBadge" class="badge badge-grey"></span>
+        <a href="/dashboard/tournaments/{{ tournament.id }}/brackets" class="btn btn-primary btn-sm">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 3v18" />
+                <path d="M18 3v18" />
+                <path d="M6 8h4l2 2 2-2h4" />
+                <path d="M6 16h4l2-2 2 2h4" />
+            </svg>
+            Create Brackets
+        </a>
+    </div>
+
+    <p class="text-muted cm-hint">
+        Staff tool — no eligibility checks. Click a category to see who's in it, then drag any entry onto a
+        different category to move it. Changes save immediately.
+    </p>
+
+    <div class="cm-board">
+
+        {# ── LEFT: category list ──────────────────────────────────────────── #}
+        <div class="card-panel cm-pane cm-pane--categories">
+            <input id="categoryFilter" type="text" placeholder="Filter categories…" class="cm-filter"
+                oninput="renderCategoryList()">
+            <div id="categoryList" class="cm-category-list">
+                <p class="text-muted" style="padding: 1rem 0;">Loading categories…</p>
+            </div>
+        </div>
+
+        {# ── RIGHT: selected category's entries ───────────────────────────── #}
+        <div class="card-panel cm-pane cm-pane--roster">
+            <div id="rosterHeader" class="cm-roster-header">
+                <span class="text-muted">Select a category on the left to see who's registered.</span>
+            </div>
+
+            <div id="addAthletePopover" class="cm-add-popover hidden">
+                <input id="addAthleteSearchInput" type="text" placeholder="Search all athletes…" autocomplete="off"
+                    oninput="onAddAthleteSearchInput()">
+                <div id="addAthleteResults" class="cm-add-results"></div>
+            </div>
+
+            <div id="rosterList" class="cm-roster-list"></div>
+        </div>
+
+    </div>
+</div>
+<div id="addAthleteBackdrop" class="cm-add-backdrop hidden" onclick="closeAddAthlete()"></div>
+
+<script>
+    const TOURNAMENT_ID = "{{ tournament.id }}";
+    const TOURNAMENT_SPORT = "{{ tournament.sport | default('') | lower }}";
+    const TOURNAMENT_DISCIPLINE = "{{ tournament.discipline | default('') | lower }}";
+
+    let flatCategories = [];    // every leaf category, flattened: {code, ageCode, genderCode, entryTypeCode, groupLabel, label}
+    let categoryCounts = {};    // { categoryCode: count }
+    let divisionRosterCache = {}; // ageCode -> { categoryCode: { entryId: {members} } }, lazy-fetched per division
+    let activeCategoryCode = null;
+    let draggedEntry = null;    // { entryId, athleteIds, oldCategoryCode, oldAgeCode }
+
+    // Same design standard as tournament.html's roster view — flag, name,
+    // rank — kept byte-identical to that file's helpers on purpose so the
+    // two roster views never visually drift apart.
+    const RANK_LABELS = [
+        "10. Keup (White)", "9. Keup (White-Yellow)", "8. Keup (Yellow)", "7. Keup (Yellow-Green)",
+        "6. Keup (Green)", "5. Keup (Green-Blue)", "4. Keup (Blue)", "3. Keup (Blue-Red)",
+        "2. Keup (Red)", "1. Keup (Red-Black)", "1. Dan", "2. Dan", "3. Dan", "4. Dan",
+        "5. Dan", "6. Dan", "7. Dan", "8. Dan", "9. Dan",
+    ];
+    function formatRank(rank) {
+        if (rank == null) return null;
+        return RANK_LABELS[rank] ?? `Rank ${rank}`;
+    }
+
+    const ALPHA3_TO_ALPHA2 = { "ABW": "AW", "AFG": "AF", "AGO": "AO", "AIA": "AI", "ALA": "AX", "ALB": "AL", "AND": "AD", "ARE": "AE", "ARG": "AR", "ARM": "AM", "ASM": "AS", "ATA": "AQ", "ATF": "TF", "ATG": "AG", "AUS": "AU", "AUT": "AT", "AZE": "AZ", "BDI": "BI", "BEL": "BE", "BEN": "BJ", "BES": "BQ", "BFA": "BF", "BGD": "BD", "BGR": "BG", "BHR": "BH", "BHS": "BS", "BIH": "BA", "BLM": "BL", "BLR": "BY", "BLZ": "BZ", "BMU": "BM", "BOL": "BO", "BRA": "BR", "BRB": "BB", "BRN": "BN", "BTN": "BT", "BVT": "BV", "BWA": "BW", "CAF": "CF", "CAN": "CA", "CCK": "CC", "CHE": "CH", "CHL": "CL", "CHN": "CN", "CIV": "CI", "CMR": "CM", "COD": "CD", "COG": "CG", "COK": "CK", "COL": "CO", "COM": "KM", "CPV": "CV", "CRI": "CR", "CUB": "CU", "CUW": "CW", "CXR": "CX", "CYM": "KY", "CYP": "CY", "CZE": "CZ", "DEU": "DE", "DJI": "DJ", "DMA": "DM", "DNK": "DK", "DOM": "DO", "DZA": "DZ", "ECU": "EC", "EGY": "EG", "ERI": "ER", "ESH": "EH", "ESP": "ES", "EST": "EE", "ETH": "ET", "FIN": "FI", "FJI": "FJ", "FLK": "FK", "FRA": "FR", "FRO": "FO", "FSM": "FM", "GAB": "GA", "GBR": "GB", "GEO": "GE", "GGY": "GG", "GHA": "GH", "GIB": "GI", "GIN": "GN", "GLP": "GP", "GMB": "GM", "GNB": "GW", "GNQ": "GQ", "GRC": "GR", "GRD": "GD", "GRL": "GL", "GTM": "GT", "GUF": "GF", "GUM": "GU", "GUY": "GY", "HKG": "HK", "HMD": "HM", "HND": "HN", "HRV": "HR", "HTI": "HT", "HUN": "HU", "IDN": "ID", "IMN": "IM", "IND": "IN", "IOT": "IO", "IRL": "IE", "IRN": "IR", "IRQ": "IQ", "ISL": "IS", "ISR": "IL", "ITA": "IT", "JAM": "JM", "JEY": "JE", "JOR": "JO", "JPN": "JP", "KAZ": "KZ", "KEN": "KE", "KGZ": "KG", "KHM": "KH", "KIR": "KI", "KNA": "KN", "KOR": "KR", "KWT": "KW", "LAO": "LA", "LBN": "LB", "LBR": "LR", "LBY": "LY", "LCA": "LC", "LIE": "LI", "LKA": "LK", "LSO": "LS", "LTU": "LT", "LUX": "LU", "LVA": "LV", "MAC": "MO", "MAF": "MF", "MAR": "MA", "MCO": "MC", "MDA": "MD", "MDG": "MG", "MDV": "MV", "MEX": "MX", "MHL": "MH", "MKD": "MK", "MLI": "ML", "MLT": "MT", "MMR": "MM", "MNE": "ME", "MNG": "MN", "MNP": "MP", "MOZ": "MZ", "MRT": "MR", "MSR": "MS", "MTQ": "MQ", "MUS": "MU", "MWI": "MW", "MYS": "MY", "MYT": "YT", "NAM": "NA", "NCL": "NC", "NER": "NE", "NFK": "NF", "NGA": "NG", "NIC": "NI", "NIU": "NU", "NLD": "NL", "NOR": "NO", "NPL": "NP", "NRU": "NR", "NZL": "NZ", "OMN": "OM", "PAK": "PK", "PAN": "PA", "PCN": "PN", "PER": "PE", "PHL": "PH", "PLW": "PW", "PNG": "PG", "POL": "PL", "PRI": "PR", "PRK": "KP", "PRT": "PT", "PRY": "PY", "PSE": "PS", "PYF": "PF", "QAT": "QA", "REU": "RE", "ROU": "RO", "RUS": "RU", "RWA": "RW", "SAU": "SA", "SDN": "SD", "SEN": "SN", "SGP": "SG", "SGS": "GS", "SHN": "SH", "SJM": "SJ", "SLB": "SB", "SLE": "SL", "SLV": "SV", "SMR": "SM", "SOM": "SO", "SPM": "PM", "SRB": "RS", "SSD": "SS", "STP": "ST", "SUR": "SR", "SVK": "SK", "SVN": "SI", "SWE": "SE", "SWZ": "SZ", "SXM": "SX", "SYC": "SC", "SYR": "SY", "TCA": "TC", "TCD": "TD", "TGO": "TG", "THA": "TH", "TJK": "TJ", "TKL": "TK", "TKM": "TM", "TLS": "TL", "TON": "TO", "TTO": "TT", "TUN": "TN", "TUR": "TR", "TUV": "TV", "TWN": "TW", "TZA": "TZ", "UGA": "UG", "UKR": "UA", "UMI": "UM", "URY": "UY", "USA": "US", "UZB": "UZ", "VAT": "VA", "VCT": "VC", "VEN": "VE", "VGB": "VG", "VIR": "VI", "VNM": "VN", "VUT": "VU", "WLF": "WF", "WSM": "WS", "YEM": "YE", "ZAF": "ZA", "ZMB": "ZM", "ZWE": "ZW" };
+
+    function countryFlagEmoji(alpha3) {
+        const alpha2 = ALPHA3_TO_ALPHA2[(alpha3 || "").toUpperCase()];
+        if (!alpha2) return "";
+        return String.fromCodePoint(...[...alpha2].map(ch => 127397 + ch.charCodeAt(0)));
+    }
+
+    async function init() {
+        let dimensions = [];
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/categories`);
+            const data = await res.json();
+            const sportSchemas = (data.categories && data.categories.sportSchemas) || {};
+            const sportKeys = Object.keys(sportSchemas);
+            const sportKey = sportSchemas[TOURNAMENT_SPORT] ? TOURNAMENT_SPORT : sportKeys[0];
+            const sportSchema = sportKey ? sportSchemas[sportKey] : {};
+            const disciplineSchemas = sportSchema.disciplines || {};
+            const disciplineKeys = Object.keys(disciplineSchemas);
+            const disciplineKey = disciplineSchemas[TOURNAMENT_DISCIPLINE] ? TOURNAMENT_DISCIPLINE : disciplineKeys[0];
+            dimensions = disciplineKey ? (disciplineSchemas[disciplineKey].dimensions || []) : [];
+        } catch (err) {
+            console.error("Failed to load category schema", err);
+        }
+
+        flatCategories = flattenCategories(dimensions);
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/category-counts`);
+            const data = await res.json();
+            categoryCounts = data.categoryCounts || {};
+            document.getElementById("totalBadge").textContent = `${data.totalRegistered || 0} registered`;
+        } catch (err) {
+            console.error("Failed to load category counts", err);
+        }
+
+        renderCategoryList();
+    }
+
+    // Flattens the schema straight into a list of leaf categories — no
+    // eligibility, no per-entry-type Register button grouping like the
+    // club-facing page. This tool just needs "every place an entry could
+    // possibly live," to click on or drop onto.
+    function flattenCategories(schema) {
+        const entryDim = schema.find(d => d.key === "entry_type");
+        const ageDim = schema.find(d => d.key === "age");
+        const genderDim = schema.find(d => d.key === "gender");
+        const weightDim = schema.find(d => d.key === "weight");
+        if (!ageDim || !genderDim) return [];
+
+        const entryOptions = (entryDim && entryDim.options && entryDim.options.length > 0)
+            ? entryDim.options
+            : [{ code: "individual", label: "Individual" }];
+        const unit = (weightDim && weightDim.unit) || "kg";
+
+        const flat = [];
+        entryOptions.forEach(entryOpt => {
+            ageDim.options.forEach(ageOpt => {
+                genderDim.options.forEach(genderOpt => {
+                    let weightCats;
+                    if (weightDim) {
+                        const key = `${ageOpt.code}|${genderOpt.code}`;
+                        const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[key]) || [];
+                        if (thresholds.length === 0) return;
+                        weightCats = thresholds.map(w => ({ code: `${ageOpt.code}_${genderOpt.code}_${w}`, label: `-${w}${unit}` }));
+                        if (weightDim.open_top) {
+                            const top = thresholds[thresholds.length - 1];
+                            weightCats.push({ code: `${ageOpt.code}_${genderOpt.code}_${top}plus`, label: `+${top}${unit}` });
+                        }
+                    } else {
+                        weightCats = [{ code: `${ageOpt.code}_${genderOpt.code}`, label: "" }];
+                    }
+
+                    weightCats.forEach(c => {
+                        flat.push({
+                            code: `${entryOpt.code}_${c.code}`,
+                            ageCode: ageOpt.code,
+                            genderCode: genderOpt.code,
+                            entryTypeCode: entryOpt.code,
+                            groupLabel: entryOpt.label,
+                            label: c.label ? `${ageOpt.label} ${genderOpt.label} ${c.label}` : `${ageOpt.label} ${genderOpt.label}`,
+                        });
+                    });
+                });
+            });
+        });
+        return flat;
+    }
+
+    function renderCategoryList() {
+        const container = document.getElementById("categoryList");
+        const filter = document.getElementById("categoryFilter").value.trim().toLowerCase();
+
+        if (flatCategories.length === 0) {
+            container.innerHTML = `<p class="text-muted" style="padding: 1rem 0;">No categories configured for this tournament.</p>`;
+            return;
+        }
+
+        const groups = {};
+        flatCategories.forEach(c => {
+            if (filter && !`${c.groupLabel} ${c.label}`.toLowerCase().includes(filter)) return;
+            (groups[c.groupLabel] = groups[c.groupLabel] || []).push(c);
+        });
+
+        container.innerHTML = Object.entries(groups).map(([groupLabel, cats]) => `
+            <div class="cm-group-label">${escapeHtml(groupLabel)}</div>
+            ${cats.map(c => `
+                <div class="cm-category-item ${c.code === activeCategoryCode ? 'cm-category-item--active' : ''}"
+                    data-category-code="${c.code}" data-age-code="${c.ageCode}" data-gender-code="${c.genderCode}"
+                    data-entry-type-code="${c.entryTypeCode}"
+                    onclick="selectCategory('${c.code}')"
+                    ondragover="onCategoryDragOver(event, this)"
+                    ondragleave="onCategoryDragLeave(event, this)"
+                    ondrop="onCategoryDrop(event, this)">
+                    <span>${escapeHtml(c.label)}</span>
+                    <span class="cm-count">${categoryCounts[c.code] || 0}</span>
+                </div>
+            `).join("")}
+        `).join("") || `<p class="text-muted" style="padding: 1rem 0;">No categories match "${escapeHtml(filter)}".</p>`;
+    }
+
+    async function selectCategory(categoryCode) {
+        activeCategoryCode = categoryCode;
+        renderCategoryList(); // refresh active-state highlight
+
+        const cat = flatCategories.find(c => c.code === categoryCode);
+        if (!cat) return;
+
+        document.getElementById("rosterHeader").innerHTML = `
+            <strong>${escapeHtml(cat.groupLabel)} · ${escapeHtml(cat.label)}</strong>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openAddAthlete(event)">
+                + Add Athlete
+            </button>
+        `;
+        const listEl = document.getElementById("rosterList");
+        listEl.innerHTML = `<p class="text-muted" style="padding: 1rem 0;">Loading…</p>`;
+        closeAddAthlete(); // any popover from a previously selected category shouldn't linger
+
+        if (!(cat.ageCode in divisionRosterCache)) {
+            try {
+                const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/division-rosters/${cat.ageCode}`);
+                const data = await res.json();
+                divisionRosterCache[cat.ageCode] = data.athletes || {};
+            } catch (err) {
+                console.error("Failed to load division roster", err);
+                listEl.innerHTML = `<p style="color:#b91c1c;">Couldn't load roster — try again.</p>`;
+                return;
+            }
+        }
+        renderRosterList(cat);
+    }
+
+    function renderRosterList(cat) {
+        const listEl = document.getElementById("rosterList");
+        const entries = (divisionRosterCache[cat.ageCode] || {})[cat.code] || {};
+        const entryIds = Object.keys(entries);
+
+        if (entryIds.length === 0) {
+            listEl.innerHTML = `<p class="text-muted" style="padding: 1rem 0;">Nobody registered in this category yet.</p>`;
+            return;
+        }
+
+        listEl.innerHTML = entryIds.map(entryId => {
+            const entry = entries[entryId];
+            const members = entry.members || [];
+            const namesHtml = members.map(m => {
+                const flag = countryFlagEmoji(m.country);
+                const rankLabel = formatRank(m.rank); // omitted by the backend for sports with no rank concept
+                return `${flag ? flag + " " : ""}${escapeHtml(m.name)}${rankLabel ? ` <span class="text-muted">(${escapeHtml(rankLabel)})</span>` : ""}`;
+            }).join(" &amp; ");
+            const club = members[0] ? members[0].club : "";
+            const athleteIds = members.map(m => m.athleteId).join(",");
+
+            return `
+                <div class="cm-athlete-card" draggable="true"
+                    data-entry-id="${entryId}" data-athlete-ids="${athleteIds}"
+                    data-old-category-code="${cat.code}" data-old-age-code="${cat.ageCode}"
+                    data-entry-type-code="${cat.entryTypeCode}"
+                    ondragstart="onAthleteDragStart(event, this)"
+                    ondragend="onAthleteDragEnd(event, this)">
+                    <div class="cm-athlete-card-row">
+                        <div class="cm-athlete-name">${namesHtml}</div>
+                        <button type="button" class="cm-bin-btn" title="Remove completely"
+                            onclick="removeEntry(event, '${cat.code}', '${cat.ageCode}', '${entryId}')">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 6h18" />
+                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                <path d="M10 11v6" /><path d="M14 11v6" />
+                            </svg>
+                        </button>
+                    </div>
+                    ${club ? `<div class="text-muted cm-athlete-club">${escapeHtml(club)}</div>` : ""}
+                </div>
+            `;
+        }).join("");
+    }
+
+    async function removeEntry(event, categoryCode, ageCode, entryId) {
+        event.stopPropagation(); // don't let this bubble into the card's drag handling
+        if (!confirm("Remove this entry completely? This can't be undone from here.")) return;
+
+        try {
+            const res = await fetch(
+                `/api/tournaments/${TOURNAMENT_ID}/registrations/${categoryCode}/${entryId}?age_code=${encodeURIComponent(ageCode)}`,
+                { method: "DELETE" }
+            );
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `Remove failed (${res.status})`);
+            }
+
+            categoryCounts[categoryCode] = Math.max(0, (categoryCounts[categoryCode] || 1) - 1);
+            delete divisionRosterCache[ageCode];
+
+            renderCategoryList();
+            if (activeCategoryCode) {
+                const activeCat = flatCategories.find(c => c.code === activeCategoryCode);
+                if (activeCat) await selectCategory(activeCat.code);
+            }
+            showFlash("Entry removed.");
+        } catch (err) {
+            console.error("Remove failed", err);
+            showFlash(err.message || "Remove failed — try again.", true);
+        }
+    }
+
+    // ── Add Athlete (search all athletes, no eligibility checks) ──────
+    let addAthleteDebounceTimer = null;
+
+    function openAddAthlete(event) {
+        event.stopPropagation();
+        if (!activeCategoryCode) return;
+        document.getElementById("addAthletePopover").classList.remove("hidden");
+        document.getElementById("addAthleteBackdrop").classList.remove("hidden");
+        const input = document.getElementById("addAthleteSearchInput");
+        input.value = "";
+        document.getElementById("addAthleteResults").innerHTML = "";
+        input.focus();
+    }
+
+    function closeAddAthlete() {
+        clearTimeout(addAthleteDebounceTimer);
+        document.getElementById("addAthletePopover").classList.add("hidden");
+        document.getElementById("addAthleteBackdrop").classList.add("hidden");
+    }
+
+    function onAddAthleteSearchInput() {
+        clearTimeout(addAthleteDebounceTimer);
+        const q = document.getElementById("addAthleteSearchInput").value.trim();
+        const resultsEl = document.getElementById("addAthleteResults");
+        if (q.length < 2) {
+            resultsEl.innerHTML = "";
+            return;
+        }
+        addAthleteDebounceTimer = setTimeout(() => runAddAthleteSearch(q), 300);
+    }
+
+    async function runAddAthleteSearch(q) {
+        const resultsEl = document.getElementById("addAthleteResults");
+        resultsEl.innerHTML = `<p class="text-muted" style="font-size: 0.85rem; padding: 0.6rem;">Searching…</p>`;
+
+        try {
+            const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&limit=10`);
+            if (!res.ok) throw new Error(`Search failed: ${res.status}`);
+            const data = await res.json();
+            renderAddAthleteResults(data.athletes || []);
+        } catch (err) {
+            console.error("Athlete search failed", err);
+            resultsEl.innerHTML = `<p style="color: #b91c1c; font-size: 0.85rem; padding: 0.6rem;">Search failed — try again.</p>`;
+        }
+    }
+
+    function renderAddAthleteResults(athletes) {
+        const resultsEl = document.getElementById("addAthleteResults");
+        if (athletes.length === 0) {
+            resultsEl.innerHTML = `<p class="text-muted" style="font-size: 0.85rem; padding: 0.6rem;">No matching athletes.</p>`;
+            return;
+        }
+        resultsEl.innerHTML = athletes.map((a, i) => `
+            <div class="cm-add-result" onclick="addAthleteToActiveCategory(${i})">
+                <div style="font-weight: 600;">${escapeHtml(a.displayName)}</div>
+                <div class="text-muted" style="font-size: 0.8rem;">
+                    ${escapeHtml(a.club || "No club")}${a.gender ? " · " + a.gender : ""}${a.birthYear != null ? " · " + a.birthYear : ""}
+                </div>
+            </div>
+        `).join("");
+        window.__addAthleteResults = athletes; // stashed for the click handler above — simplest way to avoid re-escaping a JSON blob into an onclick attribute
+    }
+
+    async function addAthleteToActiveCategory(index) {
+        const athlete = (window.__addAthleteResults || [])[index];
+        const cat = flatCategories.find(c => c.code === activeCategoryCode);
+        if (!athlete || !cat) return;
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/registrations/admin-add`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    athleteIds: [athlete.id],
+                    entryTypeCode: cat.entryTypeCode,
+                    ageCode: cat.ageCode,
+                    genderCode: cat.genderCode,
+                    categoryCode: cat.code,
+                    categoryLabel: `${cat.groupLabel} · ${cat.label}`,
+                }),
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `Add failed (${res.status})`);
+            }
+
+            categoryCounts[cat.code] = (categoryCounts[cat.code] || 0) + 1;
+            delete divisionRosterCache[cat.ageCode];
+
+            closeAddAthlete();
+            renderCategoryList();
+            await selectCategory(cat.code);
+            showFlash(`${athlete.displayName} added to ${cat.groupLabel} · ${cat.label}.`);
+        } catch (err) {
+            console.error("Add athlete failed", err);
+            showFlash(err.message || "Add failed — try again.", true);
+        }
+    }
+
+    // ── Drag and drop ───────────────────────────────────────────────
+    function onAthleteDragStart(event, el) {
+        draggedEntry = {
+            entryId: el.dataset.entryId,
+            athleteIds: el.dataset.athleteIds.split(",").filter(Boolean),
+            oldCategoryCode: el.dataset.oldCategoryCode,
+            oldAgeCode: el.dataset.oldAgeCode,
+            oldEntryTypeCode: el.dataset.entryTypeCode,
+        };
+        el.classList.add("cm-athlete-card--dragging");
+        event.dataTransfer.effectAllowed = "move";
+    }
+
+    function onAthleteDragEnd(event, el) {
+        el.classList.remove("cm-athlete-card--dragging");
+    }
+
+    function onCategoryDragOver(event, el) {
+        if (!draggedEntry) return;
+        event.preventDefault();
+        if (el.dataset.categoryCode !== draggedEntry.oldCategoryCode) {
+            el.classList.add("cm-category-item--drop-target");
+        }
+    }
+
+    function onCategoryDragLeave(event, el) {
+        el.classList.remove("cm-category-item--drop-target");
+    }
+
+    async function onCategoryDrop(event, el) {
+        event.preventDefault();
+        el.classList.remove("cm-category-item--drop-target");
+        if (!draggedEntry) return;
+
+        const newCategoryCode = el.dataset.categoryCode;
+        if (newCategoryCode === draggedEntry.oldCategoryCode) return; // dropped on itself — no-op
+
+        const cat = flatCategories.find(c => c.code === newCategoryCode);
+        if (!cat) return;
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/registrations/admin-move`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    athleteIds: draggedEntry.athleteIds,
+                    oldCategoryCode: draggedEntry.oldCategoryCode,
+                    oldAgeCode: draggedEntry.oldAgeCode,
+                    newEntryTypeCode: cat.entryTypeCode,
+                    newAgeCode: cat.ageCode,
+                    newGenderCode: cat.genderCode,
+                    newCategoryCode: cat.code,
+                    newCategoryLabel: `${cat.groupLabel} · ${cat.label}`,
+                }),
+            });
+
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `Move failed (${res.status})`);
+            }
+
+            // Update local counts and invalidate both affected divisions'
+            // cached rosters so a re-select fetches fresh data.
+            categoryCounts[draggedEntry.oldCategoryCode] = Math.max(0, (categoryCounts[draggedEntry.oldCategoryCode] || 1) - 1);
+            categoryCounts[newCategoryCode] = (categoryCounts[newCategoryCode] || 0) + 1;
+            delete divisionRosterCache[draggedEntry.oldAgeCode];
+            delete divisionRosterCache[cat.ageCode];
+
+            renderCategoryList();
+            if (activeCategoryCode) {
+                const activeCat = flatCategories.find(c => c.code === activeCategoryCode);
+                if (activeCat) await selectCategory(activeCat.code);
+            }
+            showFlash(`Moved to ${cat.groupLabel} · ${cat.label}.`);
+        } catch (err) {
+            console.error("Move failed", err);
+            showFlash(err.message || "Move failed — try again.", true);
+        } finally {
+            draggedEntry = null;
+        }
+    }
+
+    function showFlash(text, isError) {
+        const el = document.getElementById("flash");
+        el.textContent = text;
+        el.className = `flash-banner ${isError ? "flash-banner--error" : ""}`;
+        setTimeout(() => el.classList.add("hidden"), 2500);
+    }
+
+    function escapeHtml(str) {
+        return String(str ?? "").replace(/[&<>"']/g, ch => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        }[ch]));
+    }
+
+    init();
+</script>
+
+<style>
+    :root {
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --muted: #64748b;
+        --text: #0f172a;
+        --accent: #4f46e5;
+        --green: #16a34a;
+        --green-bg: #dcfce7;
+        --radius: 14px;
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    .text-muted {
+        color: var(--muted) !important;
+    }
+
+    /* ── Card panel / panel header (copied from tournament_detail.html's
+       local definitions — that page doesn't rely on style.css for these
+       either, so neither does this one) ────────────────────────────── */
+    .card-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 1px 4px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .04);
+    }
+
+    .panel-eyebrow {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--muted);
+        display: block;
+        margin-bottom: .25rem;
+    }
+
+    .panel-title {
+        margin: 0;
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--text);
+        line-height: 1.2;
+    }
+
+    /* ── Badges ─────────────────────────────────────────────────── */
+    .badge {
+        display: inline-block;
+        font-size: .72rem;
+        font-weight: 600;
+        padding: .2rem .55rem;
+        border-radius: 99px;
+        white-space: nowrap;
+    }
+
+    .badge-green {
+        background: var(--green-bg);
+        color: var(--green);
+    }
+
+    .badge-grey {
+        background: #f1f5f9;
+        color: var(--muted);
+    }
+
+    /* ── Buttons ────────────────────────────────────────────────── */
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .5rem 1rem;
+        border-radius: 8px;
+        font-size: .875rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        text-decoration: none;
+        transition: all .15s;
+        white-space: nowrap;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #4338ca;
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+        background: #f8fafc;
+        color: var(--text);
+    }
+
+    .btn-sm {
+        font-size: .8rem;
+        padding: .35rem .8rem;
+    }
+
+    /* This page's <main class="container"> ancestor (from base.html /
+       style.css) caps width for normal dashboard pages — override it
+       here so THIS page goes full width, without touching the shared
+       stylesheet or any other page's layout. Padding is set explicitly
+       here rather than just clearing margin, since clearing margin
+       alone (without replacing whatever spacing .container used to
+       provide) is what left the page flush against the browser edges
+       with zero gutter. */
+    .container {
+        max-width: none !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 1.5rem 2rem !important;
+        box-sizing: border-box !important;
+    }
+
+    body {
+        background: #f1f5f9;
+        /* subtle contrast so the white card panels are actually visible as cards, not just flat text */
+    }
+
+    .cm-wrapper {
+        width: 100%;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .cm-topbar {
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+    }
+
+    .cm-topbar-title {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .cm-hint {
+        margin-top: -0.5rem;
+        font-size: 0.9rem;
+    }
+
+    .cm-board {
+        display: grid;
+        /* minmax(0, 1fr), not just 1fr — grid items default to
+           min-width: auto, which lets a wide card in the roster pane
+           expand its column beyond the container and force a horizontal
+           scrollbar. minmax(0, ...) is what actually prevents that. */
+        grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+        gap: 1.25rem;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .cm-pane {
+        padding: 1.25rem;
+        min-width: 0;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        /* Both panes share one viewport-bounded height so they read as a
+           matched pair of cards, instead of one being capped (75vh) and
+           the other only min-height'd — which is what let the categories
+           list run on indefinitely with no visible bottom edge. */
+        height: calc(100vh - 260px);
+        min-height: 420px;
+    }
+
+    /* The filter input / roster header are direct (non-scrolling)
+       children of the pane; only the list below them scrolls. Before,
+       the filter input and the list shared ONE scroll container, so
+       scrolling the list also scrolled the filter box out of view. */
+    .cm-category-list,
+    .cm-roster-list {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+        /* required for a flex child to actually scroll instead of overflowing its parent */
+    }
+
+    .cm-roster-list {
+        align-content: flex-start;
+    }
+
+    .cm-filter {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 0.75rem;
+        font-size: 0.88rem;
+        box-sizing: border-box;
+        flex-shrink: 0;
+    }
+
+    .cm-group-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin: 1rem 0 0.35rem;
+    }
+
+    .cm-category-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.6rem;
+        border-radius: 8px;
+        font-size: 0.88rem;
+        cursor: pointer;
+        border: 1px solid transparent;
+    }
+
+    .cm-category-item:hover {
+        background: #f8fafc;
+    }
+
+    .cm-category-item--active {
+        background: #eef2ff;
+        border-color: #c7d2fe;
+        font-weight: 600;
+    }
+
+    .cm-category-item--drop-target {
+        background: var(--green-bg);
+        border-color: var(--green);
+    }
+
+    .cm-count {
+        font-size: 0.76rem;
+        color: var(--muted);
+        background: #f1f5f9;
+        border-radius: 999px;
+        padding: 0.05rem 0.5rem;
+    }
+
+    .cm-pane--roster {
+        position: relative;
+    }
+
+    .cm-roster-header {
+        padding-bottom: 0.75rem;
+        margin-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.95rem;
+        flex-shrink: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .cm-roster-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+    }
+
+    .cm-athlete-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.6rem 0.9rem;
+        cursor: grab;
+        background: var(--surface);
+        min-width: 160px;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    .cm-athlete-card--dragging {
+        opacity: 0.4;
+    }
+
+    .cm-athlete-card-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.5rem;
+    }
+
+    .cm-athlete-name {
+        font-weight: 600;
+        font-size: 0.9rem;
+        word-break: break-word;
+    }
+
+    .cm-athlete-club {
+        font-size: 0.8rem;
+        margin-top: 0.15rem;
+        word-break: break-word;
+    }
+
+    .cm-bin-btn {
+        flex-shrink: 0;
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 0.1rem;
+        border-radius: 4px;
+        line-height: 0;
+    }
+
+    .cm-bin-btn:hover {
+        color: #b91c1c;
+        background: #fef2f2;
+    }
+
+    /* ── Add Athlete popover ────────────────────────────────────── */
+    .cm-add-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        background: transparent;
+        /* invisible — just here to catch outside clicks and close the popover */
+    }
+
+    .cm-add-popover {
+        position: absolute;
+        top: 3rem;
+        right: 0;
+        z-index: 50;
+        width: 320px;
+        max-width: calc(100vw - 3rem);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, .15);
+        padding: 0.75rem;
+    }
+
+    #addAthleteSearchInput {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.5rem 0.7rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 0.88rem;
+    }
+
+    .cm-add-results {
+        max-height: 280px;
+        overflow-y: auto;
+        margin-top: 0.5rem;
+    }
+
+    .cm-add-result {
+        padding: 0.5rem 0.4rem;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+
+    .cm-add-result:hover {
+        background: #f8fafc;
+    }
+
+    .flash-banner {
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        background: var(--green-bg);
+        color: var(--green);
+        font-size: 0.9rem;
+    }
+
+    .flash-banner--error {
+        background: #fef2f2;
+        color: #b91c1c;
+    }
+</style>
+{% endblock %}

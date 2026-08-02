@@ -1,0 +1,300 @@
+{
+  "sportSchemas": {
+    "taekwondo": {
+      "key": "taekwondo",
+      "label": "Taekwondo",
+      "disciplines": {
+        "kyorugi": {
+          "key": "kyorugi",
+          "label": "Kyorugi",
+          "dimensions": [
+            {
+              "key": "entry_type",
+              "type": "discrete",
+              "field": "entryType",
+              "display": "Entry Type",
+              "unit": null,
+              "options": [
+                {
+                  "code": "individual",
+                  "label": "Individual",
+                  "match_value": "individual",
+                  "participantCount": 1,
+                  "min": null,
+                  "max": null
+                }
+              ],
+              "depends_on": [],
+              "thresholds": null,
+              "thresholds_by": {},
+              "open_top": false
+            },
+            {
+              "key": "age",
+              "type": "range",
+              "field": "birthYear",
+              "display": "Birth Year",
+              "unit": null,
+              "options": [
+                {
+                  "code": "pupils_1",
+                  "label": "Pupils 1 (2018-2019)",
+                  "match_value": null,
+                  "min": 2018,
+                  "max": 2019
+                },
+                {
+                  "code": "pupils_2",
+                  "label": "Pupils 2 (2016-2017)",
+                  "match_value": null,
+                  "min": 2016,
+                  "max": 2017
+                },
+                {
+                  "code": "younger_cadets",
+                  "label": "Younger Cadets (2014-2015)",
+                  "match_value": null,
+                  "min": 2014,
+                  "max": 2015
+                },
+                {
+                  "code": "cadets",
+                  "label": "Cadets (2011-2013)",
+                  "match_value": null,
+                  "min": 2011,
+                  "max": 2013
+                },
+                {
+                  "code": "juniors",
+                  "label": "Juniors (2009-2011)",
+                  "match_value": null,
+                  "min": 2009,
+                  "max": 2011
+                },
+                {
+                  "code": "seniors",
+                  "label": "Seniors (1991-2009)",
+                  "match_value": null,
+                  "min": 1991,
+                  "max": 2009
+                },
+                {
+                  "code": "veterans",
+                  "label": "Veterans (1960-1990)",
+                  "match_value": null,
+                  "min": 1960,
+                  "max": 1990
+                }
+              ],
+              "depends_on": [],
+              "thresholds": null,
+              "thresholds_by": {},
+              "open_top": true
+            },
+            {
+              "key": "gender",
+              "type": "discrete",
+              "field": "gender",
+              "display": "Gender",
+              "unit": null,
+              "options": [
+                {
+                  "code": "male",
+                  "label": "Male",
+                  "match_value": "male",
+                  "min": null,
+                  "max": null
+                },
+                {
+                  "code": "female",
+                  "label": "Female",
+                  "match_value": "female",
+                  "min": null,
+                  "max": null
+                }
+              ],
+              "depends_on": [],
+              "thresholds": null,
+              "thresholds_by": {},
+              "open_top": true
+            },
+            {
+              "key": "weight",
+              "type": "bracket",
+              "field": "weight",
+              "display": "Declared Weight",
+              "unit": "kg",
+              "options": [],
+              "depends_on": [
+                "age",
+                "gender"
+              ],
+              "thresholds": null,
+              "thresholds_by": {
+                "pupils_1|male": [
+                  18,
+                  20,
+                  22,
+                  24,
+                  26,
+                  28,
+                  30,
+                  32,
+                  34,
+                  36,
+                  38
+                ],
+                "pupils_1|female": [
+                  18,
+                  20,
+                  22,
+                  24,
+                  26,
+                  28,
+                  30,
+                  32,
+                  34,
+                  36,
+                  38
+                ],
+                "pupils_2|male": [
+                  22,
+                  24,
+                  26,
+                  28,
+                  30,
+                  32,
+                  34,
+                  36,
+                  38,
+                  41,
+                  44
+                ],
+                "pupils_2|female": [
+                  22,
+                  24,
+                  26,
+                  28,
+                  30,
+                  32,
+                  34,
+                  36,
+                  38,
+                  41,
+                  44
+                ],
+                "younger_cadets|male": [
+                  26,
+                  28,
+                  30,
+                  32,
+                  34,
+                  36,
+                  39,
+                  42,
+                  46,
+                  50,
+                  55
+                ],
+                "younger_cadets|female": [
+                  26,
+                  28,
+                  30,
+                  32,
+                  34,
+                  36,
+                  39,
+                  42,
+                  46,
+                  50,
+                  55
+                ],
+                "cadets|male": [
+                  33,
+                  37,
+                  41,
+                  45,
+                  49,
+                  53,
+                  57,
+                  61,
+                  65
+                ],
+                "cadets|female": [
+                  29,
+                  33,
+                  37,
+                  41,
+                  44,
+                  47,
+                  51,
+                  55,
+                  59
+                ],
+                "juniors|male": [
+                  45,
+                  48,
+                  51,
+                  55,
+                  59,
+                  63,
+                  68,
+                  73,
+                  78
+                ],
+                "juniors|female": [
+                  42,
+                  44,
+                  46,
+                  49,
+                  52,
+                  55,
+                  59,
+                  63,
+                  68
+                ],
+                "seniors|male": [
+                  54,
+                  58,
+                  63,
+                  68,
+                  74,
+                  80,
+                  87
+                ],
+                "seniors|female": [
+                  46,
+                  49,
+                  53,
+                  57,
+                  62,
+                  67,
+                  73
+                ],
+                "veterans|male": [
+                  54,
+                  58,
+                  63,
+                  68,
+                  74,
+                  80,
+                  87
+                ],
+                "veterans|female": [
+                  46,
+                  49,
+                  53,
+                  57,
+                  62,
+                  67,
+                  73
+                ]
+              },
+              "open_top": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}

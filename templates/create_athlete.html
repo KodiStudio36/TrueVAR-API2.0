@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div style="max-width: 600px; margin: 2rem auto;">
+    <a href="javascript:history.back()" class="text-muted" style="font-size: 0.95rem; text-decoration: none;">&larr;
+        Back to tournament</a>
+
+    <div class="panel" style="padding: 2.5rem; margin-top: 1rem;">
+        <h2 style="margin-bottom: 0.5rem;">Create Athlete</h2>
+        <p class="text-muted" style="margin-bottom: 2rem;">Add a new athlete to your club roster.</p>
+
+        <form id="createAthleteForm" onsubmit="submitAthlete(event)"
+            style="display: flex; flex-direction: column; gap: 1.25rem;">
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div>
+                    <label class="field-label" for="a_firstname">First Name</label>
+                    <input type="text" id="a_firstname" required>
+                </div>
+                <div>
+                    <label class="field-label" for="a_lastname">Last Name</label>
+                    <input type="text" id="a_lastname" required>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div>
+                    <label class="field-label" for="a_gender">Gender</label>
+                    <select id="a_gender" required>
+                        <option value="" disabled selected>Select gender...</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="field-label" for="a_birthday">Birthday</label>
+                    <input type="date" id="a_birthday" required>
+                </div>
+            </div>
+
+            <div>
+                <label class="field-label" for="a_country">Country (3-letter code)</label>
+                <input type="text" id="a_country" placeholder="e.g. SVK, USA" minlength="3" maxlength="3"
+                    style="text-transform: uppercase;" required>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid var(--border); margin: 0.5rem 0;">
+
+            <div>
+                <label class="field-label" for="a_sport">Primary Sport</label>
+                <select id="a_sport" onchange="toggleSportSpecifics()" required>
+                    <option value="" disabled selected>Select sport...</option>
+                    <option value="taekwondo">Taekwondo</option>
+                    <option value="boxing">Boxing</option>
+                </select>
+            </div>
+
+            <!-- Taekwondo Specifics -->
+            <div id="tkd_specifics" class="hidden"
+                style="background: var(--bg-alt); padding: 1rem; border-radius: 6px; border: 1px solid var(--border);">
+                <label class="field-label" for="tkd_rank">Taekwondo Rank</label>
+                <select id="tkd_rank">
+                    <optgroup label="Color Belts (Keup)">
+                        <option value="0">10. Keup (White)</option>
+                        <option value="1">9. Keup (White-Yellow)</option>
+                        <option value="2">8. Keup (Yellow)</option>
+                        <option value="3">7. Keup (Yellow-Green)</option>
+                        <option value="4">6. Keup (Green)</option>
+                        <option value="5">5. Keup (Green-Blue)</option>
+                        <option value="6">4. Keup (Blue)</option>
+                        <option value="7">3. Keup (Blue-Red)</option>
+                        <option value="8">2. Keup (Red)</option>
+                        <option value="9">1. Keup (Red-Black)</option>
+                    </optgroup>
+                    <optgroup label="Black Belts (Dan/Poom)">
+                        <option value="10">1. Dan</option>
+                        <option value="11">2. Dan</option>
+                        <option value="12">3. Dan</option>
+                        <option value="13">4. Dan</option>
+                        <option value="14">5. Dan</option>
+                        <option value="15">6. Dan</option>
+                        <option value="16">7. Dan</option>
+                        <option value="17">8. Dan</option>
+                        <option value="18">9. Dan</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <!-- Boxing Specifics (Placeholder for future fields) -->
+            <div id="boxing_specifics" class="hidden"
+                style="background: var(--bg-alt); padding: 1rem; border-radius: 6px; border: 1px solid var(--border);">
+                <p class="text-muted" style="font-size: 0.85rem; margin: 0;">Boxing specific fields will appear here.
+                </p>
+            </div>
+
+            <div style="margin-top: 1rem;">
+                <button type="submit" id="submitBtn" class="btn btn-primary" style="width: 100%;">Create
+                    Athlete</button>
+            </div>
+
+            <p id="formMsg" class="hidden"
+                style="border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.95rem; margin: 0; text-align: center;">
+            </p>
+        </form>
+    </div>
+</div>
+
+<script>
+    function toggleSportSpecifics() {
+        const sport = document.getElementById("a_sport").value;
+        const tkdDiv = document.getElementById("tkd_specifics");
+        const boxDiv = document.getElementById("boxing_specifics");
+
+        tkdDiv.classList.add("hidden");
+        boxDiv.classList.add("hidden");
+
+        if (sport === "taekwondo") tkdDiv.classList.remove("hidden");
+        if (sport === "boxing") boxDiv.classList.remove("hidden");
+    }
+
+    async function submitAthlete(event) {
+        event.preventDefault();
+
+        const submitBtn = document.getElementById("submitBtn");
+        const msg = document.getElementById("formMsg");
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating...";
+        msg.classList.add("hidden");
+
+        const sport = document.getElementById("a_sport").value;
+        let rankValue = 0; // Default or fallback
+
+        // Grab specific field data based on selected sport
+        if (sport === "taekwondo") {
+            rankValue = parseInt(document.getElementById("tkd_rank").value, 10);
+        }
+
+        const payload = {
+            firstName: document.getElementById("a_firstname").value.trim(),
+            lastName: document.getElementById("a_lastname").value.trim(),
+            gender: document.getElementById("a_gender").value,
+            birthday: document.getElementById("a_birthday").value,
+            country: document.getElementById("a_country").value.trim(),
+            sport: sport,
+            rank: rankValue
+        };
+
+        try {
+            const res = await fetch("/api/athletes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const body = await res.json();
+                throw new Error(body.detail || "Failed to create athlete");
+            }
+
+            msg.textContent = "Athlete successfully added to your club roster!";
+            msg.style.background = "var(--blue-bg)";
+            msg.style.color = "var(--blue-text)";
+            msg.classList.remove("hidden");
+
+            // Redirect back to tournament registration after short delay
+            setTimeout(() => {
+                history.back();
+            }, 1200);
+
+        } catch (err) {
+            msg.textContent = err.message;
+            msg.style.background = "#fee2e2"; // Error red bg
+            msg.style.color = "#b91c1c";     // Error red text
+            msg.classList.remove("hidden");
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Create Athlete";
+        }
+    }
+</script>
+{% endblock %}

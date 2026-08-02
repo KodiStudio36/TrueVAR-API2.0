@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel" style="max-width: 480px; margin: 2.5rem auto; padding: 2.5rem;">
+    <h2 style="font-size: 1.8rem; margin-bottom: 0.5rem;">Complete Your Profile</h2>
+    <p class="text-muted" style="font-size: 1rem; margin-bottom: 1.75rem;">
+        A few details to finish setting up your account.
+    </p>
+
+    <form id="profileForm" onsubmit="handleCompleteProfile(event)"
+        style="display: flex; flex-direction: column; gap: 1.25rem;">
+        <div>
+            <label class="field-label" for="firstname">First Name</label>
+            <input type="text" id="firstname" required>
+        </div>
+
+        <div>
+            <label class="field-label" for="lastname">Last Name</label>
+            <input type="text" id="lastname" required>
+        </div>
+
+        <div>
+            <label class="field-label" for="birthday">Date of Birth</label>
+            <input type="date" id="birthday" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top: 0.5rem;">
+            Complete Registration
+        </button>
+    </form>
+
+    <p id="regError" class="hidden"
+        style="color: var(--red-text); background: var(--red-bg); border-radius: 6px; padding: 0.75rem 1rem; margin-top: 1.25rem; font-size: 0.95rem;">
+    </p>
+</div>
+
+<script>
+    async function handleCompleteProfile(event) {
+        event.preventDefault();
+        const errEl = document.getElementById("regError");
+        errEl.classList.add("hidden");
+
+        const idToken = sessionStorage.getItem("authToken");
+        const inviteToken = sessionStorage.getItem("inviteToken");
+
+        if (!idToken) {
+            alert("Session expired. Please log in again.");
+            window.location.href = "/login";
+            return;
+        }
+
+        const payload = {
+            idToken: idToken,
+            firstname: document.getElementById("firstname").value,
+            lastname: document.getElementById("lastname").value,
+            birthday: document.getElementById("birthday").value,
+            inviteToken: inviteToken || null
+        };
+
+        try {
+            const response = await fetch("/api/auth/complete-profile", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                sessionStorage.removeItem("inviteToken");
+                window.location.href = data.redirectUrl;
+            } else {
+                throw new Error(data.detail || "Registration failed.");
+            }
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.classList.remove("hidden");
+        }
+    }
+</script>
+{% endblock %}

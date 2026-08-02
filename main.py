@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from infrastructure.routers.api_router import router as tournament_router
 from infrastructure.routers.youtube_router import router as youtube_router
 from infrastructure.routers.dashboard_router import router as dashboard_router
+from infrastructure.routers.auth_router import router as auth_router
 
 from dotenv import load_dotenv
 
@@ -31,6 +32,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(tournament_router, prefix="/api")
 app.include_router(youtube_router)
 app.include_router(dashboard_router, prefix="/dashboard")
+app.include_router(auth_router)
 
 
 @app.get("/")

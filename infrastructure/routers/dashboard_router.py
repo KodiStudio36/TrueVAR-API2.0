@@ -29,7 +29,7 @@ async def dashboard_page(
     case_use_case = GetAllCasesUseCase(case_repo)
     cases = case_use_case.execute()
     
-    return templates.TemplateResponse(request, "dashboard.html", {
+    return templates.TemplateResponse(request, "dashboard/dashboard.html", {
         "request": request,
         "tournaments": tournaments,
         "cases": cases,
@@ -40,7 +40,7 @@ async def create_tournament_page(request: Request):
     """Renders the form to create a new tournament."""
     return templates.TemplateResponse(
         request, 
-        "tournament_create.html", 
+        "dashboard/tournament_create.html", 
         {"request": request}
     )
 
@@ -55,7 +55,49 @@ async def tournament_detail_page(request: Request, tournament_id: str, repo=Depe
         
     return templates.TemplateResponse(
         request,
-        "tournament_detail.html", 
+        "dashboard/tournament_detail.html", 
+        {"request": request, "tournament": tournament}
+    )
+
+@router.get("/tournaments/{tournament_id}/categories")
+async def tournament_category_manager_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
+    """
+    Staff-only drag-and-drop category finalization screen — lists every
+    category for the tournament's discipline and lets staff move any
+    entry between categories with no eligibility validation, ahead of
+    bracket generation. See tournament_detail.html's "Manage Categories"
+    link (shown only when isRegistrationOpen is true) for where this is
+    linked from.
+    """
+    use_case = GetTournamentUseCase(repo)
+    tournament = use_case.execute(tournament_id)
+
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/category_manager.html",
+        {"request": request, "tournament": tournament}
+    )
+
+@router.get("/tournaments/{tournament_id}/brackets")
+async def bracket_builder_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
+    """
+    Bracket generation + court ordering — everything computes client-side
+    in the browser (seeding, placement, byes, court assignment); nothing
+    touches Firestore until the "Push to Firebase" button. See
+    commit_brackets_endpoint in api_router.py for that one write.
+    """
+    use_case = GetTournamentUseCase(repo)
+    tournament = use_case.execute(tournament_id)
+
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/bracket_builder.html",
         {"request": request, "tournament": tournament}
     )
 
@@ -67,6 +109,6 @@ async def stream_keys_page(request: Request):
     keys = [{"id": doc.id, **doc.to_dict()} for doc in docs]
     return templates.TemplateResponse(
         request,
-        "stream_keys.html",
+        "dashboard/stream_keys.html",
         {"request": request, "keys": keys},
     )

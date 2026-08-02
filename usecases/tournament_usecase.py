@@ -8,7 +8,7 @@ class CreateTournamentUseCase:
         self.repo = repo
 
     def execute(self, title: str, location: str, courtNum: int, dateTime: datetime, isExternalPublic: bool,
-                settings: dict, discipline: str, sport: str) -> None:
+                settings: dict, discipline: str, sport: str, isRegistrationOpen: bool) -> None:
         tournament = Tournament(
             id=None,
             title=title,
@@ -20,8 +20,9 @@ class CreateTournamentUseCase:
             sport=sport,
             isExternalPublic=isExternalPublic,
             status="active",
+            isRegistrationOpen=isRegistrationOpen,
         )
-        self.repo.createTournament(tournament)
+        return self.repo.createTournament(tournament)
 
 class GetAllTournamentsUseCase:
     def __init__(self, repo: TournamentPort):

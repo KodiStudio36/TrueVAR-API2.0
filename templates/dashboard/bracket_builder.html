@@ -1,0 +1,1177 @@
+{% extends "dashboard/base.html" %}
+{% block content %}
+
+<div id="flash" class="flash-banner hidden"></div>
+
+<div class="bb-wrapper">
+
+    <div class="bb-topbar">
+        <a href="/tournaments/{{ tournament.id }}/categories" class="btn btn-ghost btn-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5" />
+                <path d="M12 19l-7-7 7-7" />
+            </svg>
+            Back to Categories
+        </a>
+        <div class="bb-topbar-title">
+            <span class="panel-eyebrow">{{ tournament.title }}</span>
+            <h1 class="panel-title" style="font-size:1.5rem;">Brackets &amp; Court Ordering</h1>
+        </div>
+        <button id="pushBtn" type="button" class="btn btn-primary" disabled onclick="pushToFirebase()">
+            Push to Firebase
+        </button>
+    </div>
+
+    <p class="text-muted bb-hint">
+        Everything below runs in your browser — nothing is written to Firestore until you hit
+        <strong>Push to Firebase</strong>. Configure courts and vest numbers (these save immediately, like the
+        category manager), then Generate to compute brackets and court ordering as a local draft you can
+        drag-and-drop to adjust before committing.
+    </p>
+
+    {# ── CONFIG ROW: courts (local only) + vest sizes (auto-derived) ────── #}
+    <div class="bb-config-row">
+
+        <div class="card-panel bb-pane">
+            <div class="bb-pane-header">
+                <h2 class="panel-title" style="font-size:1.05rem;">Courts</h2>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="addCourtRow()">+ Add Court</button>
+            </div>
+            <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+                Pre-filled from this tournament's court count. This is session-only — nothing here is saved to
+                Firestore, so it resets if you leave the page. Vest numbers can repeat across courts (different
+                physical vests); the rest-gap applies globally across every court running in parallel.
+            </p>
+            <div id="courtsList" class="bb-courts-list"></div>
+        </div>
+
+        <div class="card-panel bb-pane">
+            <div class="bb-pane-header">
+                <h2 class="panel-title" style="font-size:1.05rem;">Vest Size &amp; Hit-Level</h2>
+            </div>
+            <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+                Derived automatically by weight from whichever PSS hit-level table is selected below — not
+                assigned per tournament. Switching tables updates this preview immediately.
+            </p>
+            <div id="vestList" class="bb-vest-list"></div>
+        </div>
+
+    </div>
+
+    {# ── GENERATE ROW ──────────────────────────────────────────────────── #}
+    <div class="card-panel bb-pane" style="margin-top: 1rem;">
+        <div class="bb-pane-header">
+            <h2 class="panel-title" style="font-size:1.05rem;">Generate</h2>
+        </div>
+        <div class="bb-generate-controls">
+            <label class="bb-field">
+                <span>Bracket system</span>
+                <select id="systemSelect">
+                    <option value="single_elimination">Single elimination</option>
+                </select>
+            </label>
+            <label class="bb-field">
+                <span>Seed ordering</span>
+                <select id="orderingSelect">
+                    <option value="registration_order">Registration order</option>
+                </select>
+            </label>
+            <label class="bb-field">
+                <span>Seed placement</span>
+                <select id="placementSelect">
+                    <option value="club_country_spread">Club + country spread</option>
+                    <option value="standard">Standard (seed order only)</option>
+                </select>
+            </label>
+            <label class="bb-field">
+                <span>PSS hit-level table</span>
+                <select id="pssSetSelect" onchange="onPssSetChange()">
+                    <option value="">Loading…</option>
+                </select>
+            </label>
+            <button type="button" class="btn btn-primary" onclick="generateEverything()">Generate Brackets &amp;
+                Ordering</button>
+        </div>
+        <p class="text-muted" style="font-size: 0.8rem; margin-top: 0.6rem;">
+            Each dropdown is a registry — new algorithms slot in without touching the pipeline around them.
+            Only one option exists per slot today; more can be registered later (see ORDERING_STRATEGIES /
+            PLACEMENT_STRATEGIES / BRACKET_SYSTEMS in this page's script).
+        </p>
+        <div id="generateSummary" class="bb-generate-summary"></div>
+    </div>
+
+    {# ── RESULTS ────────────────────────────────────────────────────────── #}
+    <div id="resultsSection" class="hidden">
+
+        <div class="card-panel bb-pane" style="margin-top: 1rem;">
+            <h2 class="panel-title" style="font-size:1.05rem; margin-bottom: 0.75rem;">Brackets</h2>
+            <div id="bracketsPreview"></div>
+        </div>
+
+        <div class="card-panel bb-pane" style="margin-top: 1rem;">
+            <h2 class="panel-title" style="font-size:1.05rem; margin-bottom: 0.35rem;">Court Order</h2>
+            <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+                Drag a match to reorder it within a court, or onto a different court entirely.
+            </p>
+            <div id="unassignedWarning" class="hidden"></div>
+            <div id="courtColumns" class="bb-court-columns"></div>
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+    const TOURNAMENT_ID = "{{ tournament.id }}";
+    const TOURNAMENT_SPORT = "{{ tournament.sport | default('') | lower }}";
+    const TOURNAMENT_DISCIPLINE = "{{ tournament.discipline | default('') | lower }}";
+
+    let courts = [];             // [{label, vestNumbers, minGapBetweenSameAthlete, ageOrder}] — TRUE local state, never written to Firestore
+    let flatCategories = [];     // populated categories only: {code, ageCode, genderCode, entryTypeCode, groupLabel, label, ageMin, ageMax, weightIndex}
+    let divisionRosterCache = {};
+
+    let generatedBrackets = [];  // [{categoryCode, categoryLabel, entries, rounds}]
+    let generatedMatches = [];   // flat list across every category, mutated in place by drag-and-drop
+    let pssHitLevelSets = [];    // [{id, provider, year, label, note, pssHitLevels}] — every set available for this discipline
+    let selectedPssHitLevelSetId = null;
+
+    async function init() {
+        loadCourtsLocal();  // no fetch — courts never touch Firestore
+        await Promise.all([loadPssHitLevelSets(), loadPopulatedCategories()]);
+        renderCourtsList();
+        renderPssHitLevelSetSelect();
+        renderVestList();
+    }
+
+    // ── Courts: TRUE local state, never written to Firestore ──────────
+    // Pre-seeds from the tournament's own courtNum field (already an
+    // existing tournament property) so there's something sensible to
+    // start editing instead of an empty list.
+    let courtIdCounter = 0;
+    function nextLocalCourtId() { return `court_${++courtIdCounter}`; }
+
+    function loadCourtsLocal() {
+        const courtNum = {{ tournament.courtNum | default (0)
+    }};
+    courts = [];
+    for (let i = 0; i < courtNum; i++) {
+        courts.push({ id: nextLocalCourtId(), label: `Court ${i + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first" });
+    }
+    }
+
+    function addCourtRow() {
+        courts.push({ id: nextLocalCourtId(), label: `Court ${courts.length + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first" });
+        renderCourtsList();
+    }
+
+    function renderCourtsList() {
+        const el = document.getElementById("courtsList");
+        if (courts.length === 0) {
+            el.innerHTML = `<p class="text-muted" style="padding: 0.5rem 0;">No courts yet — add one below.</p>`;
+            return;
+        }
+        el.innerHTML = courts.map((c, i) => `
+            <div class="bb-court-row">
+                <input type="text" value="${escapeAttr(c.label)}" placeholder="Label" onchange="courts[${i}].label = this.value">
+                <input type="text" value="${(c.vestNumbers || []).join(', ')}" placeholder="Vest #s, e.g. 1, 2, 3, 4"
+                    onchange="courts[${i}].vestNumbers = this.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))">
+                <input type="number" min="0" value="${c.minGapBetweenSameAthlete}" title="Min fights between same athlete"
+                    onchange="courts[${i}].minGapBetweenSameAthlete = parseInt(this.value) || 0">
+                <select onchange="courts[${i}].ageOrder = this.value">
+                    <option value="oldest_first" ${c.ageOrder === "oldest_first" ? "selected" : ""}>Oldest first</option>
+                    <option value="youngest_first" ${c.ageOrder === "youngest_first" ? "selected" : ""}>Youngest first</option>
+                </select>
+                <button type="button" class="cm-bin-btn-inline" onclick="deleteCourtRow(${i})" title="Remove court">✕</button>
+            </div>
+        `).join("");
+    }
+
+    function deleteCourtRow(index) {
+        courts.splice(index, 1);
+        renderCourtsList();
+    }
+
+    // ── PSS size / hit-level: multiple named reference sets, admin picks ──
+    // one at generation time (different providers, or the same provider's
+    // chart revised in a later year — see list_pss_hit_level_sets_endpoint).
+    async function loadPssHitLevelSets() {
+        try {
+            const res = await fetch(`/api/sports/${TOURNAMENT_SPORT}/disciplines/${TOURNAMENT_DISCIPLINE}/pss-hit-level-sets`);
+            const data = await res.json();
+            pssHitLevelSets = data.sets || [];
+            selectedPssHitLevelSetId = pssHitLevelSets.length > 0 ? pssHitLevelSets[0].id : null;
+        } catch (err) {
+            console.error("Failed to load PSS hit-level sets", err);
+            pssHitLevelSets = [];
+            selectedPssHitLevelSetId = null;
+        }
+    }
+
+    function renderPssHitLevelSetSelect() {
+        const el = document.getElementById("pssSetSelect");
+        if (pssHitLevelSets.length === 0) {
+            el.innerHTML = `<option value="">No PSS hit-level tables uploaded</option>`;
+            el.disabled = true;
+            return;
+        }
+        el.disabled = false;
+        el.innerHTML = pssHitLevelSets.map(s =>
+            `<option value="${escapeAttr(s.id)}">${escapeHtml(s.label || s.id)}${s.provider ? ` (${escapeHtml(s.provider)}${s.year ? " " + s.year : ""})` : ""}</option>`
+        ).join("");
+        el.value = selectedPssHitLevelSetId;
+    }
+
+    function onPssSetChange() {
+        selectedPssHitLevelSetId = document.getElementById("pssSetSelect").value || null;
+        renderVestList(); // different sets can give a category a different size/hit-level — refresh the preview
+    }
+
+    function currentPssHitLevels() {
+        const set = pssHitLevelSets.find(s => s.id === selectedPssHitLevelSetId);
+        return set ? (set.pssHitLevels || {}) : {};
+    }
+
+    // Looks up pssSize/hitLevel for one leaf category by its weightIndex
+    // (position within its age|gender weight-bracket list) — the chosen
+    // set's array is index-parallel with that list, one entry per
+    // bracket including the open-top one.
+    function vestInfoFor(cat) {
+        const rows = currentPssHitLevels()[`${cat.ageCode}|${cat.genderCode}`];
+        if (!rows || cat.weightIndex == null) return null;
+        return rows[cat.weightIndex] || null;
+    }
+
+    async function loadPopulatedCategories() {
+        let dimensions = [];
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/categories`);
+            const data = await res.json();
+            const sportSchemas = (data.categories && data.categories.sportSchemas) || {};
+            const sportKey = sportSchemas[TOURNAMENT_SPORT] ? TOURNAMENT_SPORT : Object.keys(sportSchemas)[0];
+            const sportSchema = sportKey ? sportSchemas[sportKey] : {};
+            const disciplineSchemas = sportSchema.disciplines || {};
+            const disciplineKey = disciplineSchemas[TOURNAMENT_DISCIPLINE] ? TOURNAMENT_DISCIPLINE : Object.keys(disciplineSchemas)[0];
+            dimensions = disciplineKey ? (disciplineSchemas[disciplineKey].dimensions || []) : [];
+        } catch (err) {
+            console.error("Failed to load category schema", err);
+        }
+
+        const flat = flattenCategories(dimensions);
+
+        let counts = {};
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/category-counts`);
+            const data = await res.json();
+            counts = data.categoryCounts || {};
+        } catch (err) {
+            console.error("Failed to load category counts", err);
+        }
+
+        // Only categories with at least one registration need a bracket.
+        flatCategories = flat.filter(c => (counts[c.code] || 0) > 0);
+    }
+
+    // Same flattening logic as category_manager.html, plus weightIndex —
+    // this category's position within its age|gender weight-bracket
+    // list, which is what vestInfoFor() uses to look up the matching
+    // pssHitLevels row (that array is index-parallel with this one).
+    function flattenCategories(schema) {
+        const entryDim = schema.find(d => d.key === "entry_type");
+        const ageDim = schema.find(d => d.key === "age");
+        const genderDim = schema.find(d => d.key === "gender");
+        const weightDim = schema.find(d => d.key === "weight");
+        if (!ageDim || !genderDim) return [];
+
+        const entryOptions = (entryDim && entryDim.options && entryDim.options.length > 0)
+            ? entryDim.options : [{ code: "individual", label: "Individual" }];
+        const unit = (weightDim && weightDim.unit) || "kg";
+
+        const flat = [];
+        entryOptions.forEach(entryOpt => {
+            ageDim.options.forEach(ageOpt => {
+                genderDim.options.forEach(genderOpt => {
+                    let weightCats;
+                    if (weightDim) {
+                        const key = `${ageOpt.code}|${genderOpt.code}`;
+                        const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[key]) || [];
+                        if (thresholds.length === 0) return;
+                        weightCats = thresholds.map(w => ({ code: `${ageOpt.code}_${genderOpt.code}_${w}`, label: `-${w}${unit}` }));
+                        if (weightDim.open_top) {
+                            const top = thresholds[thresholds.length - 1];
+                            weightCats.push({ code: `${ageOpt.code}_${genderOpt.code}_${top}plus`, label: `+${top}${unit}` });
+                        }
+                    } else {
+                        weightCats = [{ code: `${ageOpt.code}_${genderOpt.code}`, label: "" }];
+                    }
+                    weightCats.forEach((c, weightIndex) => {
+                        flat.push({
+                            code: `${entryOpt.code}_${c.code}`,
+                            ageCode: ageOpt.code, genderCode: genderOpt.code, entryTypeCode: entryOpt.code,
+                            ageMin: ageOpt.min, ageMax: ageOpt.max, weightIndex,
+                            groupLabel: entryOpt.label,
+                            label: c.label ? `${ageOpt.label} ${genderOpt.label} ${c.label}` : `${ageOpt.label} ${genderOpt.label}`,
+                        });
+                    });
+                });
+            });
+        });
+        return flat;
+    }
+
+    // Read-only — PSS size/hit-level are derived automatically, not
+    // assigned per tournament, so this panel is for visibility, not
+    // data entry.
+    function renderVestList() {
+        const el = document.getElementById("vestList");
+        if (flatCategories.length === 0) {
+            el.innerHTML = `<p class="text-muted" style="padding: 0.5rem 0;">No populated categories yet — register some athletes first.</p>`;
+            return;
+        }
+        el.innerHTML = flatCategories.map(c => {
+            const info = vestInfoFor(c);
+            const display = info
+                ? `PSS ${info.pssSize} · hit-level ${info.hitLevel}`
+                : `<span class="text-muted">no data</span>`;
+            return `
+                <div class="bb-vest-row">
+                    <span>${escapeHtml(c.groupLabel)} · ${escapeHtml(c.label)}</span>
+                    <span>${display}</span>
+                </div>
+            `;
+        }).join("");
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // ORDERING STRATEGIES — rank entries 1..N. Registry: add more here.
+    // ══════════════════════════════════════════════════════════════════
+    const ORDERING_STRATEGIES = {
+        registration_order: (entries) => entries.slice(),
+    };
+
+    // ══════════════════════════════════════════════════════════════════
+    // PLACEMENT STRATEGIES — seed 1..N -> bracket slot positions.
+    // Registry: add more here (e.g. "points").
+    // ══════════════════════════════════════════════════════════════════
+
+    // Textbook seeding table via recursive halving: seed 1 & 2 land in
+    // opposite halves, 1-4 in different quarters, etc.
+    function standardSeedSlotOrder(bracketSize) {
+        let order = [1];
+        while (order.length < bracketSize) {
+            const n = order.length * 2;
+            const next = [];
+            order.forEach(s => { next.push(s); next.push(n + 1 - s); });
+            order = next;
+        }
+        return order;
+    }
+
+    function placeStandard(seededEntries, bracketSize) {
+        const slotOrder = standardSeedSlotOrder(bracketSize);
+        const slots = new Array(bracketSize).fill(null);
+        slotOrder.forEach((seed, i) => { slots[i] = seededEntries[seed - 1] || null; }); // null = bye
+        return slots;
+    }
+
+    // Starts from standard placement, then runs a greedy local-swap pass
+    // trying to separate same-club/same-country entries that landed in
+    // the same round-1 pair. This is a best-effort optimization, not a
+    // guarantee — with enough entries from one club, some proximity can
+    // be mathematically unavoidable. conflictCount on the return value
+    // reports how many round-1 pairs still clash after swapping.
+    function placeClubCountrySpread(seededEntries, bracketSize) {
+        let slots = placeStandard(seededEntries, bracketSize);
+
+        function pairClash(a, b) {
+            if (!a || !b) return false;
+            return (a.clubId && a.clubId === b.clubId) || (a.country && a.country === b.country);
+        }
+
+        let improved = true, iterations = 0;
+        while (improved && iterations < 200) {
+            improved = false;
+            iterations++;
+            for (let i = 0; i < slots.length; i += 2) {
+                const a = slots[i], b = slots[i + 1];
+                if (!pairClash(a, b)) continue;
+                for (let j = 0; j < slots.length; j += 2) {
+                    if (j === i) continue;
+                    const c = slots[j], d = slots[j + 1];
+                    if (!c) continue;
+                    if (!pairClash(a, c) && !pairClash(b, d)) {
+                        slots[i + 1] = c; slots[j] = b;
+                        improved = true;
+                        break;
+                    }
+                }
+                if (improved) break;
+            }
+        }
+
+        let conflictCount = 0;
+        for (let i = 0; i < slots.length; i += 2) if (pairClash(slots[i], slots[i + 1])) conflictCount++;
+        slots.conflictCount = conflictCount;
+        return slots;
+    }
+
+    const PLACEMENT_STRATEGIES = {
+        standard: placeStandard,
+        club_country_spread: placeClubCountrySpread,
+    };
+
+    // ══════════════════════════════════════════════════════════════════
+    // BRACKET SYSTEMS — Registry: add round_robin / cut_off here later.
+    // ══════════════════════════════════════════════════════════════════
+    function nextPowerOfTwo(n) {
+        let p = 1;
+        while (p < n) p *= 2;
+        return p;
+    }
+
+    function generateSingleElimination(categoryCode, entries, placementFn) {
+        const bracketSize = nextPowerOfTwo(entries.length);
+        const slots = placementFn(entries, bracketSize);
+        const conflictCount = slots.conflictCount || 0;
+
+        const rounds = [];
+        let prevRoundMatches = null;
+        let roundParticipantCount = bracketSize;
+        let roundNum = 1;
+
+        while (roundParticipantCount >= 1) {
+            if (roundNum > 1 && roundParticipantCount === prevRoundMatches.length) break; // safety
+            const numMatches = roundNum === 1 ? bracketSize / 2 : prevRoundMatches.length / 2;
+            if (numMatches < 1) break;
+
+            const roundMatches = [];
+            for (let i = 0; i < numMatches; i++) {
+                const matchId = `${categoryCode}_r${roundNum}_m${i + 1}`;
+                let participants, status, winnerEntryId = null;
+
+                if (roundNum === 1) {
+                    const p1 = slots[i * 2], p2 = slots[i * 2 + 1];
+                    participants = [
+                        p1 ? { entryId: p1.entryId, athleteIds: p1.athleteIds } : { entryId: null, source: null },
+                        p2 ? { entryId: p2.entryId, athleteIds: p2.athleteIds } : { entryId: null, source: null },
+                    ];
+                    if (p1 && !p2) { status = "walkover"; winnerEntryId = p1.entryId; }
+                    else if (p2 && !p1) { status = "walkover"; winnerEntryId = p2.entryId; }
+                    else if (p1 && p2) { status = "ready"; }
+                    else { status = "walkover"; }
+                } else {
+                    const m1 = prevRoundMatches[i * 2], m2 = prevRoundMatches[i * 2 + 1];
+                    participants = [
+                        m1.status === "walkover" ? { entryId: m1.winnerEntryId, athleteIds: m1.winnerAthleteIds } : { entryId: null, source: { matchId: m1.matchId, slot: "winner" } },
+                        m2.status === "walkover" ? { entryId: m2.winnerEntryId, athleteIds: m2.winnerAthleteIds } : { entryId: null, source: { matchId: m2.matchId, slot: "winner" } },
+                    ];
+                    status = participants.every(p => p.entryId) ? "ready" : "pending";
+                }
+
+                roundMatches.push({ matchId, categoryCode, round: roundNum, matchNumber: i + 1, participants, status, winnerEntryId, courtId: null, queuePosition: null });
+            }
+
+            rounds.push(roundMatches);
+            if (roundMatches.length === 1) break; // final placed
+            prevRoundMatches = roundMatches;
+            roundNum++;
+        }
+
+        return { rounds, conflictCount, bracketSize };
+    }
+
+    const BRACKET_SYSTEMS = {
+        single_elimination: generateSingleElimination,
+    };
+
+    // ══════════════════════════════════════════════════════════════════
+    // COURT ORDERING — global position index shared across all courts
+    // (they run in parallel), so the rest-gap constraint is checked
+    // against every court's placements, not just one court's own queue.
+    // This is a greedy heuristic, not a provably optimal scheduler —
+    // genuinely optimal scheduling under these constraints is a much
+    // harder problem than a real event needs solved perfectly.
+    // ══════════════════════════════════════════════════════════════════
+    function generateCourtOrdering(readyMatchesByCategory) {
+        const activeCourts = courts; // every court in the local list is "active" — no separate flag needed now that this is pure client state
+        const pool = [];
+
+        Object.entries(readyMatchesByCategory).forEach(([categoryCode, matches]) => {
+            const cat = flatCategories.find(c => c.code === categoryCode);
+            const info = cat ? vestInfoFor(cat) : null;
+            const pssSizeNum = info ? info.pssSize : null;
+            const eligibleCourts = activeCourts.filter(c => pssSizeNum == null || (c.vestNumbers || []).includes(pssSizeNum));
+            const avgBirthYear = cat ? (cat.ageMin + cat.ageMax) / 2 : 0;
+            matches.forEach(m => {
+                if (m.status !== "ready") return; // byes/walkovers never need a live court slot
+                pool.push({
+                    match: m, categoryCode, avgBirthYear,
+                    eligibleCourtIds: eligibleCourts.map(c => c.id),
+                    athleteIds: m.participants.flatMap(p => p.athleteIds || []),
+                });
+            });
+        });
+
+        const unassigned = pool.filter(p => p.eligibleCourtIds.length === 0);
+        const assignable = pool.filter(p => p.eligibleCourtIds.length > 0);
+
+        const remainingByCourtId = {};
+        activeCourts.forEach(c => {
+            const candidates = assignable.filter(p => p.eligibleCourtIds.includes(c.id));
+            candidates.sort((a, b) => c.ageOrder === "youngest_first" ? b.avgBirthYear - a.avgBirthYear : a.avgBirthYear - b.avgBirthYear);
+            remainingByCourtId[c.id] = candidates;
+        });
+
+        const placed = [];
+        const assignedIds = new Set();
+        let position = 0;
+        let guard = 0;
+
+        while (assignedIds.size < assignable.length && guard < assignable.length * 4 + 20) {
+            guard++;
+            let placedThisRow = false;
+            for (const court of activeCourts) {
+                const queue = remainingByCourtId[court.id];
+                let pickIndex = -1;
+                for (let i = 0; i < queue.length; i++) {
+                    const cand = queue[i];
+                    if (assignedIds.has(cand.match.matchId)) continue;
+                    const violates = placed.some(p =>
+                        Math.abs(p.position - position) < court.minGapBetweenSameAthlete &&
+                        p.athleteIds.some(id => cand.athleteIds.includes(id))
+                    );
+                    if (!violates) { pickIndex = i; break; }
+                }
+                if (pickIndex === -1) continue;
+                const chosen = queue[pickIndex];
+                chosen.match.courtId = court.id;
+                chosen.match.queuePosition = position;
+                placed.push({ position, athleteIds: chosen.athleteIds });
+                assignedIds.add(chosen.match.matchId);
+                placedThisRow = true;
+            }
+            position++;
+            if (!placedThisRow) position++; // nobody could be placed safely this row — advance anyway rather than loop forever
+        }
+
+        // Anything still unplaced after the guard limit (a genuinely
+        // unsatisfiable configuration) gets appended at the end, gap
+        // constraint ignored — scheduled late beats not scheduled.
+        assignable.forEach(p => {
+            if (assignedIds.has(p.match.matchId)) return;
+            const court = activeCourts.find(c => p.eligibleCourtIds.includes(c.id));
+            if (!court) return;
+            p.match.courtId = court.id;
+            p.match.queuePosition = position++;
+        });
+
+        return { placedCount: assignedIds.size, unassigned };
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // GENERATE — orchestrates the pipeline above
+    // ══════════════════════════════════════════════════════════════════
+    async function generateEverything() {
+        if (flatCategories.length === 0) {
+            showFlash("No populated categories to generate brackets for.", true);
+            return;
+        }
+        if (courts.length === 0) {
+            showFlash("Add and save at least one court first.", true);
+            return;
+        }
+        if (!selectedPssHitLevelSetId) {
+            showFlash("No PSS hit-level table selected — upload one via upload_pss_hitlevels.py first.", true);
+            return;
+        }
+
+        const orderingFn = ORDERING_STRATEGIES[document.getElementById("orderingSelect").value];
+        const placementFn = PLACEMENT_STRATEGIES[document.getElementById("placementSelect").value];
+        const bracketFn = BRACKET_SYSTEMS[document.getElementById("systemSelect").value];
+
+        generatedBrackets = [];
+        generatedMatches = [];
+        let totalConflicts = 0;
+
+        for (const cat of flatCategories) {
+            if (!(cat.ageCode in divisionRosterCache)) {
+                try {
+                    const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/division-rosters/${cat.ageCode}`);
+                    const data = await res.json();
+                    divisionRosterCache[cat.ageCode] = data.athletes || {};
+                } catch (err) {
+                    console.error("Failed to load roster for", cat.code, err);
+                    continue;
+                }
+            }
+            const rosterEntries = (divisionRosterCache[cat.ageCode] || {})[cat.code] || {};
+            const entries = Object.entries(rosterEntries).map(([entryId, entry]) => {
+                const members = entry.members || [];
+                return {
+                    entryId,
+                    athleteIds: members.map(m => m.athleteId),
+                    clubId: members[0] ? members[0].clubId : null,
+                    country: members[0] ? members[0].country : null,
+                    name: members.map(m => m.name).join(" & "),
+                };
+            });
+            if (entries.length === 0) continue;
+
+            const seeded = orderingFn(entries);
+            const built = bracketFn(cat.code, seeded, placementFn);
+            totalConflicts += built.conflictCount || 0;
+
+            // Fill in winnerAthleteIds for walkover matches so later
+            // rounds' athleteIds (needed for the gap constraint) are known
+            // even before a real "match completed" event happens.
+            const vestInfo = vestInfoFor(cat);
+            built.rounds.forEach(roundMatches => roundMatches.forEach(m => {
+                if (m.status === "walkover") {
+                    const winner = m.participants.find(p => p.entryId === m.winnerEntryId);
+                    m.winnerAthleteIds = winner ? winner.athleteIds : [];
+                }
+                // Vest size / hit-level are a property of the CATEGORY
+                // (weight bracket), so every match within it — every
+                // round — gets the same values, set once here.
+                m.pssSize = vestInfo ? vestInfo.pssSize : null;
+                m.hitLevel = vestInfo ? vestInfo.hitLevel : null;
+                m.pssHitLevelSetId = selectedPssHitLevelSetId;
+            }));
+
+            generatedBrackets.push({
+                categoryCode: cat.code, categoryLabel: `${cat.groupLabel} · ${cat.label}`,
+                discipline: TOURNAMENT_DISCIPLINE, format: "duel",
+                system: document.getElementById("systemSelect").value,
+                orderingStrategy: document.getElementById("orderingSelect").value,
+                placementStrategy: document.getElementById("placementSelect").value,
+                pssHitLevelSetId: selectedPssHitLevelSetId,
+                entries: entries.map(e => ({ entryId: e.entryId, athleteIds: e.athleteIds, clubId: e.clubId, country: e.country, name: e.name })),
+                rounds: built.rounds,
+                bracketSize: built.bracketSize,
+            });
+            built.rounds.forEach(roundMatches => roundMatches.forEach(m => generatedMatches.push(m)));
+        }
+
+        // Court ordering runs once, globally, across every category's
+        // round-1 matches together (later rounds get inserted live once
+        // they become ready — see the earlier design discussion).
+        const round1ByCategory = {};
+        generatedBrackets.forEach(b => { round1ByCategory[b.categoryCode] = b.rounds[0] || []; });
+        const orderingResult = generateCourtOrdering(round1ByCategory);
+
+        document.getElementById("generateSummary").innerHTML = `
+            ${generatedBrackets.length} bracket(s) generated ·
+            ${orderingResult.placedCount} match(es) scheduled onto courts ·
+            ${totalConflicts > 0 ? `<span style="color:#b45309;">${totalConflicts} unavoidable club/country pairing(s)</span> · ` : ""}
+            ${orderingResult.unassigned.length > 0 ? `<span style="color:#b91c1c;">${orderingResult.unassigned.length} match(es) have no eligible court (check vest numbers)</span>` : ""}
+        `;
+
+        renderBracketsPreview();
+        renderCourtColumns();
+        document.getElementById("resultsSection").classList.remove("hidden");
+        document.getElementById("pushBtn").disabled = false;
+    }
+
+    // ── Rendering: bracket preview (round-by-round list) ────────────────
+    function renderBracketsPreview() {
+        const el = document.getElementById("bracketsPreview");
+        el.innerHTML = generatedBrackets.map(b => `
+            <div class="bb-bracket-block">
+                <div class="bb-bracket-title">${escapeHtml(b.categoryLabel)} <span class="text-muted">(${b.entries.length} entries, ${b.bracketSize}-slot bracket)</span></div>
+                ${b.rounds.map((round, ri) => `
+                    <div class="bb-round">
+                        <div class="bb-round-label">${ri === b.rounds.length - 1 ? "Final" : `Round ${ri + 1}`}</div>
+                        ${round.map(m => renderMatchLine(m, b)).join("")}
+                    </div>
+                `).join("")}
+            </div>
+        `).join("");
+    }
+
+    function entryNameForMatch(entries, entryId) {
+        if (!entryId) return "TBD";
+        const e = entries.find(x => x.entryId === entryId);
+        return e ? e.name : entryId;
+    }
+
+    function renderMatchLine(m, bracket) {
+        const p1 = m.participants[0], p2 = m.participants[1];
+        const n1 = p1.entryId ? entryNameForMatch(bracket.entries, p1.entryId) : "BYE / TBD";
+        const n2 = p2.entryId ? entryNameForMatch(bracket.entries, p2.entryId) : "BYE / TBD";
+        const badge = m.status === "walkover" ? `<span class="badge badge-grey">walkover</span>` : m.status === "pending" ? `<span class="badge badge-grey">pending</span>` : "";
+        return `<div class="bb-match-line">${escapeHtml(n1)} <span class="text-muted">vs</span> ${escapeHtml(n2)} ${badge}</div>`;
+    }
+
+    // ── Rendering: court columns with drag-and-drop ─────────────────────
+    let draggedMatchId = null;
+
+    function renderCourtColumns() {
+        const activeCourts = courts;
+        const el = document.getElementById("courtColumns");
+
+        el.innerHTML = activeCourts.map(court => {
+            const matches = generatedMatches
+                .filter(m => m.courtId === court.id)
+                .sort((a, b) => a.queuePosition - b.queuePosition);
+            return `
+                <div class="bb-court-column" data-court-id="${court.id}" ondragover="onColumnDragOver(event, this)" ondrop="onColumnDrop(event, this)">
+                    <div class="bb-court-column-header">${escapeHtml(court.label)}</div>
+                    <div class="bb-court-column-body">
+                        ${matches.map((m, i) => renderCourtMatchCard(m, i)).join("") || `<p class="text-muted" style="font-size:0.82rem; padding: 0.5rem 0;">No matches assigned.</p>`}
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+        const unassignedEl = document.getElementById("unassignedWarning");
+        const unassignedMatches = generatedMatches.filter(m => m.status === "ready" && !m.courtId);
+        if (unassignedMatches.length > 0) {
+            unassignedEl.classList.remove("hidden");
+            unassignedEl.innerHTML = `<p style="color:#b91c1c; font-size:0.85rem;">${unassignedMatches.length} ready match(es) have no eligible court — set a matching vest number or add a court that carries it.</p>`;
+        } else {
+            unassignedEl.classList.add("hidden");
+        }
+    }
+
+    function renderCourtMatchCard(m, index) {
+        const bracket = generatedBrackets.find(b => b.categoryCode === m.categoryCode);
+        const n1 = entryNameForMatch(bracket.entries, m.participants[0].entryId);
+        const n2 = entryNameForMatch(bracket.entries, m.participants[1].entryId);
+        return `
+            <div class="bb-court-match" draggable="true" data-match-id="${m.matchId}"
+                ondragstart="onMatchDragStart(event, this)" ondragend="onMatchDragEnd(event, this)">
+                <div class="text-muted" style="font-size:0.72rem;">#${index + 1} · ${escapeHtml(bracket.categoryLabel)}</div>
+                <div style="font-size:0.88rem; font-weight:600;">${escapeHtml(n1)} vs ${escapeHtml(n2)}</div>
+            </div>
+        `;
+    }
+
+    function onMatchDragStart(event, el) {
+        draggedMatchId = el.dataset.matchId;
+        el.classList.add("bb-court-match--dragging");
+    }
+    function onMatchDragEnd(event, el) {
+        el.classList.remove("bb-court-match--dragging");
+    }
+    function onColumnDragOver(event) {
+        event.preventDefault();
+    }
+
+    function onColumnDrop(event, columnEl) {
+        event.preventDefault();
+        if (!draggedMatchId) return;
+        const targetCourtId = columnEl.dataset.courtId;
+
+        // Figure out drop position: index of the card under the pointer,
+        // or end of column if dropped below everything.
+        const cards = [...columnEl.querySelectorAll(".bb-court-match")];
+        let dropIndex = cards.length;
+        const y = event.clientY;
+        for (let i = 0; i < cards.length; i++) {
+            const rect = cards[i].getBoundingClientRect();
+            if (y < rect.top + rect.height / 2) { dropIndex = i; break; }
+        }
+
+        const moved = generatedMatches.find(m => m.matchId === draggedMatchId);
+        if (!moved) return;
+
+        moved.courtId = targetCourtId;
+
+        // Renumber queuePosition sequentially for the target column,
+        // inserting the moved match at dropIndex.
+        const columnMatches = generatedMatches
+            .filter(m => m.courtId === targetCourtId && m.matchId !== draggedMatchId)
+            .sort((a, b) => a.queuePosition - b.queuePosition);
+        columnMatches.splice(dropIndex, 0, moved);
+        columnMatches.forEach((m, i) => { m.queuePosition = i; });
+
+        draggedMatchId = null;
+        renderCourtColumns();
+    }
+
+    // ── Push to Firebase ─────────────────────────────────────────────
+    async function pushToFirebase() {
+        if (generatedBrackets.length === 0) return;
+        if (!confirm(`Push ${generatedBrackets.length} bracket(s) and ${generatedMatches.length} match(es) to Firestore? This is the live commit.`)) return;
+
+        const btn = document.getElementById("pushBtn");
+        btn.disabled = true;
+        btn.textContent = "Pushing…";
+
+        const payload = {
+            sport: TOURNAMENT_SPORT,
+            discipline: TOURNAMENT_DISCIPLINE,
+            brackets: generatedBrackets.map(b => ({
+                categoryCode: b.categoryCode, categoryLabel: b.categoryLabel, discipline: b.discipline, format: b.format,
+                system: b.system, orderingStrategy: b.orderingStrategy, placementStrategy: b.placementStrategy,
+                pssHitLevelSetId: b.pssHitLevelSetId, entries: b.entries,
+            })),
+            matches: generatedMatches.map(m => ({
+                matchId: m.matchId, bracketCategoryCode: m.categoryCode, round: m.round, matchNumber: m.matchNumber,
+                participants: m.participants, status: m.status, winnerEntryId: m.winnerEntryId,
+                courtId: m.courtId, queuePosition: m.queuePosition,
+                pssSize: m.pssSize, hitLevel: m.hitLevel, pssHitLevelSetId: m.pssHitLevelSetId,
+            })),
+        };
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/brackets/commit`, {
+                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `Push failed (${res.status})`);
+            }
+            showFlash("Brackets pushed to Firestore.");
+            btn.textContent = "Pushed ✓";
+        } catch (err) {
+            console.error("Push failed", err);
+            showFlash(err.message || "Push failed — try again.", true);
+            btn.disabled = false;
+            btn.textContent = "Push to Firebase";
+        }
+    }
+
+    function showFlash(text, isError) {
+        const el = document.getElementById("flash");
+        el.textContent = text;
+        el.className = `flash-banner ${isError ? "flash-banner--error" : ""}`;
+        el.classList.remove("hidden");
+        setTimeout(() => el.classList.add("hidden"), 3000);
+    }
+
+    function escapeHtml(str) {
+        return String(str ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+    function escapeAttr(str) { return escapeHtml(str); }
+
+    init();
+</script>
+
+<style>
+    :root {
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --muted: #64748b;
+        --text: #0f172a;
+        --accent: #4f46e5;
+        --green: #16a34a;
+        --green-bg: #dcfce7;
+        --radius: 14px;
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    .text-muted {
+        color: var(--muted) !important;
+    }
+
+    .container {
+        max-width: none !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 1.5rem 2rem !important;
+        box-sizing: border-box !important;
+    }
+
+    body {
+        background: #f1f5f9;
+    }
+
+    .card-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 1px 4px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .04);
+    }
+
+    .panel-eyebrow {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--muted);
+        display: block;
+        margin-bottom: .25rem;
+    }
+
+    .panel-title {
+        margin: 0;
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--text);
+        line-height: 1.2;
+    }
+
+    .badge {
+        display: inline-block;
+        font-size: .72rem;
+        font-weight: 600;
+        padding: .2rem .55rem;
+        border-radius: 99px;
+        white-space: nowrap;
+    }
+
+    .badge-green {
+        background: var(--green-bg);
+        color: var(--green);
+    }
+
+    .badge-grey {
+        background: #f1f5f9;
+        color: var(--muted);
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .5rem 1rem;
+        border-radius: 8px;
+        font-size: .875rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #4338ca;
+    }
+
+    .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+        background: #f8fafc;
+        color: var(--text);
+    }
+
+    .btn-sm {
+        font-size: .8rem;
+        padding: .35rem .8rem;
+    }
+
+    .bb-wrapper {
+        width: 100%;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .bb-topbar {
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+    }
+
+    .bb-topbar-title {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .bb-hint {
+        margin-top: -0.5rem;
+        font-size: 0.9rem;
+    }
+
+    .bb-config-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.25rem;
+    }
+
+    .bb-pane {
+        padding: 1.25rem;
+    }
+
+    .bb-pane-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+
+    .bb-court-row {
+        display: grid;
+        grid-template-columns: 1fr 1.3fr 90px 130px auto auto;
+        gap: 0.5rem;
+        align-items: center;
+        padding: 0.4rem 0;
+    }
+
+    .bb-court-row input,
+    .bb-court-row select {
+        padding: 0.4rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 0.85rem;
+        box-sizing: border-box;
+        width: 100%;
+    }
+
+    .cm-bin-btn-inline {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 1rem;
+    }
+
+    .cm-bin-btn-inline:hover {
+        color: #b91c1c;
+    }
+
+    .bb-vest-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0;
+        font-size: 0.85rem;
+        border-bottom: 1px solid #f1f5f9;
+    }
+
+    .bb-vest-row input {
+        padding: 0.35rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+    }
+
+    .bb-generate-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: end;
+    }
+
+    .bb-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        font-size: 0.82rem;
+        color: var(--muted);
+        font-weight: 600;
+    }
+
+    .bb-field select {
+        padding: 0.45rem 0.6rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 0.85rem;
+        color: var(--text);
+        font-weight: 400;
+    }
+
+    .bb-generate-summary {
+        margin-top: 0.75rem;
+        font-size: 0.85rem;
+    }
+
+    .bb-bracket-block {
+        padding: 0.9rem 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .bb-bracket-block:last-child {
+        border-bottom: none;
+    }
+
+    .bb-bracket-title {
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+
+    .bb-round {
+        margin-bottom: 0.5rem;
+    }
+
+    .bb-round-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin-bottom: 0.2rem;
+    }
+
+    .bb-match-line {
+        font-size: 0.88rem;
+        padding: 0.2rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .bb-court-columns {
+        display: flex;
+        gap: 1rem;
+        overflow-x: auto;
+        padding-bottom: 0.5rem;
+    }
+
+    .bb-court-column {
+        flex: 0 0 240px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #f8fafc;
+        min-height: 200px;
+    }
+
+    .bb-court-column-header {
+        font-weight: 700;
+        font-size: 0.9rem;
+        padding: 0.6rem 0.75rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .bb-court-column-body {
+        padding: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+        min-height: 120px;
+    }
+
+    .bb-court-match {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.5rem 0.6rem;
+        cursor: grab;
+    }
+
+    .bb-court-match--dragging {
+        opacity: 0.4;
+    }
+
+    .flash-banner {
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        background: var(--green-bg);
+        color: var(--green);
+        font-size: 0.9rem;
+    }
+
+    .flash-banner--error {
+        background: #fef2f2;
+        color: #b91c1c;
+    }
+</style>
+{% endblock %}

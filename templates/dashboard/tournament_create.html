@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "dashboard/base.html" %}
 
 {% block content %}
 <h2 id="page-heading">Create New Tournament</h2>
@@ -71,10 +71,38 @@
         <label for="isExternalPublic">This is a public event</label>
     </div>
 
+    <div class="form-group checkbox-group" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+        <input type="checkbox" id="isRegistrationOpen" name="isRegistrationOpen">
+        <label for="isRegistrationOpen"><strong>Open tournament for public registration</strong></label>
+    </div>
+
+    <!-- Container for registration settings (Deadline + File Upload) -->
+    <div id="registrationSettingsGroup"
+        style="display: none; background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
+        <div class="form-group" style="margin-bottom: 1rem;">
+            <label for="registrationDeadline">Registration Deadline:</label>
+            <input type="datetime-local" id="registrationDeadline" name="registrationDeadline">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0;">
+            <label for="categoriesJsonFile">Upload Categories Definition (JSON):</label>
+            <input type="file" id="categoriesJsonFile" accept=".json">
+            <small style="color: #64748b; display: block; margin-top: 0.25rem;">Upload JSON file containing
+                divisions/categories.</small>
+        </div>
+    </div>
+
     <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">Create Tournament</button>
 </form>
 
 <script>
+    const registrationCheckbox = document.getElementById("isRegistrationOpen");
+    const registrationSettingsGroup = document.getElementById("registrationSettingsGroup");
+
+    registrationCheckbox.addEventListener("change", (e) => {
+        registrationSettingsGroup.style.display = e.target.checked ? "block" : "none";
+    });
+
     // ── Sport → Discipline → Provider → Mode cascade config ──────────────
     // ★ marks the default at each level (most-used option, pre-selected).
     const SPORT_DATA = {
@@ -187,6 +215,27 @@
 
         const rawDateTime = document.getElementById('dateTime').value;
         const formattedDateTime = new Date(rawDateTime).toISOString();
+        const isRegistrationOpen = document.getElementById('isRegistrationOpen').checked;
+
+        // Parse registration deadline if provided
+        const rawDeadline = document.getElementById('registrationDeadline').value;
+        const formattedDeadline = (isRegistrationOpen && rawDeadline) ? new Date(rawDeadline).toISOString() : null;
+
+        let categoriesData = null;
+
+        if (isRegistrationOpen) {
+            const fileInput = document.getElementById('categoriesJsonFile');
+            if (fileInput.files.length > 0) {
+                try {
+                    const fileText = await fileInput.files[0].text();
+                    const parsedJson = JSON.parse(fileText);
+                    categoriesData = parsedJson.categories || parsedJson;
+                } catch (err) {
+                    alert('Invalid JSON file format.');
+                    return;
+                }
+            }
+        }
 
         const formData = {
             title: document.getElementById('title').value,
@@ -201,6 +250,10 @@
             isExternalPublic: document.getElementById('isExternalPublic').checked,
             venueName: document.getElementById('venueName').value,
             numbering: document.getElementById('numbering').value,
+            // Registration data
+            isRegistrationOpen: isRegistrationOpen,
+            registrationDeadline: formattedDeadline,
+            categories: categoriesData
         };
 
         try {

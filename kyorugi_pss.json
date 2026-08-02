@@ -1,0 +1,759 @@
+{
+    "sport": "taekwondo",
+    "discipline": "kyorugi",
+    "setId": "daedo_2023",
+    "provider": "DAEDO",
+    "year": 2023,
+    "label": "DAEDO PSS HITLEVEL (2023)",
+    "note": "pupils_1/pupils_2/younger_cadets rows are fit from DAEDO's Kids 8-10/11-12 charts by age proximity + nearest weight, not exact DAEDO-published values for those exact weight classes. juniors/seniors/veterans are exact matches to DAEDO's own tables. See generate_pss_hitlevels.py's docstring for the full mapping.",
+    "pssHitLevels": {
+        "pupils_1|male": [
+            {
+                "maxWeight": 18,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 20,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 22,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 24,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 26,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 28,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 30,
+                "pssSize": 0,
+                "hitLevel": 8
+            },
+            {
+                "maxWeight": 32,
+                "pssSize": 0,
+                "hitLevel": 8
+            },
+            {
+                "maxWeight": 34,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 36,
+                "pssSize": 1,
+                "hitLevel": 10
+            },
+            {
+                "maxWeight": 38,
+                "pssSize": 1,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 2,
+                "hitLevel": 12
+            }
+        ],
+        "pupils_1|female": [
+            {
+                "maxWeight": 18,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 20,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 22,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 24,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 26,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 28,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 30,
+                "pssSize": 0,
+                "hitLevel": 8
+            },
+            {
+                "maxWeight": 32,
+                "pssSize": 0,
+                "hitLevel": 8
+            },
+            {
+                "maxWeight": 34,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 36,
+                "pssSize": 1,
+                "hitLevel": 10
+            },
+            {
+                "maxWeight": 38,
+                "pssSize": 1,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 2,
+                "hitLevel": 12
+            }
+        ],
+        "pupils_2|male": [
+            {
+                "maxWeight": 22,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 24,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 26,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 28,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 30,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 32,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 34,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 36,
+                "pssSize": 0,
+                "hitLevel": 8
+            },
+            {
+                "maxWeight": 38,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 41,
+                "pssSize": 1,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 44,
+                "pssSize": 1,
+                "hitLevel": 12
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 3,
+                "hitLevel": 15
+            }
+        ],
+        "pupils_2|female": [
+            {
+                "maxWeight": 22,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 24,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 26,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 28,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 30,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 32,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 34,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 36,
+                "pssSize": 0,
+                "hitLevel": 8
+            },
+            {
+                "maxWeight": 38,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 41,
+                "pssSize": 1,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 44,
+                "pssSize": 1,
+                "hitLevel": 12
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 3,
+                "hitLevel": 15
+            }
+        ],
+        "younger_cadets|male": [
+            {
+                "maxWeight": 26,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 28,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 30,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 32,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 34,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 36,
+                "pssSize": 0,
+                "hitLevel": 8
+            },
+            {
+                "maxWeight": 39,
+                "pssSize": 1,
+                "hitLevel": 10
+            },
+            {
+                "maxWeight": 42,
+                "pssSize": 1,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 46,
+                "pssSize": 2,
+                "hitLevel": 13
+            },
+            {
+                "maxWeight": 50,
+                "pssSize": 2,
+                "hitLevel": 14
+            },
+            {
+                "maxWeight": 55,
+                "pssSize": 2,
+                "hitLevel": 14
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 3,
+                "hitLevel": 15
+            }
+        ],
+        "younger_cadets|female": [
+            {
+                "maxWeight": 26,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 28,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 30,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 32,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 34,
+                "pssSize": 0,
+                "hitLevel": 7
+            },
+            {
+                "maxWeight": 36,
+                "pssSize": 0,
+                "hitLevel": 8
+            },
+            {
+                "maxWeight": 39,
+                "pssSize": 1,
+                "hitLevel": 10
+            },
+            {
+                "maxWeight": 42,
+                "pssSize": 1,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 46,
+                "pssSize": 2,
+                "hitLevel": 13
+            },
+            {
+                "maxWeight": 50,
+                "pssSize": 2,
+                "hitLevel": 14
+            },
+            {
+                "maxWeight": 55,
+                "pssSize": 2,
+                "hitLevel": 14
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 3,
+                "hitLevel": 15
+            }
+        ],
+        "cadets|male": [
+            {
+                "maxWeight": 33,
+                "pssSize": 0,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 37,
+                "pssSize": 0,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 41,
+                "pssSize": 0,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 45,
+                "pssSize": 0,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 49,
+                "pssSize": 1,
+                "hitLevel": 12
+            },
+            {
+                "maxWeight": 53,
+                "pssSize": 1,
+                "hitLevel": 14
+            },
+            {
+                "maxWeight": 57,
+                "pssSize": 2,
+                "hitLevel": 15
+            },
+            {
+                "maxWeight": 61,
+                "pssSize": 2,
+                "hitLevel": 17
+            },
+            {
+                "maxWeight": 65,
+                "pssSize": 3,
+                "hitLevel": 18
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 3,
+                "hitLevel": 20
+            }
+        ],
+        "cadets|female": [
+            {
+                "maxWeight": 29,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 33,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 37,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 41,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 44,
+                "pssSize": 0,
+                "hitLevel": 9
+            },
+            {
+                "maxWeight": 47,
+                "pssSize": 1,
+                "hitLevel": 11
+            },
+            {
+                "maxWeight": 51,
+                "pssSize": 1,
+                "hitLevel": 12
+            },
+            {
+                "maxWeight": 55,
+                "pssSize": 2,
+                "hitLevel": 14
+            },
+            {
+                "maxWeight": 59,
+                "pssSize": 2,
+                "hitLevel": 15
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 3,
+                "hitLevel": 18
+            }
+        ],
+        "juniors|male": [
+            {
+                "maxWeight": 45,
+                "pssSize": 1,
+                "hitLevel": 14
+            },
+            {
+                "maxWeight": 48,
+                "pssSize": 2,
+                "hitLevel": 15
+            },
+            {
+                "maxWeight": 51,
+                "pssSize": 2,
+                "hitLevel": 16
+            },
+            {
+                "maxWeight": 55,
+                "pssSize": 2,
+                "hitLevel": 17
+            },
+            {
+                "maxWeight": 59,
+                "pssSize": 3,
+                "hitLevel": 18
+            },
+            {
+                "maxWeight": 63,
+                "pssSize": 3,
+                "hitLevel": 19
+            },
+            {
+                "maxWeight": 68,
+                "pssSize": 3,
+                "hitLevel": 20
+            },
+            {
+                "maxWeight": 73,
+                "pssSize": 4,
+                "hitLevel": 21
+            },
+            {
+                "maxWeight": 78,
+                "pssSize": 4,
+                "hitLevel": 22
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 4,
+                "hitLevel": 23
+            }
+        ],
+        "juniors|female": [
+            {
+                "maxWeight": 42,
+                "pssSize": 1,
+                "hitLevel": 12
+            },
+            {
+                "maxWeight": 44,
+                "pssSize": 1,
+                "hitLevel": 12
+            },
+            {
+                "maxWeight": 46,
+                "pssSize": 1,
+                "hitLevel": 13
+            },
+            {
+                "maxWeight": 49,
+                "pssSize": 2,
+                "hitLevel": 14
+            },
+            {
+                "maxWeight": 52,
+                "pssSize": 2,
+                "hitLevel": 15
+            },
+            {
+                "maxWeight": 55,
+                "pssSize": 2,
+                "hitLevel": 16
+            },
+            {
+                "maxWeight": 59,
+                "pssSize": 3,
+                "hitLevel": 17
+            },
+            {
+                "maxWeight": 63,
+                "pssSize": 3,
+                "hitLevel": 18
+            },
+            {
+                "maxWeight": 68,
+                "pssSize": 3,
+                "hitLevel": 18
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 4,
+                "hitLevel": 20
+            }
+        ],
+        "seniors|male": [
+            {
+                "maxWeight": 54,
+                "pssSize": 2,
+                "hitLevel": 17
+            },
+            {
+                "maxWeight": 58,
+                "pssSize": 3,
+                "hitLevel": 18
+            },
+            {
+                "maxWeight": 63,
+                "pssSize": 3,
+                "hitLevel": 19
+            },
+            {
+                "maxWeight": 68,
+                "pssSize": 3,
+                "hitLevel": 20
+            },
+            {
+                "maxWeight": 74,
+                "pssSize": 4,
+                "hitLevel": 21
+            },
+            {
+                "maxWeight": 80,
+                "pssSize": 4,
+                "hitLevel": 22
+            },
+            {
+                "maxWeight": 87,
+                "pssSize": 4,
+                "hitLevel": 22
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 5,
+                "hitLevel": 23
+            }
+        ],
+        "seniors|female": [
+            {
+                "maxWeight": 46,
+                "pssSize": 2,
+                "hitLevel": 15
+            },
+            {
+                "maxWeight": 49,
+                "pssSize": 2,
+                "hitLevel": 16
+            },
+            {
+                "maxWeight": 53,
+                "pssSize": 2,
+                "hitLevel": 17
+            },
+            {
+                "maxWeight": 57,
+                "pssSize": 3,
+                "hitLevel": 18
+            },
+            {
+                "maxWeight": 62,
+                "pssSize": 3,
+                "hitLevel": 19
+            },
+            {
+                "maxWeight": 67,
+                "pssSize": 3,
+                "hitLevel": 19
+            },
+            {
+                "maxWeight": 73,
+                "pssSize": 4,
+                "hitLevel": 20
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 4,
+                "hitLevel": 21
+            }
+        ],
+        "veterans|male": [
+            {
+                "maxWeight": 54,
+                "pssSize": 2,
+                "hitLevel": 17
+            },
+            {
+                "maxWeight": 58,
+                "pssSize": 3,
+                "hitLevel": 18
+            },
+            {
+                "maxWeight": 63,
+                "pssSize": 3,
+                "hitLevel": 19
+            },
+            {
+                "maxWeight": 68,
+                "pssSize": 3,
+                "hitLevel": 20
+            },
+            {
+                "maxWeight": 74,
+                "pssSize": 4,
+                "hitLevel": 21
+            },
+            {
+                "maxWeight": 80,
+                "pssSize": 4,
+                "hitLevel": 22
+            },
+            {
+                "maxWeight": 87,
+                "pssSize": 4,
+                "hitLevel": 22
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 5,
+                "hitLevel": 23
+            }
+        ],
+        "veterans|female": [
+            {
+                "maxWeight": 46,
+                "pssSize": 2,
+                "hitLevel": 15
+            },
+            {
+                "maxWeight": 49,
+                "pssSize": 2,
+                "hitLevel": 16
+            },
+            {
+                "maxWeight": 53,
+                "pssSize": 2,
+                "hitLevel": 17
+            },
+            {
+                "maxWeight": 57,
+                "pssSize": 3,
+                "hitLevel": 18
+            },
+            {
+                "maxWeight": 62,
+                "pssSize": 3,
+                "hitLevel": 19
+            },
+            {
+                "maxWeight": 67,
+                "pssSize": 3,
+                "hitLevel": 19
+            },
+            {
+                "maxWeight": 73,
+                "pssSize": 4,
+                "hitLevel": 20
+            },
+            {
+                "maxWeight": null,
+                "pssSize": 4,
+                "hitLevel": 21
+            }
+        ]
+    }
+}

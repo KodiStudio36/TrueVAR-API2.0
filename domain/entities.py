@@ -1,6 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 @dataclass
 class Tournament:
@@ -13,7 +13,10 @@ class Tournament:
     sport: str
     discipline: str
     settings: dict
+    isRegistrationOpen: Optional[bool] = False
     status: str = "active"
+    playlistId: Optional[str] = None
+    streams: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     def toJson(self):
         return {
@@ -25,7 +28,10 @@ class Tournament:
             "dateTime": self.dateTime,
             "sport": self.sport,
             "discipline": self.discipline,
+            "isRegistrationOpen": self.isRegistrationOpen,
             "settings": self.settings,
+            "playlistId": self.playlistId,
+            "streams": self.streams,
         }
     
     def fromJson(id: str, data) -> Tournament:
@@ -38,8 +44,11 @@ class Tournament:
             dateTime=data["dateTime"],
             sport=data["sport"],
             discipline=data["discipline"],
+            isRegistrationOpen=data.get("isRegistrationOpen", False),
             settings=data["settings"],
             status=data["status"],
+            playlistId=data.get("playlistId"),
+            streams=data.get("streams", {}),
         )
 
 @dataclass

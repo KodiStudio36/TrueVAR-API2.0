@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel" style="max-width: 440px; margin: 3rem auto; padding: 2.5rem; text-align: center;">
+    <h2 style="font-size: 1.9rem; margin-bottom: 0.75rem;">Welcome to TrueVAR</h2>
+    <p class="text-muted" style="font-size: 1rem; margin-bottom: 2rem;">
+        Sign in or create an account to continue.
+    </p>
+
+    <button id="googleSignInBtn" onclick="handleGoogleSignIn()" class="btn btn-primary" style="width: 100%;">
+        Sign in with Google
+    </button>
+
+    <p id="authError" class="hidden"
+        style="color: var(--red-text); background: var(--red-bg); border-radius: 6px; padding: 0.75rem 1rem; margin-top: 1.25rem; font-size: 0.95rem; text-align: left;">
+    </p>
+</div>
+
+<!-- Firebase SDK Compat -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
+<script>
+    // Replace with your Firebase Web Config
+    const firebaseConfig = {
+        apiKey: "AIzaSyD7fEL2Ke4dO12UUSrWk48CC8I3kfMsBY0",
+        authDomain: "easytkd.firebaseapp.com",
+        databaseURL: "https://easytkd-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "easytkd",
+        storageBucket: "easytkd.firebasestorage.app",
+        messagingSenderId: "640679780677",
+        appId: "1:640679780677:web:90d03fc8a748612ce35e2c",
+        measurementId: "G-P35R9MG1RR"
+    };
+    firebase.initializeApp(firebaseConfig);
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const inviteToken = urlParams.get('token') || sessionStorage.getItem("inviteToken");
+
+    if (inviteToken) {
+        sessionStorage.setItem("inviteToken", inviteToken);
+    }
+
+    async function handleGoogleSignIn() {
+        const errEl = document.getElementById("authError");
+        errEl.classList.add("hidden");
+
+        try {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            const result = await firebase.auth().signInWithPopup(provider);
+            const idToken = await result.user.getIdToken();
+
+            sessionStorage.setItem("authToken", idToken);
+
+            const tokenToSubmit = sessionStorage.getItem("inviteToken");
+
+            const response = await fetch("/api/auth/google", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    idToken: idToken,
+                    inviteToken: tokenToSubmit || null
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Clear the invite token after successful use
+                sessionStorage.removeItem("inviteToken");
+                window.location.href = data.redirectUrl;
+            } else {
+                throw new Error(data.detail || "Authentication failed.");
+            }
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.classList.remove("hidden");
+        }
+    }
+</script>
+{% endblock %}

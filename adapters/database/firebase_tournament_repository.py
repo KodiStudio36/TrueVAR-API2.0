@@ -13,8 +13,14 @@ class FirebaseTournamentRepository(TournamentPort):
         self.db = db
         self.collection = self.db.collection("tournaments")
 
-    def createTournament(self, tournament: Tournament) -> None:
-        self.collection.add(tournament.toJson())
+    def createTournament(self, tournament: Tournament) -> Tournament:
+        # Generates a new auto-id reference before writing
+        doc_ref = self.collection.document()
+        tournament.id = doc_ref.id
+        
+        # Write to Firestore
+        doc_ref.set(tournament.toJson())
+        return tournament
 
     def updateTournament(self, tournament: Tournament) -> None:
         doc_ref = self.collection.document(tournament.id)

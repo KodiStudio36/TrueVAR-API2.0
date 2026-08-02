@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "dashboard/base.html" %}
 {% block content %}
 
 {# ── Flash banner (driven by ?msg= query param) ─────────────────────────────── #}
@@ -198,6 +198,37 @@
         </form>
 
     </div>{# /card-panel #}
+
+    {# ═══════════════════════════════════════════════════════════════════════════
+    REGISTRATION / CATEGORIES CARD (only shown when this tournament uses our own
+    registration system — many tournaments are run externally and never open
+    registration here at all)
+    ═══════════════════════════════════════════════════════════════════════════ #}
+    {% if tournament.isRegistrationOpen %}
+    <div class="card-panel">
+        <div class="panel-header" style="margin-bottom:1rem">
+            <div class="panel-title-group">
+                <span class="panel-eyebrow">Registration</span>
+                <h2 class="panel-title" style="font-size:1.4rem">Categories &amp; Entries</h2>
+            </div>
+            <span class="badge badge-green">Open</span>
+        </div>
+        <p class="text-muted" style="margin-bottom:1.25rem;">
+            Club admins register athletes into categories through the public registration system.
+            Before generating brackets, finalize the field here — move any entry between categories
+            with no eligibility checks, since this is a staff tool rather than the club-facing form.
+        </p>
+        <a href="/dashboard/tournaments/{{ tournament.id }}/categories" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+            </svg>
+            Manage Categories
+        </a>
+    </div>
+    {% endif %}
 
     {# ═══════════════════════════════════════════════════════════════════════════
     YOUTUBE STREAMING CARD (only shown if isStream is enabled)
