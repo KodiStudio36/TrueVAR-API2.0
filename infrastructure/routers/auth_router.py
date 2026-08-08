@@ -238,8 +238,7 @@ async def main_page(
     tournament_repo=Depends(get_tournament_repo),
 ):
     """Renders main dashboard with tournaments."""
-    tournament_use_case = GetAllTournamentsUseCase(tournament_repo)
-    tournaments = tournament_repo.getTournamentsPaginated(status="active", limit=10, offset=0)
+    tournaments = tournament_repo.getTournamentsPaginated(status="active", limit=10, offset=0, isExternalPublic=True)
 
     return templates.TemplateResponse(request, "main.html", {
         "request": request,
@@ -282,11 +281,23 @@ async def tournament_detail_page(
     })
 
 @router.get("/athletes/new")
-async def create_athlete_page(request: Request, user: Optional[dict] = Depends(get_current_user)):
-    """Serves the athlete creation form."""
+async def render_create_athlete_page(
+    request: Request,
+    user: Optional[dict] = Depends(get_current_user)
+):
     admin_club_id = get_admin_club_id(user)
-    if not admin_club_id:
-        # Redirect non-admins or unauthenticated users to login or dashboard
-        return RedirectResponse(url="/", status_code=303)
-        
-    return templates.TemplateResponse(request, "create_athlete.html", {"request": request, "user": user})
+    club_country = ""
+    club_sport = ""
+
+    if admin_club_id:
+        club_doc = db.collection("clubs").document(admin_club_id).get()
+        if club_doc.exists:
+            data = club_doc.to_dict()
+            club_country = data.get("country", "").upper()
+            club_sport = data.get("sport", "").lower()
+
+    return templates.TemplateResponse(request, "create_athlete.html", {
+        "request": request,
+        "club_country": club_country,
+        "club_sport": club_sport
+    })

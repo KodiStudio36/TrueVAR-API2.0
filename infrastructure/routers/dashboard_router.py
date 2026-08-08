@@ -3,7 +3,7 @@ from fastapi.templating import Jinja2Templates
 
 from infrastructure.routers.api_router import get_case_repo
 from usecases.case_usecase import GetAllCasesUseCase
-from usecases.tournament_usecase import GetAllTournamentsUseCase, GetTournamentUseCase
+from usecases.tournament_usecase import GetTournamentUseCase
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
 from infrastructure.firebase_client import init_firestore
 
@@ -22,7 +22,6 @@ async def dashboard_page(
 ):
     """Renders the main dashboard with all tournaments and cases."""
     # Fetch Tournaments
-    tournament_use_case = GetAllTournamentsUseCase(tournament_repo)
     tournaments = tournament_repo.getTournamentsPaginated(status="active", limit=10, offset=0)
     
     # Fetch Cases
@@ -98,6 +97,33 @@ async def bracket_builder_page(request: Request, tournament_id: str, repo=Depend
     return templates.TemplateResponse(
         request,
         "dashboard/bracket_builder.html",
+        {"request": request, "tournament": tournament}
+    )
+
+@router.get("/tournaments/{tournament_id}/live")
+async def live_queue_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
+    """
+    Realtime match-queue admin console for a running tournament: every
+    court's running order top-to-bottom, drag-and-drop reorder/re-court,
+    ad hoc match insertion between two existing matches, and live
+    pending/ready/done status via the Firestore client SDK — not
+    polling. See dashboard/live_queue.html and, in api_router.py, the
+    /tournaments/{id}/courts, /firebase-client-config,
+    /matches/.../position, /matches/.../status and
+    /tournaments/{id}/matches/insert endpoints this page talks to.
+
+    See tournament_detail.html's "Live Match Queue" card for where this
+    is linked from.
+    """
+    use_case = GetTournamentUseCase(repo)
+    tournament = use_case.execute(tournament_id)
+
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/live_queue.html",
         {"request": request, "tournament": tournament}
     )
 

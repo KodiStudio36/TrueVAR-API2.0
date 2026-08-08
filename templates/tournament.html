@@ -416,6 +416,9 @@
     // the full composed category label ("Seniors Male -68kg", never a
     // bare "-68kg") — pulled from the roster doc's `members` list, not
     // just a count.
+    // In templates/tournament.html
+
+    // 1. Update renderDivisionBody to include the trash icon next to the Edit button
     function renderDivisionBody(entryTypeCode, division) {
         const bodyEl = document.getElementById(`divisionBody_${entryTypeCode}_${division.code}`);
         if (!bodyEl) return;
@@ -427,7 +430,7 @@
             g.weightCats.forEach(c => {
                 const fullCode = `${entryTypeCode}_${c.code}`;
                 const entries = roster[fullCode];
-                if (!entries || Object.keys(entries).length === 0) return; // hide brackets nobody's registered in
+                if (!entries || Object.keys(entries).length === 0) return;
 
                 const fullLabel = c.label ? `${division.label} ${g.label} ${c.label}` : `${division.label} ${g.label}`;
 
@@ -435,43 +438,86 @@
                     const members = entry.members || [];
                     const namesHtml = members.map(m => {
                         const flag = countryFlagEmoji(m.country);
-                        const rankLabel = formatRank(m.rank); // rank omitted entirely by the backend for sports with no rank concept
+                        const rankLabel = formatRank(m.rank);
                         return `${flag ? flag + " " : ""}${escapeHtml(m.name)}${rankLabel ? ` <span class="text-muted">(${escapeHtml(rankLabel)})</span>` : ""}`;
                     }).join(" &amp; ");
                     const club = members[0] ? members[0].club : "";
-                    // Edit is only offered when the viewing admin runs the
-                    // SAME club this entry is from — server re-checks this
-                    // on every write, this is just hiding a button that
-                    // would 403 anyway.
                     const entryClubId = members[0] ? members[0].clubId : null;
                     const athleteIdsCsv = members.map(m => m.athleteId).join(",");
                     const canEdit = IS_CLUB_ADMIN && ADMIN_CLUB_ID && entryClubId === ADMIN_CLUB_ID;
-                    const editBtn = canEdit ? `
+
+                    const actionBtns = canEdit ? `
+                    <div style="display: flex; gap: 0.35rem; align-items: center;">
                         <button type="button"
                             onclick="openEditRegistration('${entryTypeCode}', '${division.code}', '${fullCode}', '${athleteIdsCsv}')"
                             style="background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.15rem 0.6rem; font-size: 0.78rem; cursor: pointer;">
                             Edit
                         </button>
-                    ` : "";
+                        <button type="button"
+                            title="Remove registration"
+                            onclick="removeRegistration('${entryTypeCode}', '${division.code}', '${fullCode}', '${entryId}')"
+                            style="background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.15rem 0.45rem; font-size: 0.78rem; cursor: pointer; color: #dc2626; display: inline-flex; align-items: center; justify-content: center;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                <line x1="10" y1="11" x2="10" y2="17"></line>
+                                <line x1="14" y1="11" x2="14" y2="17"></line>
+                            </svg>
+                        </button>
+                    </div>
+                ` : "";
 
                     return `
-                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.3rem 0; font-size: 0.88rem;">
-                            <span>${namesHtml}${club ? ` <span class="text-muted">· ${escapeHtml(club)}</span>` : ""}</span>
-                            ${editBtn}
-                        </div>
-                    `;
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.3rem 0; font-size: 0.88rem;">
+                        <span>${namesHtml}${club ? ` <span class="text-muted">· ${escapeHtml(club)}</span>` : ""}</span>
+                        ${actionBtns}
+                    </div>
+                `;
                 }).join("");
 
                 html += `
-                    <div style="margin-top: 0.75rem;">
-                        <div style="font-weight: 600; font-size: 0.88rem;">${escapeHtml(fullLabel)}</div>
-                        <div style="margin-left: 0.5rem;">${rowsHtml}</div>
-                    </div>
-                `;
+                <div style="margin-top: 0.75rem;">
+                    <div style="font-weight: 600; font-size: 0.88rem;">${escapeHtml(fullLabel)}</div>
+                    <div style="margin-left: 0.5rem;">${rowsHtml}</div>
+                </div>
+            `;
             });
         });
 
         bodyEl.innerHTML = html || `<p class="text-muted" style="font-size: 0.85rem;">No athletes registered in this division yet.</p>`;
+    }
+
+    // 2. Add function to handle registration removal
+    async function removeRegistration(entryTypeCode, ageCode, categoryCode, entryId) {
+        if (!IS_CLUB_ADMIN) return;
+
+        if (!confirm("Are you sure you want to remove this athlete from registration?")) {
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/registrations/${categoryCode}/${entryId}?age_code=${ageCode}`, {
+                method: "DELETE",
+            });
+
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `Remove failed (${res.status})`);
+            }
+
+            // Optimistically update counts and totals
+            categoryCounts[categoryCode] = Math.max(0, (categoryCounts[categoryCode] || 1) - 1);
+            totalRegistered = Math.max(0, totalRegistered - 1);
+            document.getElementById("slotCount").textContent = totalRegistered;
+
+            // Invalidate division roster cache and re-render
+            delete divisionRosterCache[ageCode];
+            renderCategories();
+            await loadDivisionRoster(entryTypeCode, ageCode);
+        } catch (err) {
+            console.error("Remove registration failed", err);
+            alert(err.message || "Failed to remove registration.");
+        }
     }
 
     // ── REGISTRATION MODAL ─────────────────────────────────────────

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Create Club — TrueVAR{% endblock %}
+
+{% block content %}
+<div style="max-width: 560px; margin: 2rem auto;">
+    <a href="/settings" class="text-muted" style="font-size: 0.95rem; text-decoration: none;">&larr; Back to
+        settings</a>
+
+    <div class="panel" style="padding: 2.5rem; margin-top: 1rem;">
+        <h2 style="margin-bottom: 0.5rem;">Create Your Club</h2>
+        <p class="text-muted" style="margin-bottom: 2rem;">
+            You'll become the admin of this club, letting you add athletes and register them for tournaments.
+        </p>
+
+        <form id="createClubForm" onsubmit="submitClub(event)"
+            style="display: flex; flex-direction: column; gap: 1.25rem;">
+
+            <div>
+                <label class="field-label" for="c_name">Club Name</label>
+                <input type="text" id="c_name" placeholder="e.g. Black Tiger Taekwondo" required>
+            </div>
+
+            <div>
+                <label class="field-label" for="c_sport_select">Sport</label>
+                <select id="c_sport_select" required
+                    style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid #ccc;">
+                    <option value="" disabled selected>Select Sport...</option>
+                    <option value="taekwondo">Taekwondo</option>
+                    <option value="box">Box</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="field-label" for="c_state_select">Country / State Region</label>
+                <select id="c_state_select" required
+                    style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid #ccc;">
+                    <option value="" disabled selected>Select Country/State...</option>
+                    <option value="SVK">Slovakia (SVK)</option>
+                    <option value="CZE">Czech Republic (CZE)</option>
+                    <option value="AUT">Austria (AUT)</option>
+                    <option value="POL">Poland (POL)</option>
+                    <option value="DEU">Germany (DEU)</option>
+                    <option value="USA">United States (USA)</option>
+                    <option value="GBR">United Kingdom (GBR)</option>
+                    <option value="UKR">Ukraine (UKR)</option>
+                    <option value="HUN">Hungary (HUN)</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="field-label" for="c_city">State / City Working With</label>
+                <input type="text" id="c_city" placeholder="e.g. Snina" required>
+            </div>
+
+            <div style="margin-top: 1rem;">
+                <button type="submit" id="submitBtn" class="btn btn-primary" style="width: 100%;">Create Club</button>
+            </div>
+
+            <p id="formMsg" class="hidden"
+                style="border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.95rem; margin: 0; text-align: center;">
+            </p>
+        </form>
+    </div>
+</div>
+
+<script>
+    async function submitClub(event) {
+        event.preventDefault();
+
+        const submitBtn = document.getElementById("submitBtn");
+        const msg = document.getElementById("formMsg");
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating...";
+        msg.classList.add("hidden");
+
+        const payload = {
+            name: document.getElementById("c_name").value.trim(),
+            sport: document.getElementById("c_sport_select").value,
+            state: document.getElementById("c_state_select").value,
+            city: document.getElementById("c_city").value.trim()
+        };
+
+        try {
+            const res = await fetch("/api/clubs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const body = await res.json();
+                throw new Error(body.detail || "Failed to create club");
+            }
+
+            msg.textContent = "Club created! Taking you to your dashboard...";
+            msg.style.background = "var(--blue-bg)";
+            msg.style.color = "var(--blue-text)";
+            msg.classList.remove("hidden");
+
+            setTimeout(() => {
+                window.location.href = "/clubs/mine";
+            }, 900);
+
+        } catch (err) {
+            msg.textContent = err.message;
+            msg.style.background = "#fee2e2";
+            msg.style.color = "#b91c1c";
+            msg.classList.remove("hidden");
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Create Club";
+        }
+    }
+</script>
+{% endblock %}

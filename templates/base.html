@@ -94,12 +94,29 @@
 
         /* ── NAVBAR ─────────────────────────────────────────── */
         .navbar {
+            position: sticky;
+            top: 0;
+            z-index: 40;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 1.1rem 2rem;
-            background-color: var(--surface);
+            padding: 1rem 2rem;
+            background-color: rgba(255, 255, 255, 0.88);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             border-bottom: 1px solid var(--border);
+        }
+
+        .navbar::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: -1px;
+            height: 2px;
+            background: linear-gradient(90deg, var(--navy) 0%, rgba(28, 61, 107, 0) 55%);
+            opacity: 0.55;
+            pointer-events: none;
         }
 
         .brand-logo {
@@ -109,6 +126,11 @@
             text-decoration: none;
             color: var(--ink);
             letter-spacing: -0.01em;
+            transition: color 0.15s ease;
+        }
+
+        .brand-logo:hover {
+            color: var(--navy);
         }
 
         .nav-right {
@@ -117,13 +139,47 @@
             gap: 1.5rem;
         }
 
-        .user-chip {
+        /* Whole chip is now a link into Settings */
+        .profile-link {
             display: flex;
             align-items: center;
             gap: 0.65rem;
-            font-size: 0.95rem;
-            font-weight: 500;
+            text-decoration: none;
             color: var(--text);
+            padding: 0.35rem 0.6rem 0.35rem 0.4rem;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .profile-link:hover,
+        .profile-link:focus-visible {
+            background-color: var(--page-bg);
+            border-color: var(--border);
+        }
+
+        .profile-link:hover .user-avatar {
+            box-shadow: 0 0 0 3px var(--blue-bg);
+        }
+
+        .user-chip-text {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.15;
+        }
+
+        .user-chip-name {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        .user-chip-sub {
+            font-size: 0.76rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
         }
 
         .user-avatar {
@@ -132,6 +188,12 @@
             border-radius: 50%;
             object-fit: cover;
             border: 1px solid var(--border-strong);
+            transition: box-shadow 0.15s ease;
+        }
+
+        .profile-chevron {
+            color: var(--text-muted);
+            flex-shrink: 0;
         }
 
         .btn-login {
@@ -276,6 +338,10 @@
                 padding: 1rem;
             }
 
+            .user-chip-text {
+                display: none;
+            }
+
             body {
                 font-size: 16px;
             }
@@ -294,11 +360,18 @@
 
         <div class="nav-right">
             {% if user %}
-            <div class="user-chip">
-                <span>{{ user.firstname }}</span>
+            <a href="/settings" class="profile-link" aria-label="Open account settings">
                 <img src="{{ user.photoUrl }}" alt="" class="user-avatar" referrerpolicy="no-referrer">
-            </div>
-            <a href="/logout" class="btn-logout">Log out</a>
+                <span class="user-chip-text">
+                    <span class="user-chip-name">{{ user.firstname }}</span>
+                    <span class="user-chip-sub">Settings</span>
+                </span>
+                <svg class="profile-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"
+                    xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                </svg>
+            </a>
             {% else %}
             <a href="/login" class="btn-login">Log in</a>
             {% endif %}

@@ -200,6 +200,38 @@
     </div>{# /card-panel #}
 
     {# ═══════════════════════════════════════════════════════════════════════════
+    LIVE MATCH QUEUE CARD — the realtime, court-by-court running-order admin
+    console. Always shown (read-only value even before brackets exist, e.g. to
+    preview an empty queue), but the "Manage" framing only makes sense once
+    brackets have been pushed via bracket_builder.html's commit step.
+    ═══════════════════════════════════════════════════════════════════════════ #}
+    <div class="card-panel">
+        <div class="panel-header" style="margin-bottom:1rem">
+            <div class="panel-title-group">
+                <span class="panel-eyebrow">Live</span>
+                <h2 class="panel-title" style="font-size:1.4rem">Match Queue</h2>
+            </div>
+            {% if tournament.status != 'archived' %}
+            <span class="badge badge-green">Live</span>
+            {% else %}
+            <span class="badge badge-grey">Archived</span>
+            {% endif %}
+        </div>
+        <p class="text-muted" style="margin-bottom:1.25rem;">
+            Court-by-court running order with realtime pending/ready/done status,
+            drag-and-drop reordering, and ad hoc match insertion — for the staff
+            running the tournament floor once brackets are pushed.
+        </p>
+        <a href="/dashboard/tournaments/{{ tournament.id }}/live" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 6v6l4 2" />
+            </svg>
+            Open Live Queue
+        </a>
+    </div>
+
+    {# ═══════════════════════════════════════════════════════════════════════════
     REGISTRATION / CATEGORIES CARD (only shown when this tournament uses our own
     registration system — many tournaments are run externally and never open
     registration here at all)

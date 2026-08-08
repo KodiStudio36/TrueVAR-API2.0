@@ -1,0 +1,1591 @@
+{% extends "dashboard/base.html" %}
+{% block content %}
+
+<div class="lq-wrapper">
+
+    {# ═══════════════════════════════════════════════════════════════════════
+    HEADER
+    ═══════════════════════════════════════════════════════════════════════ #}
+    <div class="lq-header">
+        <div>
+            <a href="/dashboard/tournaments/{{ tournament.id }}" class="lq-back">&larr; {{ tournament.title }}</a>
+            <h1 class="lq-title">Live Match Queue</h1>
+        </div>
+        <div class="lq-conn" id="conn-indicator">
+            <span class="lq-conn-dot"></span>
+            <span id="conn-text">Connecting…</span>
+        </div>
+    </div>
+
+    {# ═══════════════════════════════════════════════════════════════════════
+    COURT TABS
+    ═══════════════════════════════════════════════════════════════════════ #}
+    <div class="lq-courts" id="court-tabs">
+        <div class="lq-court-skeleton">Loading courts…</div>
+    </div>
+
+    {# ═══════════════════════════════════════════════════════════════════════
+    TOOLBAR
+    ═══════════════════════════════════════════════════════════════════════ #}
+    <div class="lq-toolbar">
+        <input id="search-box" type="search" placeholder="Filter loaded matches by athlete, club or category…"
+            class="lq-search">
+        <div class="lq-toolbar-hint">Hover the gap between two fights to insert one. Drag the ⠿ handle to reorder or
+            drop onto another court tab to re-court.</div>
+    </div>
+
+    {# ═══════════════════════════════════════════════════════════════════════
+    QUEUE LIST
+    ═══════════════════════════════════════════════════════════════════════ #}
+    <div class="lq-list-panel">
+        <div id="queue-list" class="lq-list"></div>
+        <div id="queue-empty" class="lq-empty hidden">No matches on this court yet.</div>
+        <div id="queue-sentinel" class="lq-sentinel"><span id="sentinel-text" class="hidden">Loading more…</span></div>
+    </div>
+
+</div>{# /lq-wrapper #}
+
+{# ═══════════════════════════════════════════════════════════════════════
+MATCH DETAIL MODAL
+═══════════════════════════════════════════════════════════════════════ #}
+<div id="detail-modal" class="lq-modal-overlay hidden" onclick="if(event.target===this) closeDetailModal()">
+    <div class="lq-modal">
+        <div class="lq-modal-header">
+            <h3 id="detail-title">Match</h3>
+            <button class="lq-modal-close" onclick="closeDetailModal()">&times;</button>
+        </div>
+        <div id="detail-body" class="lq-modal-body"></div>
+    </div>
+</div>
+
+{# ═══════════════════════════════════════════════════════════════════════
+INSERT MATCH MODAL
+═══════════════════════════════════════════════════════════════════════ #}
+<div id="insert-modal" class="lq-modal-overlay hidden" onclick="if(event.target===this) closeInsertModal()">
+    <div class="lq-modal">
+        <div class="lq-modal-header">
+            <h3>Insert Match</h3>
+            <button class="lq-modal-close" onclick="closeInsertModal()">&times;</button>
+        </div>
+        <div class="lq-modal-body">
+            <p class="lq-insert-hint" id="insert-position-hint"></p>
+
+            <div class="lq-form-field">
+                <label>Category</label>
+                <select id="insert-category"></select>
+                <div id="insert-category-custom" class="hidden lq-custom-category">
+                    <input id="insert-category-code" type="text" placeholder="categoryCode e.g. exhibition_open"
+                        class="lq-text-input">
+                    <input id="insert-category-label" type="text" placeholder="Label e.g. Exhibition · Open"
+                        class="lq-text-input">
+                </div>
+            </div>
+
+            <div class="lq-form-field">
+                <label class="lq-checkbox-label">
+                    <input type="checkbox" id="insert-ranked" checked>
+                    <span>Official / ranked bout (counts toward standings)</span>
+                </label>
+            </div>
+
+            <div class="lq-corners">
+                <div class="lq-corner lq-corner-blue">
+                    <label>Blue Corner</label>
+                    <input type="search" id="search-blue" placeholder="Search athlete…" class="lq-text-input">
+                    <div id="results-blue" class="lq-athlete-results"></div>
+                    <div id="picked-blue" class="lq-picked-athletes"></div>
+                </div>
+                <div class="lq-corner lq-corner-red">
+                    <label>Red Corner</label>
+                    <input type="search" id="search-red" placeholder="Search athlete…" class="lq-text-input">
+                    <div id="results-red" class="lq-athlete-results"></div>
+                    <div id="picked-red" class="lq-picked-athletes"></div>
+                </div>
+            </div>
+
+            <div id="insert-error" class="lq-alert-error hidden"></div>
+
+            <div class="lq-modal-actions">
+                <button class="btn btn-primary" id="insert-submit-btn" onclick="submitInsertMatch()">Create
+                    Match</button>
+                <button class="btn btn-ghost" onclick="closeInsertModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+{# ═══════════════════════════════════════════════════════════════════════
+STYLES
+═══════════════════════════════════════════════════════════════════════ #}
+<style>
+    :root {
+        --lq-surface: #ffffff;
+        --lq-border: #e2e8f0;
+        --lq-muted: #64748b;
+        --lq-text: #0f172a;
+        --lq-accent: #4f46e5;
+        --lq-blue: #2563eb;
+        --lq-red: #dc2626;
+        --lq-green: #16a34a;
+        --lq-amber: #d97706;
+        --lq-radius: 12px;
+    }
+
+    .lq-wrapper {
+        max-width: 980px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .lq-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+    }
+
+    .lq-back {
+        font-size: .8rem;
+        color: var(--lq-muted);
+        text-decoration: none;
+        font-weight: 600;
+    }
+
+    .lq-back:hover {
+        color: var(--lq-text);
+    }
+
+    .lq-title {
+        margin: .25rem 0 0;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--lq-text);
+    }
+
+    .lq-conn {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        font-size: .78rem;
+        font-weight: 700;
+        color: var(--lq-muted);
+    }
+
+    .lq-conn-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #cbd5e1;
+    }
+
+    .lq-conn.live .lq-conn-dot {
+        background: var(--lq-green);
+        animation: lq-pulse 1.5s infinite;
+    }
+
+    .lq-conn.live {
+        color: var(--lq-green);
+    }
+
+    .lq-conn.error .lq-conn-dot {
+        background: var(--lq-red);
+    }
+
+    .lq-conn.error {
+        color: var(--lq-red);
+    }
+
+    @keyframes lq-pulse {
+
+        0%,
+        100% {
+            opacity: 1;
+        }
+
+        50% {
+            opacity: .35;
+        }
+    }
+
+    /* ── Court tabs ─────────────────────────────────────────────── */
+    .lq-courts {
+        display: flex;
+        gap: .5rem;
+        overflow-x: auto;
+        padding-bottom: .25rem;
+    }
+
+    .lq-court-skeleton,
+    .lq-court-tab-empty {
+        font-size: .85rem;
+        color: var(--lq-muted);
+        padding: .5rem 0;
+    }
+
+    .lq-court-tab {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        gap: .15rem;
+        padding: .6rem 1rem;
+        border-radius: var(--lq-radius);
+        border: 1px solid var(--lq-border);
+        background: var(--lq-surface);
+        cursor: pointer;
+        min-width: 130px;
+        transition: border-color .15s, box-shadow .15s;
+    }
+
+    .lq-court-tab:hover {
+        border-color: var(--lq-accent);
+    }
+
+    .lq-court-tab.active {
+        border-color: var(--lq-accent);
+        box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
+    }
+
+    .lq-court-tab.drag-over {
+        border-color: var(--lq-green);
+        box-shadow: 0 0 0 3px rgba(22, 163, 74, .18);
+    }
+
+    .lq-court-tab-name {
+        font-size: .85rem;
+        font-weight: 700;
+        color: var(--lq-text);
+    }
+
+    .lq-court-tab-meta {
+        font-size: .7rem;
+        color: var(--lq-muted);
+    }
+
+    .lq-court-tab-next {
+        font-size: .68rem;
+        color: var(--lq-accent);
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 160px;
+    }
+
+    /* ── Toolbar ────────────────────────────────────────────────── */
+    .lq-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .lq-search {
+        flex: 1;
+        min-width: 220px;
+        padding: .55rem .8rem;
+        border: 1px solid var(--lq-border);
+        border-radius: 8px;
+        font-size: .85rem;
+        outline: none;
+    }
+
+    .lq-search:focus {
+        border-color: var(--lq-accent);
+    }
+
+    .lq-toolbar-hint {
+        font-size: .75rem;
+        color: var(--lq-muted);
+    }
+
+    /* ── List panel ─────────────────────────────────────────────── */
+    .lq-list-panel {
+        background: var(--lq-surface);
+        border: 1px solid var(--lq-border);
+        border-radius: var(--lq-radius);
+        padding: 1rem;
+    }
+
+    .lq-list {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .lq-empty {
+        text-align: center;
+        color: var(--lq-muted);
+        font-size: .9rem;
+        padding: 2rem 0;
+    }
+
+    .lq-sentinel {
+        text-align: center;
+        padding: .75rem 0;
+        color: var(--lq-muted);
+        font-size: .8rem;
+    }
+
+    /* ── Gap / insert affordance ────────────────────────────────── */
+    .lq-gap {
+        position: relative;
+        height: 14px;
+    }
+
+    .lq-gap.dragging-over {
+        height: 34px;
+        background: rgba(79, 70, 229, .08);
+        border-radius: 6px;
+    }
+
+    .lq-gap-btn {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(.6);
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--lq-accent);
+        color: #fff;
+        border: none;
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity .12s, transform .12s;
+    }
+
+    .lq-gap:hover .lq-gap-btn {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    /* ── Match row ──────────────────────────────────────────────── */
+    .lq-row {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        padding: .75rem .6rem;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: background .12s, border-color .12s;
+    }
+
+    .lq-row:hover {
+        background: #f8fafc;
+        border-color: var(--lq-border);
+    }
+
+    .lq-row.next-up {
+        background: #eef2ff;
+        border-color: var(--lq-accent);
+    }
+
+    .lq-row.dragging {
+        opacity: .35;
+    }
+
+    .lq-drag-handle {
+        cursor: grab;
+        color: #cbd5e1;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+        padding: 0 .1rem;
+        user-select: none;
+    }
+
+    .lq-drag-handle:active {
+        cursor: grabbing;
+    }
+
+    .lq-row-number {
+        flex-shrink: 0;
+        width: 56px;
+        font-family: 'Courier New', monospace;
+        font-size: .8rem;
+        color: var(--lq-muted);
+        font-weight: 700;
+    }
+
+    .lq-row-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: .15rem;
+    }
+
+    .lq-row-corners {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        font-size: .88rem;
+        font-weight: 600;
+        color: var(--lq-text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .lq-corner-name.blue {
+        color: var(--lq-blue);
+    }
+
+    .lq-corner-name.red {
+        color: var(--lq-red);
+    }
+
+    .lq-vs {
+        color: var(--lq-muted);
+        font-weight: 400;
+        font-size: .78rem;
+    }
+
+    .lq-row-meta {
+        font-size: .72rem;
+        color: var(--lq-muted);
+    }
+
+    .lq-unranked-flag {
+        font-size: .65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--lq-amber);
+    }
+
+    .lq-status-pill {
+        flex-shrink: 0;
+        font-size: .68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        padding: .25rem .6rem;
+        border-radius: 99px;
+    }
+
+    .lq-status-pending {
+        background: #f1f5f9;
+        color: var(--lq-muted);
+    }
+
+    .lq-status-ready {
+        background: #dbeafe;
+        color: var(--lq-blue);
+    }
+
+    .lq-status-done {
+        background: #dcfce7;
+        color: var(--lq-green);
+    }
+
+    .lq-status-walkover {
+        background: #ffedd5;
+        color: var(--lq-amber);
+    }
+
+    .lq-next-badge {
+        flex-shrink: 0;
+        font-size: .65rem;
+        font-weight: 800;
+        letter-spacing: .06em;
+        background: var(--lq-accent);
+        color: #fff;
+        padding: .25rem .5rem;
+        border-radius: 6px;
+    }
+
+    /* ── Row print button ───────────────────────────────────────── */
+    .lq-print-btn {
+        flex-shrink: 0;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--lq-border);
+        background: #fff;
+        border-radius: 8px;
+        font-size: .85rem;
+        cursor: pointer;
+        transition: background .12s, border-color .12s, transform .1s;
+    }
+
+    .lq-print-btn:hover {
+        background: #eef2ff;
+        border-color: var(--lq-accent);
+    }
+
+    .lq-print-btn:active {
+        transform: scale(.93);
+    }
+
+    .lq-print-btn:disabled {
+        opacity: .5;
+        cursor: wait;
+    }
+
+    .lq-print-btn.done-flash {
+        background: var(--lq-green);
+        border-color: var(--lq-green);
+        color: #fff;
+    }
+
+    /* ── Modals ─────────────────────────────────────────────────── */
+    .lq-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, .45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        padding: 1rem;
+    }
+
+    .lq-modal {
+        background: #fff;
+        border-radius: 14px;
+        width: 100%;
+        max-width: 560px;
+        max-height: 88vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+    }
+
+    .lq-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1.25rem 1.5rem;
+        border-bottom: 1px solid var(--lq-border);
+    }
+
+    .lq-modal-header h3 {
+        margin: 0;
+        font-size: 1.1rem;
+    }
+
+    .lq-modal-close {
+        border: none;
+        background: none;
+        font-size: 1.4rem;
+        line-height: 1;
+        cursor: pointer;
+        color: var(--lq-muted);
+    }
+
+    .lq-modal-body {
+        padding: 1.5rem;
+    }
+
+    .lq-modal-actions {
+        display: flex;
+        gap: .6rem;
+        margin-top: 1.25rem;
+    }
+
+    .lq-detail-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .lq-detail-cell dt {
+        font-size: .68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        color: var(--lq-muted);
+        margin-bottom: .2rem;
+    }
+
+    .lq-detail-cell dd {
+        margin: 0;
+        font-size: .9rem;
+        color: var(--lq-text);
+    }
+
+    .lq-detail-corner {
+        border: 1px solid var(--lq-border);
+        border-radius: 10px;
+        padding: .85rem 1rem;
+        margin-bottom: .6rem;
+    }
+
+    .lq-detail-corner.blue {
+        border-left: 4px solid var(--lq-blue);
+    }
+
+    .lq-detail-corner.red {
+        border-left: 4px solid var(--lq-red);
+    }
+
+    .lq-action-row {
+        display: flex;
+        gap: .5rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--lq-border);
+    }
+
+    .lq-form-field {
+        margin-bottom: 1rem;
+    }
+
+    .lq-form-field label {
+        display: block;
+        font-size: .75rem;
+        font-weight: 700;
+        color: var(--lq-muted);
+        margin-bottom: .3rem;
+    }
+
+    .lq-text-input,
+    select {
+        width: 100%;
+        padding: .55rem .7rem;
+        border: 1px solid var(--lq-border);
+        border-radius: 8px;
+        font-size: .87rem;
+        outline: none;
+        box-sizing: border-box;
+    }
+
+    .lq-custom-category {
+        display: flex;
+        gap: .5rem;
+        margin-top: .5rem;
+    }
+
+    .lq-checkbox-label {
+        display: flex !important;
+        align-items: center;
+        gap: .5rem;
+        font-size: .85rem;
+        font-weight: 500 !important;
+        cursor: pointer;
+    }
+
+    .lq-corners {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+
+    .lq-corner label {
+        display: block;
+        font-size: .72rem;
+        font-weight: 700;
+        margin-bottom: .3rem;
+    }
+
+    .lq-corner-blue label {
+        color: var(--lq-blue);
+    }
+
+    .lq-corner-red label {
+        color: var(--lq-red);
+    }
+
+    .lq-athlete-results {
+        border: 1px solid var(--lq-border);
+        border-radius: 8px;
+        margin-top: .3rem;
+        max-height: 140px;
+        overflow-y: auto;
+    }
+
+    .lq-athlete-results:empty {
+        border: none;
+    }
+
+    .lq-athlete-result-item {
+        padding: .45rem .6rem;
+        font-size: .8rem;
+        cursor: pointer;
+        border-bottom: 1px solid #f1f5f9;
+    }
+
+    .lq-athlete-result-item:last-child {
+        border-bottom: none;
+    }
+
+    .lq-athlete-result-item:hover {
+        background: #f8fafc;
+    }
+
+    .lq-picked-athletes {
+        display: flex;
+        flex-direction: column;
+        gap: .3rem;
+        margin-top: .5rem;
+    }
+
+    .lq-picked-chip {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #f1f5f9;
+        border-radius: 6px;
+        padding: .3rem .55rem;
+        font-size: .8rem;
+    }
+
+    .lq-picked-chip button {
+        border: none;
+        background: none;
+        color: var(--lq-muted);
+        cursor: pointer;
+        font-size: .95rem;
+    }
+
+    .lq-insert-hint {
+        font-size: .78rem;
+        color: var(--lq-muted);
+        margin: 0 0 1rem;
+    }
+
+    .lq-alert-error {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fca5a5;
+        padding: .6rem .8rem;
+        border-radius: 8px;
+        font-size: .82rem;
+        margin-bottom: 1rem;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .5rem 1rem;
+        border-radius: 8px;
+        font-size: .85rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+    }
+
+    .btn-primary {
+        background: var(--lq-accent);
+        color: #fff;
+    }
+
+    .btn-primary:hover {
+        background: #4338ca;
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--lq-muted);
+        border: 1px solid var(--lq-border);
+    }
+
+    .btn-ghost:hover {
+        background: #f8fafc;
+    }
+
+    .btn-sm {
+        font-size: .75rem;
+        padding: .35rem .7rem;
+    }
+
+    .btn-danger {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fca5a5;
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    @media (max-width: 640px) {
+
+        .lq-corners,
+        .lq-detail-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .lq-row-number {
+            width: 40px;
+        }
+    }
+</style>
+
+
+{# ═══════════════════════════════════════════════════════════════════════
+JAVASCRIPT
+═══════════════════════════════════════════════════════════════════════ #}
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script>
+    "use strict";
+
+    const TOURNAMENT_ID = "{{ tournament.id }}";
+    const SPORT = "{{ tournament.sport }}";
+    const DISCIPLINE = "{{ tournament.discipline }}";
+    const TOURNAMENT_TITLE = "{{ tournament.title }}";
+
+    const PAGE_SIZE_STEP = 25;
+    let pageLimit = PAGE_SIZE_STEP;
+
+    let activeCourtId = null;
+    let courtsSummary = [];
+    let currentMatches = [];   // [{id, ...data}] in queuePosition order, as loaded
+    let unsubscribe = null;
+    let fsDb = null;
+
+    let dragState = null;      // { matchId, fromCourtId }
+    let insertContext = null;  // { prevQueuePosition, nextQueuePosition, prevDisplayNumber, nextDisplayNumber }
+    let pickedBlue = [];
+    let pickedRed = [];
+
+    // ── Bootstrapping ───────────────────────────────────────────────────────
+    (async function init() {
+        await initFirebase();
+        await loadCourts();
+        document.getElementById("search-box").addEventListener("input", renderQueue);
+
+        const sentinel = document.getElementById("queue-sentinel");
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting) maybeLoadMore();
+        }, { rootMargin: "200px" });
+        observer.observe(sentinel);
+    })();
+
+    async function initFirebase() {
+        try {
+            const res = await fetch("/api/firebase-client-config");
+            const config = await res.json();
+            if (!config.projectId) {
+                setConnState("error", "Firebase not configured");
+                return;
+            }
+            firebase.initializeApp(config);
+            fsDb = firebase.firestore();
+        } catch (e) {
+            setConnState("error", "Config load failed");
+        }
+    }
+
+    function setConnState(state, text) {
+        const el = document.getElementById("conn-indicator");
+        el.className = "lq-conn " + state;
+        document.getElementById("conn-text").textContent = text;
+    }
+
+    // ── Courts ───────────────────────────────────────────────────────────────
+    async function loadCourts() {
+        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/courts`);
+        const data = await res.json();
+        courtsSummary = data.courts || [];
+        renderCourtTabs();
+        if (courtsSummary.length && !activeCourtId) {
+            selectCourt(courtsSummary[0].courtId);
+        } else if (!courtsSummary.length) {
+            document.getElementById("court-tabs").innerHTML = '<div class="lq-court-tab-empty">No matches scheduled yet — push brackets first.</div>';
+        }
+    }
+
+    function renderCourtTabs() {
+        const wrap = document.getElementById("court-tabs");
+        wrap.innerHTML = "";
+        courtsSummary.forEach(c => {
+            const tab = document.createElement("div");
+            tab.className = "lq-court-tab" + (c.courtId === activeCourtId ? " active" : "");
+            tab.dataset.courtId = c.courtId;
+            tab.onclick = () => selectCourt(c.courtId);
+            tab.ondragover = (e) => { e.preventDefault(); tab.classList.add("drag-over"); };
+            tab.ondragleave = () => tab.classList.remove("drag-over");
+            tab.ondrop = (e) => { e.preventDefault(); tab.classList.remove("drag-over"); onDropOnCourtTab(c.courtId); };
+
+            const nextLabel = c.nextMatch ? `Next: #${c.nextMatch.displayNumber ?? ""} ${c.nextMatch.categoryCode ?? ""}` : "Nothing ready";
+            tab.innerHTML = `
+            <span class="lq-court-tab-name">${escapeHtml(c.courtId)}</span>
+            <span class="lq-court-tab-meta">${c.pending} pending · ${c.ready} ready · ${c.done} done</span>
+            <span class="lq-court-tab-next">${escapeHtml(nextLabel)}</span>
+        `;
+            wrap.appendChild(tab);
+        });
+    }
+
+    function selectCourt(courtId) {
+        activeCourtId = courtId;
+        pageLimit = PAGE_SIZE_STEP;
+        renderCourtTabs();
+        subscribeToCourt();
+    }
+
+    // ── Realtime subscription (this is what makes "done" show up live) ────────
+    function subscribeToCourt() {
+        if (!fsDb || !activeCourtId) return;
+        if (unsubscribe) unsubscribe();
+
+        setConnState("", "Connecting…");
+
+        const query = fsDb
+            .collection("sports").doc(SPORT)
+            .collection("disciplines").doc(DISCIPLINE)
+            .collection("matches")
+            .where("tournamentId", "==", TOURNAMENT_ID)
+            .where("courtId", "==", activeCourtId)
+            .orderBy("queuePosition", "asc")
+            .limit(pageLimit);
+
+        unsubscribe = query.onSnapshot(
+            (snapshot) => {
+                setConnState("live", "Live");
+                currentMatches = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                document.getElementById("sentinel-text").classList.add("hidden");
+                renderQueue();
+            },
+            (err) => {
+                console.error(err);
+                setConnState("error", "Connection error — check Firestore index/rules");
+            }
+        );
+    }
+
+    function maybeLoadMore() {
+        if (!activeCourtId) return;
+        if (currentMatches.length < pageLimit) return; // fewer docs than the limit = nothing more to load
+        document.getElementById("sentinel-text").classList.remove("hidden");
+        pageLimit += PAGE_SIZE_STEP;
+        subscribeToCourt();
+    }
+
+    // ── Rendering ───────────────────────────────────────────────────────────
+    function isDone(m) { return m.status === "done" || m.status === "walkover" || !!m.winnerEntryId; }
+
+    function findNextUpId(matches) {
+        for (const m of matches) {
+            if (!isDone(m) && m.status === "ready") return m.id;
+        }
+        return null;
+    }
+
+    function matchMatchesSearch(m, term) {
+        if (!term) return true;
+        const haystack = [
+            m.blue?.name, m.red?.name, m.categoryCode, m.categoryLabel, String(m.displayNumber ?? "")
+        ].join(" ").toLowerCase();
+        return haystack.includes(term);
+    }
+
+    function renderQueue() {
+        const listEl = document.getElementById("queue-list");
+        const emptyEl = document.getElementById("queue-empty");
+        const term = document.getElementById("search-box").value.trim().toLowerCase();
+
+        const filtered = currentMatches.filter(m => matchMatchesSearch(m, term));
+        listEl.innerHTML = "";
+
+        if (!currentMatches.length) {
+            emptyEl.classList.remove("hidden");
+            return;
+        }
+        emptyEl.classList.add("hidden");
+
+        const nextUpId = findNextUpId(currentMatches);
+
+        // Leading gap (insert at the very top)
+        listEl.appendChild(buildGap(null, currentMatches[0] || null));
+
+        filtered.forEach((m, idx) => {
+            listEl.appendChild(buildRow(m, m.id === nextUpId));
+            const realIdx = currentMatches.findIndex(x => x.id === m.id);
+            const after = currentMatches[realIdx + 1] || null;
+            listEl.appendChild(buildGap(m, after));
+        });
+    }
+
+    function buildGap(prevMatch, nextMatch) {
+        const gap = document.createElement("div");
+        gap.className = "lq-gap";
+        gap.ondragover = (e) => { e.preventDefault(); gap.classList.add("dragging-over"); };
+        gap.ondragleave = () => gap.classList.remove("dragging-over");
+        gap.ondrop = (e) => { e.preventDefault(); gap.classList.remove("dragging-over"); onDropInGap(prevMatch, nextMatch); };
+
+        const btn = document.createElement("button");
+        btn.className = "lq-gap-btn";
+        btn.type = "button";
+        btn.textContent = "+";
+        btn.title = "Insert a match here";
+        btn.onclick = () => openInsertModal(prevMatch, nextMatch);
+        gap.appendChild(btn);
+        return gap;
+    }
+
+    function buildRow(m, isNext) {
+        const row = document.createElement("div");
+        row.className = "lq-row" + (isNext ? " next-up" : "");
+        row.draggable = true;
+        row.dataset.matchId = m.id;
+
+        row.ondragstart = (e) => {
+            dragState = { matchId: m.id, fromCourtId: activeCourtId };
+            row.classList.add("dragging");
+            e.dataTransfer.effectAllowed = "move";
+        };
+        row.ondragend = () => row.classList.remove("dragging");
+        row.onclick = (e) => { if (!row.classList.contains("dragging")) openDetailModal(m); };
+
+        const statusClass = isDone(m)
+            ? (m.status === "walkover" ? "lq-status-walkover" : "lq-status-done")
+            : (m.status === "ready" ? "lq-status-ready" : "lq-status-pending");
+        const statusLabel = isDone(m) ? (m.status === "walkover" ? "Walkover" : "Done") : (m.status === "ready" ? "Ready" : "Pending");
+
+        row.innerHTML = `
+        <span class="lq-drag-handle" title="Drag to reorder">⠿</span>
+        <span class="lq-row-number">#${escapeHtml(String(m.displayNumber ?? "—"))}</span>
+        <div class="lq-row-main">
+            <div class="lq-row-corners">
+                <span class="lq-corner-name blue">${escapeHtml(m.blue?.name || "TBD")}</span>
+                <span class="lq-vs">vs</span>
+                <span class="lq-corner-name red">${escapeHtml(m.red?.name || "TBD")}</span>
+            </div>
+            <div class="lq-row-meta">${escapeHtml(m.categoryLabel || m.categoryCode || "")}${m.roundPhase ? " · " + escapeHtml(m.roundPhase) : ""}${m.isRanked === false ? ' · <span class="lq-unranked-flag">Unranked</span>' : ""}</div>
+        </div>
+        ${isNext ? '<span class="lq-next-badge">NEXT UP</span>' : ""}
+        <span class="lq-status-pill ${statusClass}">${statusLabel}</span>
+        <button type="button" class="lq-print-btn" title="Print TA Sheet" data-match-id="${m.id}">🖨</button>
+    `;
+
+        // Wired here (not inline onclick) so we get the actual button
+        // element to disable/flash without any HTML-escaping headaches
+        // around quotes in match ids.
+        row.querySelector(".lq-print-btn").addEventListener("click", (e) => {
+            e.stopPropagation();
+            quickPrintTaSheet(m.id, e.currentTarget);
+        });
+
+        return row;
+    }
+
+    // ── Drag and drop reposition ────────────────────────────────────────────
+    async function onDropInGap(prevMatch, nextMatch) {
+        if (!dragState) return;
+        if (prevMatch && prevMatch.id === dragState.matchId) { dragState = null; return; }
+        if (nextMatch && nextMatch.id === dragState.matchId) { dragState = null; return; }
+
+        await fetch(`/api/matches/${SPORT}/${DISCIPLINE}/${dragState.matchId}/position`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                courtId: activeCourtId,
+                prevQueuePosition: prevMatch ? prevMatch.queuePosition : null,
+                nextQueuePosition: nextMatch ? nextMatch.queuePosition : null,
+            }),
+        });
+        dragState = null;
+        loadCourts();
+    }
+
+    async function onDropOnCourtTab(targetCourtId) {
+        if (!dragState || targetCourtId === activeCourtId) { dragState = null; return; }
+        // Drops at the end of the target court's current queue.
+        const summary = courtsSummary.find(c => c.courtId === targetCourtId);
+        await fetch(`/api/matches/${SPORT}/${DISCIPLINE}/${dragState.matchId}/position`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                courtId: targetCourtId,
+                prevQueuePosition: summary?.nextMatch?.queuePosition ?? null,
+                nextQueuePosition: null,
+            }),
+        });
+        dragState = null;
+        loadCourts();
+    }
+
+    // ── Detail modal ─────────────────────────────────────────────────────────
+    function openDetailModal(m) {
+        document.getElementById("detail-title").textContent = `#${m.displayNumber ?? "—"} · ${m.categoryLabel || m.categoryCode || ""}`;
+        const body = document.getElementById("detail-body");
+
+        const cornerHtml = (corner, side) => `
+        <div class="lq-detail-corner ${side}">
+            <strong>${escapeHtml(corner?.name || "TBD")}</strong>
+            <div class="lq-row-meta">${escapeHtml(corner?.country || "")}${corner?.clubId ? " · " + escapeHtml(corner.clubId) : ""}</div>
+            ${m.winnerEntryId && corner?.entryId === m.winnerEntryId ? '<div class="lq-unranked-flag" style="color:var(--lq-green)">WINNER</div>' : ""}
+        </div>
+    `;
+
+        body.innerHTML = `
+        ${cornerHtml(m.blue, "blue")}
+        ${cornerHtml(m.red, "red")}
+        <dl class="lq-detail-grid">
+            <div class="lq-detail-cell"><dt>Status</dt><dd>${escapeHtml(m.status || "—")}</dd></div>
+            <div class="lq-detail-cell"><dt>Ranked</dt><dd>${m.isRanked === false ? "No (exhibition)" : "Yes"}</dd></div>
+            <div class="lq-detail-cell"><dt>Court</dt><dd>${escapeHtml(m.courtId || "—")}</dd></div>
+            <div class="lq-detail-cell"><dt>Round</dt><dd>${escapeHtml(m.roundPhase || "—")}</dd></div>
+            <div class="lq-detail-cell"><dt>Round Time</dt><dd>${escapeHtml(m.roundTime || "—")}</dd></div>
+            <div class="lq-detail-cell"><dt>Break Time</dt><dd>${escapeHtml(m.breakTime || "—")}</dd></div>
+            <div class="lq-detail-cell"><dt>PSS Size / Hit Level</dt><dd>${escapeHtml(String(m.pssSize ?? "—"))} / ${escapeHtml(String(m.hitLevel ?? "—"))}</dd></div>
+            <div class="lq-detail-cell"><dt>Queue Position</dt><dd class="mono">${escapeHtml(String(m.queuePosition ?? "—"))}</dd></div>
+        </dl>
+        <div class="lq-action-row">
+            <button class="btn btn-ghost btn-sm" onclick="setMatchStatus('${m.id}','pending')">Mark Pending</button>
+            <button class="btn btn-ghost btn-sm" onclick="setMatchStatus('${m.id}','ready')">Mark Ready</button>
+            <button class="btn btn-primary btn-sm" onclick="promptWinnerAndSetStatus('${m.id}','done','${escapeAttr(m.blue?.name)}','${escapeAttr(m.blue?.entryId)}','${escapeAttr(m.red?.name)}','${escapeAttr(m.red?.entryId)}')">Mark Done…</button>
+            <button class="btn btn-danger btn-sm" onclick="promptWinnerAndSetStatus('${m.id}','walkover','${escapeAttr(m.blue?.name)}','${escapeAttr(m.blue?.entryId)}','${escapeAttr(m.red?.name)}','${escapeAttr(m.red?.entryId)}')">Walkover…</button>
+            <button class="btn btn-ghost btn-sm" onclick="openTaSheet('${m.id}')">🖨 Print TA Sheet (preview)</button>
+        </div>
+    `;
+        document.getElementById("detail-modal").classList.remove("hidden");
+    }
+
+    function closeDetailModal() { document.getElementById("detail-modal").classList.add("hidden"); }
+
+    // ── TA Sheet (client-side only — canvas fills the template image
+    // directly in the browser, nothing is sent to the server) ────────────────
+    const TA_SHEET_TEMPLATE_URL = "/static/assets/sheets/ta-sheet-template.jpg";
+    // Every coordinate below was measured directly against the 768x1024
+    // template's own table-border pixels (see the design conversation this
+    // shipped with) — if the template image is ever swapped for a different
+    // export, these must be re-measured against the new file.
+    const TA_SHEET_EVENT_NAME_BOX = { x0: 300, y0: 91, x1: 470, y1: 117 };
+    const TA_SHEET_FIELDS = {
+        // key: [x, y, startSize, align, maxWidth]  — align/y follow canvas's
+        // textAlign + textBaseline='top', so (x,y) is the label-line top,
+        // same as the printed label immediately to its left.
+        date: [275, 150, 14, "right", 120],
+        court_no: [692, 150, 14, "right", 120],
+        match_no: [275, 186, 14, "right", 120],
+        weight_category: [472, 186, 14, "right", 120],  // right-anchored against the "kg" that follows it
+        hit_level: [588, 186, 14, "right", 120],
+        pss_size: [692, 186, 14, "right", 120],
+        chung_name: [150, 262, 14, "left", 225],
+        chung_noc: [150, 289, 14, "left", 225],
+        hong_name: [472, 262, 14, "left", 225],
+        hong_noc: [472, 289, 14, "left", 225],
+    };
+
+    let taSheetTemplateImagePromise = null;
+    function loadTaSheetTemplateImage() {
+        if (!taSheetTemplateImagePromise) {
+            taSheetTemplateImagePromise = new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = "anonymous"; // needs the template served same-origin, or with CORS headers
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error("Couldn't load the TA sheet template image."));
+                img.src = TA_SHEET_TEMPLATE_URL;
+            });
+        }
+        return taSheetTemplateImagePromise;
+    }
+
+    function taSheetFitFont(ctx, text, startSize, maxWidth, minSize = 6) {
+        let size = startSize;
+        while (size > minSize) {
+            ctx.font = `bold ${size}px Arial, sans-serif`;
+            if (ctx.measureText(text).width <= maxWidth) return size;
+            size -= 1;
+        }
+        ctx.font = `bold ${minSize}px Arial, sans-serif`;
+        return minSize;
+    }
+
+    function formatTodayForTaSheet() {
+        // Printed fresh each time from the browser's clock, not the
+        // tournament's start date — matters for multi-day events where
+        // day 2's sheets need day 2's date, not day 1's.
+        const d = new Date();
+        const day = String(d.getDate()).padStart(2, "0");
+        const month = d.toLocaleString("en-US", { month: "short" });
+        return `${day} ${month} ${d.getFullYear()}`;
+    }
+
+    function taSheetDeriveWeightCategory(categoryCode, categoryLabel) {
+        // Weight isn't its own field on the match doc — it's baked into
+        // categoryLabel (e.g. "Individual · Cadets · Male -45kg"), so pull
+        // the signed number back out of that; fall back to categoryCode's
+        // last underscore-separated token if the label doesn't match.
+        const fromLabel = (categoryLabel || "").match(/[-+]\s?\d+(\.\d+)?/);
+        if (fromLabel) return fromLabel[0].replace(/\s/g, "");
+        const tail = (categoryCode || "").split("_").pop();
+        if (tail && /^\d+(\.\d+)?$/.test(tail)) return tail;
+        return categoryLabel || categoryCode || "";
+    }
+
+    async function buildTaSheetDataUrl(m) {
+        const img = await loadTaSheetTemplateImage();
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        ctx.fillStyle = "#000";
+        ctx.textBaseline = "top";
+
+        // Whiteout + rewrite the event name.
+        const box = TA_SHEET_EVENT_NAME_BOX;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+        ctx.fillStyle = "#000";
+        const eventName = TOURNAMENT_TITLE || "";
+        if (eventName) {
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            taSheetFitFont(ctx, eventName, 17, (box.x1 - box.x0) - 8, 9);
+            ctx.fillText(eventName, (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2);
+            ctx.textBaseline = "top";
+        }
+
+        const data = {
+            date: formatTodayForTaSheet(),
+            court_no: m.courtId || "",
+            match_no: m.displayNumber != null ? String(m.displayNumber) : "",
+            weight_category: taSheetDeriveWeightCategory(m.categoryCode, m.categoryLabel),
+            hit_level: m.hitLevel != null ? String(m.hitLevel) : "",
+            pss_size: m.pssSize != null ? String(m.pssSize) : "",
+            chung_name: m.blue?.name || "",
+            chung_noc: m.blue?.country || "",
+            hong_name: m.red?.name || "",
+            hong_noc: m.red?.country || "",
+        };
+
+        for (const [key, [x, y, startSize, align, maxWidth]] of Object.entries(TA_SHEET_FIELDS)) {
+            const text = data[key];
+            if (!text) continue;
+            ctx.textAlign = align;
+            taSheetFitFont(ctx, text, startSize, maxWidth);
+            ctx.fillText(text, x, y);
+        }
+
+        return canvas.toDataURL("image/jpeg", 0.95);
+    }
+
+    // ── Fast one-click print (row button) — generates the sheet and sends
+    // it straight to the browser's print dialog via a hidden iframe, no
+    // preview tab, no extra clicks. This is the path operators use over
+    // and over during a running tournament, so it's optimized to be as
+    // few interactions as possible: click → print dialog. The OS/browser
+    // print dialog itself can't be skipped from a webpage (no browser
+    // exposes silent printing to page JS for security reasons) — if this
+    // console runs on a dedicated print station, look at your browser's
+    // kiosk-printing / "print automatically" launch flag to drop that
+    // last click too. ────────────────────────────────────────────────────
+    async function quickPrintTaSheet(matchId, btnEl) {
+        const m = currentMatches.find(x => x.id === matchId);
+        if (!m) return;
+
+        const originalText = btnEl.textContent;
+        btnEl.disabled = true;
+        btnEl.textContent = "…";
+
+        try {
+            const dataUrl = await buildTaSheetDataUrl(m);
+            await printImageDataUrl(dataUrl);
+            btnEl.classList.add("done-flash");
+            btnEl.textContent = "✓";
+            setTimeout(() => {
+                btnEl.classList.remove("done-flash");
+                btnEl.textContent = originalText;
+                btnEl.disabled = false;
+            }, 900);
+        } catch (e) {
+            console.error(e);
+            btnEl.textContent = "!";
+            alert("Couldn't print the TA sheet: " + e.message);
+            btnEl.textContent = originalText;
+            btnEl.disabled = false;
+        }
+    }
+
+    function printImageDataUrl(dataUrl) {
+        return new Promise((resolve, reject) => {
+            const iframe = document.createElement("iframe");
+            iframe.style.position = "fixed";
+            iframe.style.right = "0";
+            iframe.style.bottom = "0";
+            iframe.style.width = "0";
+            iframe.style.height = "0";
+            iframe.style.border = "0";
+            document.body.appendChild(iframe);
+
+            const cleanup = () => {
+                // Give the print dialog a moment to actually open before
+                // yanking the iframe out from under it.
+                setTimeout(() => {
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                }, 1000);
+            };
+
+            const doc = iframe.contentWindow.document;
+            doc.open();
+            doc.write(`<!DOCTYPE html><html><head><style>
+                html, body { margin: 0; padding: 0; }
+                img { width: 100%; display: block; }
+                @page { margin: 0; }
+            </style></head><body><img id="ta-print-img"></body></html>`);
+            doc.close();
+
+            const img = doc.getElementById("ta-print-img");
+            img.onload = () => {
+                try {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                } finally {
+                    cleanup();
+                }
+            };
+            img.onerror = () => { cleanup(); reject(new Error("Image failed to load in print frame.")); };
+            img.src = dataUrl;
+        });
+    }
+
+    async function openTaSheet(matchId) {
+        const m = currentMatches.find(x => x.id === matchId);
+        if (!m) return;
+        const previewWindow = window.open("", "_blank");
+        previewWindow.document.write(`<!DOCTYPE html><html><head><title>TA Sheet</title></head>
+        <body style="margin:0;background:#52525b;display:flex;align-items:center;justify-content:center;font-family:sans-serif;">
+        <p style="color:#fff;">Generating TA sheet…</p></body></html>`);
+        try {
+            const dataUrl = await buildTaSheetDataUrl(m);
+            previewWindow.document.open();
+            previewWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>TA Sheet</title>
+                <style>
+                    body { margin: 0; background: #52525b; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }
+                    .toolbar { position: sticky; top: 0; width: 100%; background: #27272a; padding: .75rem 1rem; display: flex; justify-content: center; gap: .75rem; z-index: 10; }
+                    .toolbar button { padding: .5rem 1.25rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; background: #4f46e5; color: #fff; font-size: .9rem; }
+                    .toolbar button.secondary { background: transparent; color: #fff; border: 1px solid #71717a; }
+                    img { max-width: 900px; width: 100%; margin: 1.5rem 0; box-shadow: 0 10px 40px rgba(0,0,0,.4); background: #fff; }
+                    @media print {
+                        .toolbar { display: none; }
+                        body { background: #fff; }
+                        img { box-shadow: none; margin: 0; max-width: 100%; }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="toolbar">
+                    <button onclick="window.print()">Print</button>
+                    <button class="secondary" onclick="window.close()">Close</button>
+                </div>
+                <img src="${dataUrl}" alt="TA Sheet">
+            </body>
+            </html>
+        `);
+            previewWindow.document.close();
+        } catch (e) {
+            previewWindow.document.body.innerHTML = `<p style="color:#fff;">Failed to generate TA sheet: ${e.message}</p>`;
+        }
+    }
+
+    async function setMatchStatus(matchId, newStatus, winnerEntryId) {
+        const body = { status: newStatus };
+        if (winnerEntryId) body.winnerEntryId = winnerEntryId;
+        await fetch(`/api/matches/${SPORT}/${DISCIPLINE}/${matchId}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        closeDetailModal();
+        loadCourts();
+    }
+
+    function promptWinnerAndSetStatus(matchId, newStatus, blueName, blueId, redName, redId) {
+        const choice = prompt(`Winner for this ${newStatus}?\nType "blue" for ${blueName || "Blue"} or "red" for ${redName || "Red"}`);
+        if (!choice) return;
+        const normalized = choice.trim().toLowerCase();
+        const winnerEntryId = normalized === "blue" ? blueId : normalized === "red" ? redId : null;
+        if (!winnerEntryId) { alert('Please type "blue" or "red".'); return; }
+        setMatchStatus(matchId, newStatus, winnerEntryId);
+    }
+
+    // ── Insert-between modal ─────────────────────────────────────────────────
+    function openInsertModal(prevMatch, nextMatch) {
+        insertContext = {
+            prevQueuePosition: prevMatch ? prevMatch.queuePosition : null,
+            nextQueuePosition: nextMatch ? nextMatch.queuePosition : null,
+            prevDisplayNumber: prevMatch ? prevMatch.displayNumber : null,
+            nextDisplayNumber: nextMatch ? nextMatch.displayNumber : null,
+        };
+        pickedBlue = [];
+        pickedRed = [];
+        document.getElementById("results-blue").innerHTML = "";
+        document.getElementById("results-red").innerHTML = "";
+        document.getElementById("search-blue").value = "";
+        document.getElementById("search-red").value = "";
+        renderPicked("blue");
+        renderPicked("red");
+        document.getElementById("insert-error").classList.add("hidden");
+
+        const prevLabel = prevMatch ? `#${prevMatch.displayNumber}` : "the start";
+        const nextLabel = nextMatch ? `#${nextMatch.displayNumber}` : "the end";
+        document.getElementById("insert-position-hint").textContent =
+            `Inserting between ${prevLabel} and ${nextLabel} on ${activeCourtId}. It'll get its own decimal number so nothing else gets renumbered.`;
+
+        populateCategoryOptions();
+        document.getElementById("insert-modal").classList.remove("hidden");
+    }
+
+    function closeInsertModal() { document.getElementById("insert-modal").classList.add("hidden"); }
+
+    function populateCategoryOptions() {
+        const select = document.getElementById("insert-category");
+        const seen = new Map();
+        currentMatches.forEach(m => {
+            if (m.categoryCode) seen.set(m.categoryCode, m.categoryLabel || m.categoryCode);
+        });
+        select.innerHTML = "";
+        seen.forEach((label, code) => {
+            const opt = document.createElement("option");
+            opt.value = code;
+            opt.textContent = label;
+            select.appendChild(opt);
+        });
+        const customOpt = document.createElement("option");
+        customOpt.value = "__custom__";
+        customOpt.textContent = "Other / exhibition category…";
+        select.appendChild(customOpt);
+
+        select.onchange = () => {
+            document.getElementById("insert-category-custom").classList.toggle("hidden", select.value !== "__custom__");
+        };
+        select.onchange();
+    }
+
+    let athleteSearchTimers = {};
+    function wireAthleteSearch(side) {
+        const input = document.getElementById(`search-${side}`);
+        input.oninput = () => {
+            clearTimeout(athleteSearchTimers[side]);
+            const q = input.value.trim();
+            if (q.length < 2) { document.getElementById(`results-${side}`).innerHTML = ""; return; }
+            athleteSearchTimers[side] = setTimeout(async () => {
+                const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&limit=8`);
+                const data = await res.json();
+                renderAthleteResults(side, data.athletes || []);
+            }, 250);
+        };
+    }
+    wireAthleteSearch("blue");
+    wireAthleteSearch("red");
+
+    function renderAthleteResults(side, athletes) {
+        const el = document.getElementById(`results-${side}`);
+        el.innerHTML = "";
+        athletes.forEach(a => {
+            const item = document.createElement("div");
+            item.className = "lq-athlete-result-item";
+            item.textContent = `${a.displayName} — ${a.club || "no club"} (${a.birthYear || "?"})`;
+            item.onclick = () => {
+                const list = side === "blue" ? pickedBlue : pickedRed;
+                if (!list.find(x => x.id === a.id)) list.push(a);
+                renderPicked(side);
+                el.innerHTML = "";
+                document.getElementById(`search-${side}`).value = "";
+            };
+            el.appendChild(item);
+        });
+    }
+
+    function renderPicked(side) {
+        const list = side === "blue" ? pickedBlue : pickedRed;
+        const el = document.getElementById(`picked-${side}`);
+        el.innerHTML = "";
+        list.forEach(a => {
+            const chip = document.createElement("div");
+            chip.className = "lq-picked-chip";
+            chip.innerHTML = `<span>${escapeHtml(a.displayName)}</span>`;
+            const removeBtn = document.createElement("button");
+            removeBtn.textContent = "×";
+            removeBtn.onclick = () => {
+                const idx = list.findIndex(x => x.id === a.id);
+                if (idx > -1) list.splice(idx, 1);
+                renderPicked(side);
+            };
+            chip.appendChild(removeBtn);
+            el.appendChild(chip);
+        });
+    }
+
+    async function submitInsertMatch() {
+        const errEl = document.getElementById("insert-error");
+        errEl.classList.add("hidden");
+
+        if (!pickedBlue.length || !pickedRed.length) {
+            errEl.textContent = "Pick at least one athlete for each corner.";
+            errEl.classList.remove("hidden");
+            return;
+        }
+
+        const select = document.getElementById("insert-category");
+        let categoryCode, categoryLabel;
+        if (select.value === "__custom__") {
+            categoryCode = document.getElementById("insert-category-code").value.trim();
+            categoryLabel = document.getElementById("insert-category-label").value.trim();
+            if (!categoryCode || !categoryLabel) {
+                errEl.textContent = "Enter both a category code and label.";
+                errEl.classList.remove("hidden");
+                return;
+            }
+        } else {
+            categoryCode = select.value;
+            categoryLabel = select.options[select.selectedIndex].textContent;
+        }
+
+        const btn = document.getElementById("insert-submit-btn");
+        btn.disabled = true;
+        btn.textContent = "Creating…";
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/matches/insert`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    courtId: activeCourtId,
+                    prevQueuePosition: insertContext.prevQueuePosition,
+                    nextQueuePosition: insertContext.nextQueuePosition,
+                    prevDisplayNumber: insertContext.prevDisplayNumber,
+                    nextDisplayNumber: insertContext.nextDisplayNumber,
+                    categoryCode,
+                    categoryLabel,
+                    isRanked: document.getElementById("insert-ranked").checked,
+                    blue: { athleteIds: pickedBlue.map(a => a.id) },
+                    red: { athleteIds: pickedRed.map(a => a.id) },
+                }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || "Failed to create match.");
+            }
+            closeInsertModal();
+            loadCourts();
+        } catch (e) {
+            errEl.textContent = e.message;
+            errEl.classList.remove("hidden");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Create Match";
+        }
+    }
+
+    // ── Utils ────────────────────────────────────────────────────────────────
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return "";
+        return String(str).replace(/[&<>"']/g, s => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[s]));
+    }
+    function escapeAttr(str) { return escapeHtml(str).replace(/'/g, "\\'"); }
+</script>
+
+{% endblock %}

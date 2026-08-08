@@ -9,8 +9,8 @@
         <h2 style="margin-bottom: 0.5rem;">Create Athlete</h2>
         <p class="text-muted" style="margin-bottom: 2rem;">Add a new athlete to your club roster.</p>
 
-        <form id="createAthleteForm" onsubmit="submitAthlete(event)"
-            style="display: flex; flex-direction: column; gap: 1.25rem;">
+        <form id="createAthleteForm" onsubmit="submitAthlete(event)" data-club-country="{{ club_country }}"
+            data-club-sport="{{ club_sport }}" style="display: flex; flex-direction: column; gap: 1.25rem;">
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                 <div>
@@ -39,19 +39,22 @@
             </div>
 
             <div>
-                <label class="field-label" for="a_country">Country (3-letter code)</label>
-                <input type="text" id="a_country" placeholder="e.g. SVK, USA" minlength="3" maxlength="3"
-                    style="text-transform: uppercase;" required>
+                <label class="field-label" for="a_country">Country</label>
+                <select id="a_country" required
+                    style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border);">
+                    <option value="" disabled selected>Select country...</option>
+                </select>
             </div>
 
             <hr style="border: 0; border-top: 1px solid var(--border); margin: 0.5rem 0;">
 
             <div>
                 <label class="field-label" for="a_sport">Primary Sport</label>
-                <select id="a_sport" onchange="toggleSportSpecifics()" required>
+                <select id="a_sport" onchange="toggleSportSpecifics()" required
+                    style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border);">
                     <option value="" disabled selected>Select sport...</option>
                     <option value="taekwondo">Taekwondo</option>
-                    <option value="boxing">Boxing</option>
+                    <option value="boxing">Boxing / Box</option>
                 </select>
             </div>
 
@@ -59,7 +62,8 @@
             <div id="tkd_specifics" class="hidden"
                 style="background: var(--bg-alt); padding: 1rem; border-radius: 6px; border: 1px solid var(--border);">
                 <label class="field-label" for="tkd_rank">Taekwondo Rank</label>
-                <select id="tkd_rank">
+                <select id="tkd_rank"
+                    style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border);">
                     <optgroup label="Color Belts (Keup)">
                         <option value="0">10. Keup (White)</option>
                         <option value="1">9. Keup (White-Yellow)</option>
@@ -106,6 +110,79 @@
 </div>
 
 <script>
+    // Complete ISO 3166-1 alpha-3 countries list sorted alphanumerically by country name
+    const ISO_COUNTRIES = [
+        { code: "AFG", name: "Afghanistan" }, { code: "ALB", name: "Albania" },
+        { code: "DZA", name: "Algeria" }, { code: "AND", name: "Andorra" },
+        { code: "AGO", name: "Angola" }, { code: "ARG", name: "Argentina" },
+        { code: "ARM", name: "Armenia" }, { code: "AUS", name: "Australia" },
+        { code: "AUT", name: "Austria" }, { code: "AZE", name: "Azerbaijan" },
+        { code: "BHR", name: "Bahrain" }, { code: "BGD", name: "Bangladesh" },
+        { code: "BLR", name: "Belarus" }, { code: "BEL", name: "Belgium" },
+        { code: "BIH", name: "Bosnia and Herzegovina" }, { code: "BRA", name: "Brazil" },
+        { code: "BGR", name: "Bulgaria" }, { code: "CAN", name: "Canada" },
+        { code: "CHL", name: "Chile" }, { code: "CHN", name: "China" },
+        { code: "COL", name: "Colombia" }, { code: "CRO", name: "Croatia" },
+        { code: "CUB", name: "Cuba" }, { code: "CYP", name: "Cyprus" },
+        { code: "CZE", name: "Czech Republic" }, { code: "DNK", name: "Denmark" },
+        { code: "EGY", name: "Egypt" }, { code: "EST", name: "Estonia" },
+        { code: "FIN", name: "Finland" }, { code: "FRA", name: "France" },
+        { code: "GEO", name: "Georgia" }, { code: "DEU", name: "Germany" },
+        { code: "GRC", name: "Greece" }, { code: "HUN", name: "Hungary" },
+        { code: "ISL", name: "Iceland" }, { code: "IND", name: "India" },
+        { code: "IRN", name: "Iran" }, { code: "IRL", name: "Ireland" },
+        { code: "ISR", name: "Israel" }, { code: "ITA", name: "Italy" },
+        { code: "JPN", name: "Japan" }, { code: "KAZ", name: "Kazakhstan" },
+        { code: "KOR", name: "Korea (South)" }, { code: "LVA", name: "Latvia" },
+        { code: "LTU", name: "Lithuania" }, { code: "LUX", name: "Luxembourg" },
+        { code: "MEX", name: "Mexico" }, { code: "MDA", name: "Moldova" },
+        { code: "MNE", name: "Montenegro" }, { code: "NLD", name: "Netherlands" },
+        { code: "NZL", name: "New Zealand" }, { code: "MKD", name: "North Macedonia" },
+        { code: "NOR", name: "Norway" }, { code: "POL", name: "Poland" },
+        { code: "PRT", name: "Portugal" }, { code: "ROU", name: "Romania" },
+        { code: "SRB", name: "Serbia" }, { code: "SVK", name: "Slovakia" },
+        { code: "SVN", name: "Slovenia" }, { code: "ESP", name: "Spain" },
+        { code: "SWE", name: "Sweden" }, { code: "CHE", name: "Switzerland" },
+        { code: "TUR", name: "Turkey" }, { code: "UKR", name: "Ukraine" },
+        { code: "GBR", name: "United Kingdom" }, { code: "USA", name: "United States" }
+    ].sort((a, b) => a.name.localeCompare(b.name));
+
+    document.addEventListener("DOMContentLoaded", () => {
+        populateAndPreselectCountries();
+        preselectSport();
+    });
+
+    function populateAndPreselectCountries() {
+        const select = document.getElementById("a_country");
+        const form = document.getElementById("createAthleteForm");
+        const clubCountry = (form.getAttribute("data-club-country") || "").toUpperCase();
+
+        ISO_COUNTRIES.forEach(c => {
+            const opt = document.createElement("option");
+            opt.value = c.code;
+            opt.textContent = `${c.name} (${c.code})`;
+            select.appendChild(opt);
+        });
+
+        if (clubCountry) {
+            select.value = clubCountry;
+        }
+    }
+
+    function preselectSport() {
+        const select = document.getElementById("a_sport");
+        const form = document.getElementById("createAthleteForm");
+        let clubSport = (form.getAttribute("data-club-sport") || "").toLowerCase();
+
+        // Handle naming variations between backend ("box") and frontend options ("boxing")
+        if (clubSport === "box") clubSport = "boxing";
+
+        if (clubSport && (clubSport === "taekwondo" || clubSport === "boxing")) {
+            select.value = clubSport;
+            toggleSportSpecifics();
+        }
+    }
+
     function toggleSportSpecifics() {
         const sport = document.getElementById("a_sport").value;
         const tkdDiv = document.getElementById("tkd_specifics");
@@ -129,9 +206,8 @@
         msg.classList.add("hidden");
 
         const sport = document.getElementById("a_sport").value;
-        let rankValue = 0; // Default or fallback
+        let rankValue = 0;
 
-        // Grab specific field data based on selected sport
         if (sport === "taekwondo") {
             rankValue = parseInt(document.getElementById("tkd_rank").value, 10);
         }
@@ -141,7 +217,7 @@
             lastName: document.getElementById("a_lastname").value.trim(),
             gender: document.getElementById("a_gender").value,
             birthday: document.getElementById("a_birthday").value,
-            country: document.getElementById("a_country").value.trim(),
+            country: document.getElementById("a_country").value,
             sport: sport,
             rank: rankValue
         };
@@ -163,15 +239,14 @@
             msg.style.color = "var(--blue-text)";
             msg.classList.remove("hidden");
 
-            // Redirect back to tournament registration after short delay
             setTimeout(() => {
                 history.back();
             }, 1200);
 
         } catch (err) {
             msg.textContent = err.message;
-            msg.style.background = "#fee2e2"; // Error red bg
-            msg.style.color = "#b91c1c";     // Error red text
+            msg.style.background = "#fee2e2";
+            msg.style.color = "#b91c1c";
             msg.classList.remove("hidden");
             submitBtn.disabled = false;
             submitBtn.textContent = "Create Athlete";

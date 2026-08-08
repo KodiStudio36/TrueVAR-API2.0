@@ -41,8 +41,6 @@
                 Pre-filled from this tournament's court count. This is session-only — nothing here is saved to
                 Firestore, so it resets if you leave the page. Vest numbers can repeat across courts (different
                 physical vests); the rest-gap applies globally across every court running in parallel.
-                <strong>The ID field must exactly match that court's own TrueVAR-Core court_id</strong> — a
-                mismatch here is why a court-side server would see no matches at all, with no error to point at it.
             </p>
             <div id="courtsList" class="bb-courts-list"></div>
         </div>
@@ -106,14 +104,10 @@
     <div id="resultsSection" class="hidden">
 
         <div class="bb-view-pins">
-            <div style="display:flex; gap:0.5rem;">
-                <button type="button" id="pinBrackets" class="bb-pin bb-pin--active"
-                    onclick="showView('brackets')">Brackets</button>
-                <button type="button" id="pinCourtOrder" class="bb-pin" onclick="showView('courtOrder')">Court
-                    Order</button>
-            </div>
-            <button type="button" id="downloadAllPdfBtn" class="btn btn-ghost btn-sm" style="margin-left:auto;"
-                onclick="downloadAllBracketsPDF()">Download All (PDF)</button>
+            <button type="button" id="pinBrackets" class="bb-pin bb-pin--active"
+                onclick="showView('brackets')">Brackets</button>
+            <button type="button" id="pinCourtOrder" class="bb-pin" onclick="showView('courtOrder')">Court
+                Order</button>
         </div>
 
         <div id="bracketsView" class="card-panel bb-pane" style="margin-top: 0.75rem;">
@@ -150,7 +144,6 @@
     </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
     const TOURNAMENT_ID = "{{ tournament.id }}";
     const TOURNAMENT_SPORT = "{{ tournament.sport | default('') | lower }}";
@@ -192,29 +185,20 @@
     // Pre-seeds from the tournament's own courtNum field (already an
     // existing tournament property) so there's something sensible to
     // start editing instead of an empty list.
-    //
-    // IMPORTANT: court.id is what gets written as `courtId` on every
-    // scheduled match doc, and it's exactly what a court-side
-    // TrueVAR-Core instance's bound `court_id` must equal for its
-    // Firestore watch query to find anything at all — a mismatch here
-    // means that instance's match cache stays permanently empty, which
-    // looks like "GET /matches returns nothing" with no error anywhere.
-    // Plain ordinal numbers ("1", "2", "3"...) are the sane default since
-    // that's the most common physical court-numbering convention, but
-    // this is a genuine guess — the id field below is directly editable
-    // specifically so it can be corrected to match whatever court_id
-    // value your actual deployed court-side servers are configured with.
+    let courtIdCounter = 0;
+    function nextLocalCourtId() { return `court_${++courtIdCounter}`; }
+
     function loadCourtsLocal() {
         const courtNum = {{ tournament.courtNum | default (0)
     }};
     courts = [];
     for (let i = 0; i < courtNum; i++) {
-        courts.push({ id: String(i + 1), label: `Court ${i + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first" });
+        courts.push({ id: nextLocalCourtId(), label: `Court ${i + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first" });
     }
     }
 
     function addCourtRow() {
-        courts.push({ id: String(courts.length + 1), label: `Court ${courts.length + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first" });
+        courts.push({ id: nextLocalCourtId(), label: `Court ${courts.length + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first" });
         renderCourtsList();
     }
 
@@ -226,8 +210,6 @@
         }
         el.innerHTML = courts.map((c, i) => `
             <div class="bb-court-row">
-                <input type="text" value="${escapeAttr(c.id)}" placeholder="Court ID" title="Must exactly match this court's TrueVAR-Core instance's own court_id"
-                    style="font-weight: 600;" onchange="courts[${i}].id = this.value.trim()">
                 <input type="text" value="${escapeAttr(c.label)}" placeholder="Label" onchange="courts[${i}].label = this.value">
                 <input type="text" value="${(c.vestNumbers || []).join(', ')}" placeholder="Vest #s, e.g. 1, 2, 3, 4"
                     onchange="courts[${i}].vestNumbers = this.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))">
@@ -364,13 +346,6 @@
                             code: `${entryOpt.code}_${c.code}`,
                             ageCode: ageOpt.code, genderCode: genderOpt.code, entryTypeCode: entryOpt.code,
                             ageMin: ageOpt.min, ageMax: ageOpt.max, weightIndex,
-                            // Cross-sport meta on the age division itself, not
-                            // kyorugi-specific — round/break length legitimately
-                            // varies by age (cadets don't fight 2-minute rounds).
-                            // Falls back to a sane default so an older schema
-                            // doc that predates these fields doesn't break.
-                            roundTime: ageOpt.roundTime || "02:00",
-                            breakTime: ageOpt.breakTime || "01:00",
                             groupLabel: entryOpt.label,
                             label: c.label ? `${ageOpt.label} ${genderOpt.label} ${c.label}` : `${ageOpt.label} ${genderOpt.label}`,
                         });
@@ -509,44 +484,28 @@
             const roundMatches = [];
             for (let i = 0; i < numMatches; i++) {
                 const matchId = `${categoryCode}_r${roundNum}_m${i + 1}`;
-                let blue, red, status, winnerEntryId = null;
-
-                // Denormalizes name/country/clubId straight onto the
-                // corner at the moment an entry is known — so every
-                // consumer downstream (bracket sheet, court queue,
-                // TkStrikeServer) reads a fight's who-is-fighting info
-                // directly off the match doc, no separate athlete lookup.
-                function cornerFrom(slotEntry) {
-                    return slotEntry
-                        ? { entryId: slotEntry.entryId, athleteIds: slotEntry.athleteIds, name: slotEntry.name, country: slotEntry.country, clubId: slotEntry.clubId }
-                        : { entryId: null, source: null };
-                }
+                let participants, status, winnerEntryId = null;
 
                 if (roundNum === 1) {
                     const p1 = slots[i * 2], p2 = slots[i * 2 + 1];
-                    blue = cornerFrom(p1);
-                    red = cornerFrom(p2);
+                    participants = [
+                        p1 ? { entryId: p1.entryId, athleteIds: p1.athleteIds } : { entryId: null, source: null },
+                        p2 ? { entryId: p2.entryId, athleteIds: p2.athleteIds } : { entryId: null, source: null },
+                    ];
                     if (p1 && !p2) { status = "walkover"; winnerEntryId = p1.entryId; }
                     else if (p2 && !p1) { status = "walkover"; winnerEntryId = p2.entryId; }
                     else if (p1 && p2) { status = "ready"; }
                     else { status = "walkover"; }
                 } else {
                     const m1 = prevRoundMatches[i * 2], m2 = prevRoundMatches[i * 2 + 1];
-                    blue = m1.status === "walkover"
-                        ? { entryId: m1.winnerEntryId, athleteIds: m1.winnerAthleteIds, name: m1.winnerName, country: m1.winnerCountry, clubId: m1.winnerClubId }
-                        : { entryId: null, source: { matchId: m1.matchId, slot: "winner" } };
-                    red = m2.status === "walkover"
-                        ? { entryId: m2.winnerEntryId, athleteIds: m2.winnerAthleteIds, name: m2.winnerName, country: m2.winnerCountry, clubId: m2.winnerClubId }
-                        : { entryId: null, source: { matchId: m2.matchId, slot: "winner" } };
-                    status = (blue.entryId && red.entryId) ? "ready" : "pending";
+                    participants = [
+                        m1.status === "walkover" ? { entryId: m1.winnerEntryId, athleteIds: m1.winnerAthleteIds } : { entryId: null, source: { matchId: m1.matchId, slot: "winner" } },
+                        m2.status === "walkover" ? { entryId: m2.winnerEntryId, athleteIds: m2.winnerAthleteIds } : { entryId: null, source: { matchId: m2.matchId, slot: "winner" } },
+                    ];
+                    status = participants.every(p => p.entryId) ? "ready" : "pending";
                 }
 
-                const playersEnteringRound = bracketSize / Math.pow(2, roundNum - 1);
-                roundMatches.push({
-                    matchId, categoryCode, round: roundNum, matchNumber: i + 1,
-                    roundPhase: roundPhaseCode(playersEnteringRound),
-                    blue, red, status, winnerEntryId, courtId: null, queuePosition: null,
-                });
+                roundMatches.push({ matchId, categoryCode, round: roundNum, matchNumber: i + 1, participants, status, winnerEntryId, courtId: null, queuePosition: null });
             }
 
             rounds.push(roundMatches);
@@ -626,14 +585,14 @@
                     // lands latest, wherever that ends up. Round 1 has
                     // no feeders, so it's always 0.
                     let earliestPosition = 0;
-                    [m.blue, m.red].forEach(p => {
+                    m.participants.forEach(p => {
                         if (p.source && feederLookup[p.source.matchId]) {
                             const feeder = feederLookup[p.source.matchId];
                             if (feeder.queuePosition != null) earliestPosition = Math.max(earliestPosition, feeder.queuePosition + 1);
                         }
                     });
 
-                    const knownAthleteIds = m.status === "ready" ? [...(m.blue.athleteIds || []), ...(m.red.athleteIds || [])] : null;
+                    const knownAthleteIds = m.status === "ready" ? m.participants.flatMap(p => p.athleteIds || []) : null;
                     roundPool.push({ match: m, avgBirthYear: meta.avgBirthYear, eligibleCourtIds: meta.eligibleCourtIds, athleteIds: knownAthleteIds, earliestPosition });
                 });
             });
@@ -784,19 +743,14 @@
             const built = bracketFn(cat.code, seeded, placementFn);
             totalConflicts += built.conflictCount || 0;
 
-            // Fill in winner* fields for walkover matches so later rounds
-            // (which may become "ready" purely from bye-cascading, or
-            // need the gap constraint's athleteIds) have real denormalized
-            // data to carry forward, even before an actual "match
-            // completed" event happens.
+            // Fill in winnerAthleteIds for walkover matches so later
+            // rounds' athleteIds (needed for the gap constraint) are known
+            // even before a real "match completed" event happens.
             const vestInfo = vestInfoFor(cat);
             built.rounds.forEach(roundMatches => roundMatches.forEach(m => {
                 if (m.status === "walkover") {
-                    const winner = m.blue.entryId === m.winnerEntryId ? m.blue : m.red;
-                    m.winnerAthleteIds = winner.athleteIds || [];
-                    m.winnerName = winner.name;
-                    m.winnerCountry = winner.country;
-                    m.winnerClubId = winner.clubId;
+                    const winner = m.participants.find(p => p.entryId === m.winnerEntryId);
+                    m.winnerAthleteIds = winner ? winner.athleteIds : [];
                 }
                 // Vest size / hit-level are a property of the CATEGORY
                 // (weight bracket), so every match within it — every
@@ -804,10 +758,6 @@
                 m.pssSize = vestInfo ? vestInfo.pssSize : null;
                 m.hitLevel = vestInfo ? vestInfo.hitLevel : null;
                 m.pssHitLevelSetId = selectedPssHitLevelSetId;
-                // Same idea for round/break length — a property of the
-                // AGE DIVISION (see flattenCategories), not the match.
-                m.roundTime = cat.roundTime;
-                m.breakTime = cat.breakTime;
             }));
 
             generatedBrackets.push({
@@ -872,13 +822,9 @@
         `).join("");
     }
 
-    // Name plus country code, e.g. "Peter Parker (SVK)" — country is
-    // omitted when the entry doesn't have one on file.
     function entryNameForMatch(entries, entryId) {
         const e = entries.find(x => x.entryId === entryId);
-        const name = e ? e.name : entryId;
-        const country = e && e.country ? ` (${e.country})` : "";
-        return `${name}${country}`;
+        return e ? e.name : entryId;
     }
 
     // A participant slot with no entryId yet is either a genuine
@@ -897,8 +843,8 @@
     }
 
     function renderMatchLine(m, bracket) {
-        const n1 = participantLabel(bracket.entries, m.blue);
-        const n2 = participantLabel(bracket.entries, m.red);
+        const n1 = participantLabel(bracket.entries, m.participants[0]);
+        const n2 = participantLabel(bracket.entries, m.participants[1]);
         const badge = m.status === "walkover" ? `<span class="badge badge-grey">walkover</span>` : m.status === "pending" ? `<span class="badge badge-grey">pending</span>` : "";
         return `<div class="bb-match-line">${escapeHtml(n1)} <span class="text-muted">vs</span> ${escapeHtml(n2)} ${badge}</div>`;
     }
@@ -928,17 +874,6 @@
         if (playersEntering === 4) return "Semifinals";
         if (playersEntering === 8) return "Quarterfinals";
         return `Round of ${playersEntering}`;
-    }
-
-    // Short-code form of the same thing (R32, R16, QF, SF, F) — stored on
-    // each match doc as `roundPhase` for anything that wants a compact
-    // label instead of the full "Quarterfinals" text (scoreboards, court
-    // queue cards, external consoles).
-    function roundPhaseCode(playersEntering) {
-        if (playersEntering === 2) return "F";
-        if (playersEntering === 4) return "SF";
-        if (playersEntering === 8) return "QF";
-        return `R${playersEntering}`;
     }
 
     function escapeXml(str) {
@@ -1027,8 +962,8 @@
         if (bracketSize <= 2) {
             const finalMatch = bracket.rounds[0][0];
             const cx = totalWidth / 2, cy = HEADER_H + (totalHeight - HEADER_H - FOOTER_H) / 2;
-            text(cx, cy - 12, "middle", participantDisplay(bracket, finalMatch.blue), { size: 11 });
-            text(cx, cy + 16, "middle", participantDisplay(bracket, finalMatch.red), { size: 11 });
+            text(cx, cy - 12, "middle", participantDisplay(bracket, finalMatch.participants[0]), { size: 11 });
+            text(cx, cy + 16, "middle", participantDisplay(bracket, finalMatch.participants[1]), { size: 11 });
             badge(cx, cy, finalMatch.displayNumber ?? "");
             return { svg: wrapSVG(totalWidth, totalHeight, svgParts, bracket, totalWidth / 2), width: totalWidth, height: totalHeight };
         }
@@ -1085,7 +1020,7 @@
                     // Bye: just the one real fighter's name, centered in
                     // the slot — no "BYE" row, no badge (nothing fought),
                     // straight line through to the next real box.
-                    const winnerParticipant = match.blue.entryId === match.winnerEntryId ? match.blue : match.red;
+                    const winnerParticipant = match.participants.find(p => p.entryId === match.winnerEntryId);
                     const winnerStr = participantDisplay(bracket, winnerParticipant);
                     text(nameX, y + 3, anchor, winnerStr, { size: nameFontSize });
                     const winnerFeedX = dir === 1 ? nameX + estimateTextWidth(winnerStr, nameFontSize) + 4 : nameX - estimateTextWidth(winnerStr, nameFontSize) - 4;
@@ -1095,8 +1030,8 @@
                 }
 
                 const topY = y - ROW_H / 2, botY = y + ROW_H / 2;
-                const topStr = participantDisplay(bracket, match.blue);
-                const botStr = participantDisplay(bracket, match.red);
+                const topStr = participantDisplay(bracket, match.participants[0]);
+                const botStr = participantDisplay(bracket, match.participants[1]);
                 text(nameX, topY + 3, anchor, topStr, { size: nameFontSize });
                 text(nameX, botY + 3, anchor, botStr, { size: nameFontSize });
 
@@ -1200,7 +1135,7 @@
 
         // Legend
         const legendY = footerTop + 110;
-        const legendMargin = 16;
+        const legendMargin = 10;
         parts.push(`<rect x="${legendMargin}" y="${legendY}" width="${totalWidth - 2 * legendMargin}" height="34" fill="none" stroke="#1e293b"/>`);
         parts.push(`<text x="${legendMargin + 8}" y="${legendY + 14}" font-size="8.5">LEGEND    RSC: Win by Referee Stops Contest    WDR: Win by Withdrawal    DQB: Win by Disqualification for unsportsmanlike behavior</text>`);
         parts.push(`<text x="${legendMargin + 8}" y="${legendY + 27}" font-size="8.5">(x): Seed    PTF: Win by final score    DSQ: Win by Disqualification    R: Round</text>`);
@@ -1230,69 +1165,6 @@
         document.getElementById("bracketPreviewOverlay").classList.add("hidden");
     }
 
-    // ── Download all brackets as one PDF, one bracket per page ─────────
-    // Rendered via canvas rather than jsPDF's native SVG support (patchy
-    // browser-to-browser) — each bracket's SVG is rasterized to a PNG at
-    // `scale`x resolution first, then dropped onto a page sized to match
-    // the SVG's own A4-landscape canvas (PAGE_W x PAGE_H) so there's no
-    // stretching.
-    function svgStringToPngDataUrl(svgString, width, height, scale) {
-        return new Promise((resolve, reject) => {
-            const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-            const url = URL.createObjectURL(svgBlob);
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                canvas.width = width * scale;
-                canvas.height = height * scale;
-                const ctx = canvas.getContext("2d");
-                ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                URL.revokeObjectURL(url);
-                resolve(canvas.toDataURL("image/png"));
-            };
-            img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
-            img.src = url;
-        });
-    }
-
-    async function downloadAllBracketsPDF() {
-        if (generatedBrackets.length === 0) {
-            showFlash("Generate brackets first.", true);
-            return;
-        }
-        if (!window.jspdf) {
-            showFlash("PDF library failed to load — check your connection and retry.", true);
-            return;
-        }
-
-        const btn = document.getElementById("downloadAllPdfBtn");
-        if (btn) { btn.disabled = true; btn.textContent = "Building PDF…"; }
-
-        try {
-            const { jsPDF } = window.jspdf;
-            const scale = 2; // rasterize at 2x for crisper text/lines in the PDF
-            const doc = new jsPDF({ orientation: "landscape", unit: "px", format: [PAGE_W, PAGE_H] });
-
-            for (let i = 0; i < generatedBrackets.length; i++) {
-                const bracket = generatedBrackets[i];
-                const { svg } = buildBracketSVG(bracket);
-                const pngUrl = await svgStringToPngDataUrl(svg, PAGE_W, PAGE_H, scale);
-                if (i > 0) doc.addPage([PAGE_W, PAGE_H], "landscape");
-                doc.addImage(pngUrl, "PNG", 0, 0, PAGE_W, PAGE_H);
-            }
-
-            const safeTitle = (TOURNAMENT_TITLE || "brackets").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
-            doc.save(`${safeTitle || "brackets"}_all_brackets.pdf`);
-        } catch (err) {
-            console.error("Failed to build brackets PDF", err);
-            showFlash("Failed to build the PDF — try again.", true);
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = "Download All (PDF)"; }
-        }
-    }
-
     // ── Rendering: court columns with drag-and-drop ─────────────────────
     let draggedMatchId = null;
 
@@ -1305,8 +1177,7 @@
                 .filter(m => m.courtId === court.id)
                 .sort((a, b) => a.queuePosition - b.queuePosition);
             return `
-                <div class="bb-court-column" data-court-id="${court.id}"
-                    ondragover="onColumnDragOver(event, this)" ondragleave="onColumnDragLeave(event, this)" ondrop="onColumnDrop(event, this)">
+                <div class="bb-court-column" data-court-id="${court.id}" ondragover="onColumnDragOver(event, this)" ondrop="onColumnDrop(event, this)">
                     <div class="bb-court-column-header">${escapeHtml(court.label)}</div>
                     <div class="bb-court-column-body">
                         ${matches.map(m => renderCourtMatchCard(m)).join("") || `<p class="text-muted" style="font-size:0.82rem; padding: 0.5rem 0;">No matches assigned.</p>`}
@@ -1327,13 +1198,13 @@
 
     function renderCourtMatchCard(m) {
         const bracket = generatedBrackets.find(b => b.categoryCode === m.categoryCode);
-        const n1 = participantLabel(bracket.entries, m.blue);
-        const n2 = participantLabel(bracket.entries, m.red);
+        const n1 = participantLabel(bracket.entries, m.participants[0]);
+        const n2 = participantLabel(bracket.entries, m.participants[1]);
         const badge = m.status === "pending" ? `<span class="badge badge-grey">pending</span>` : "";
         return `
             <div class="bb-court-match" draggable="true" data-match-id="${m.matchId}"
                 ondragstart="onMatchDragStart(event, this)" ondragend="onMatchDragEnd(event, this)">
-                <div class="text-muted" style="font-size:0.72rem;">${m.displayNumber ?? "—"} · ${m.roundPhase ? escapeHtml(m.roundPhase) + " · " : ""}${escapeHtml(bracket.categoryLabel)} ${badge}</div>
+                <div class="text-muted" style="font-size:0.72rem;">${m.displayNumber ?? "—"} · ${escapeHtml(bracket.categoryLabel)} ${badge}</div>
                 <div style="font-size:0.88rem; font-weight:600;">${escapeHtml(n1)} vs ${escapeHtml(n2)}</div>
             </div>
         `;
@@ -1345,79 +1216,25 @@
     }
     function onMatchDragEnd(event, el) {
         el.classList.remove("bb-court-match--dragging");
-        // Safety net: if the drag was cancelled outside any valid drop
-        // zone (dropped off-window, Escape pressed, etc.), dragend still
-        // fires on the source element even though drop never did — clean
-        // up the indicator so it doesn't linger.
-        removeDropIndicator();
-        document.querySelectorAll(".bb-court-column--drop-target").forEach(c => c.classList.remove("bb-court-column--drop-target"));
     }
-
-    // Single reusable indicator element, moved to wherever the card would
-    // land rather than recreated every dragover — that would be a lot of
-    // DOM churn on every mouse-move-driven dragover event.
-    let dropIndicatorEl = null;
-    function ensureDropIndicator() {
-        if (!dropIndicatorEl) {
-            dropIndicatorEl = document.createElement("div");
-            dropIndicatorEl.className = "bb-drop-indicator";
-        }
-        return dropIndicatorEl;
-    }
-    function removeDropIndicator() {
-        if (dropIndicatorEl && dropIndicatorEl.parentNode) dropIndicatorEl.parentNode.removeChild(dropIndicatorEl);
-    }
-
-    // Shared by both the live dragover preview and the actual drop, so
-    // they can never disagree about where a card would land.
-    function computeDropIndex(bodyEl, clientY) {
-        const cards = [...bodyEl.querySelectorAll(".bb-court-match")];
-        let dropIndex = cards.length;
-        for (let i = 0; i < cards.length; i++) {
-            const rect = cards[i].getBoundingClientRect();
-            if (clientY < rect.top + rect.height / 2) { dropIndex = i; break; }
-        }
-        return { dropIndex, cards };
-    }
-
-    function onColumnDragOver(event, columnEl) {
+    function onColumnDragOver(event) {
         event.preventDefault();
-        if (!draggedMatchId) return;
-
-        const bodyEl = columnEl.querySelector(".bb-court-column-body");
-        const { dropIndex, cards } = computeDropIndex(bodyEl, event.clientY);
-
-        const indicator = ensureDropIndicator();
-        if (dropIndex >= cards.length) {
-            bodyEl.appendChild(indicator);
-        } else {
-            bodyEl.insertBefore(indicator, cards[dropIndex]);
-        }
-
-        document.querySelectorAll(".bb-court-column--drop-target").forEach(c => {
-            if (c !== columnEl) c.classList.remove("bb-court-column--drop-target");
-        });
-        columnEl.classList.add("bb-court-column--drop-target");
-    }
-
-    function onColumnDragLeave(event, columnEl) {
-        // Only clear when the pointer actually left the column (not just
-        // moved between two child elements inside it, which also fires
-        // dragleave/dragenter pairs).
-        if (!columnEl.contains(event.relatedTarget)) {
-            columnEl.classList.remove("bb-court-column--drop-target");
-        }
     }
 
     function onColumnDrop(event, columnEl) {
         event.preventDefault();
-        columnEl.classList.remove("bb-court-column--drop-target");
-        removeDropIndicator();
         if (!draggedMatchId) return;
         const targetCourtId = columnEl.dataset.courtId;
 
-        const bodyEl = columnEl.querySelector(".bb-court-column-body");
-        const { dropIndex } = computeDropIndex(bodyEl, event.clientY);
+        // Figure out drop position: index of the card under the pointer,
+        // or end of column if dropped below everything.
+        const cards = [...columnEl.querySelectorAll(".bb-court-match")];
+        let dropIndex = cards.length;
+        const y = event.clientY;
+        for (let i = 0; i < cards.length; i++) {
+            const rect = cards[i].getBoundingClientRect();
+            if (y < rect.top + rect.height / 2) { dropIndex = i; break; }
+        }
 
         const moved = generatedMatches.find(m => m.matchId === draggedMatchId);
         if (!moved) return;
@@ -1441,19 +1258,7 @@
     // ── Push to Firebase ─────────────────────────────────────────────
     async function pushToFirebase() {
         if (generatedBrackets.length === 0) return;
-
-        // Walkover (BYE) matches never get scheduled onto a court and are
-        // never referenced as a `source` by a later round (see
-        // generateSingleElimination — a walkover's winner is denormalized
-        // directly onto the next match instead of leaving a source
-        // pointer), so nothing downstream in matches/ ever needs to read
-        // one back. The full record of every bye still lives on the
-        // bracket doc itself (bracket.rounds includes them with status
-        // "walkover"), so pushing them to matches/ too would just be dead
-        // documents for TkStrike / court-side consumers to ignore.
-        const rankedMatches = generatedMatches.filter(m => m.status !== "walkover");
-
-        if (!confirm(`Push ${generatedBrackets.length} bracket(s) and ${rankedMatches.length} match(es) to Firestore? This is the live commit.`)) return;
+        if (!confirm(`Push ${generatedBrackets.length} bracket(s) and ${generatedMatches.length} match(es) to Firestore? This is the live commit.`)) return;
 
         const btn = document.getElementById("pushBtn");
         btn.disabled = true;
@@ -1467,13 +1272,11 @@
                 system: b.system, orderingStrategy: b.orderingStrategy, placementStrategy: b.placementStrategy,
                 pssHitLevelSetId: b.pssHitLevelSetId, entries: b.entries,
             })),
-            matches: rankedMatches.map(m => ({
+            matches: generatedMatches.map(m => ({
                 matchId: m.matchId, bracketCategoryCode: m.categoryCode, round: m.round, matchNumber: m.matchNumber,
-                displayNumber: m.displayNumber, roundPhase: m.roundPhase,
-                blue: m.blue, red: m.red, status: m.status, winnerEntryId: m.winnerEntryId,
+                participants: m.participants, status: m.status, winnerEntryId: m.winnerEntryId,
                 courtId: m.courtId, queuePosition: m.queuePosition,
                 pssSize: m.pssSize, hitLevel: m.hitLevel, pssHitLevelSetId: m.pssHitLevelSetId,
-                roundTime: m.roundTime, breakTime: m.breakTime,
             })),
         };
 
@@ -1674,7 +1477,7 @@
 
     .bb-court-row {
         display: grid;
-        grid-template-columns: 70px 1fr 1.3fr 90px 130px auto auto;
+        grid-template-columns: 1fr 1.3fr 90px 130px auto auto;
         gap: 0.5rem;
         align-items: center;
         padding: 0.4rem 0;
@@ -1751,7 +1554,6 @@
     .bb-view-pins {
         display: flex;
         gap: 0.5rem;
-        align-items: center;
     }
 
     .bb-pin {
@@ -1902,31 +1704,6 @@
 
     .bb-court-match--dragging {
         opacity: 0.4;
-    }
-
-    .bb-court-column--drop-target {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25) inset;
-    }
-
-    .bb-drop-indicator {
-        height: 3px;
-        border-radius: 2px;
-        background: var(--accent);
-        margin: -0.1rem 0;
-        animation: bb-drop-pulse 0.9s ease-in-out infinite;
-    }
-
-    @keyframes bb-drop-pulse {
-
-        0%,
-        100% {
-            opacity: 1;
-        }
-
-        50% {
-            opacity: 0.4;
-        }
     }
 
     .flash-banner {

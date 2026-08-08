@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}{{ club_name }} — TrueVAR{% endblock %}
+
+{% block content %}
+<div
+    style="display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.75rem;">
+    <div>
+        <a href="/settings" class="text-muted"
+            style="font-size: 0.9rem; text-decoration: none; display: block; margin-bottom: 0.5rem;">&larr; Back to
+            settings</a>
+        <h2>{{ club_name }}</h2>
+        <p class="text-muted" style="margin-top: 0.4rem;">Your club's athlete roster.</p>
+    </div>
+    <a href="/athletes/new" class="btn btn-primary">+ Create New Athlete</a>
+</div>
+
+<div class="panel" style="padding: 1.5rem;">
+    <input type="text" id="searchInput" placeholder="Search athletes by name..." style="max-width: 360px;">
+
+    <div style="overflow-x: auto; margin-top: 1.25rem;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.95rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Name</th>
+                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Gender</th>
+                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Birth Year</th>
+                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Country</th>
+                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Sport(s)</th>
+                </tr>
+            </thead>
+            <tbody id="rosterBody">
+                <tr>
+                    <td colspan="5" style="padding: 1.5rem 0.5rem; text-align: center; color: var(--text-muted);">
+                        Loading roster...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div
+        style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border);">
+        <span id="pageLabel" class="text-muted mono" style="font-size: 0.85rem;"></span>
+        <div style="display: flex; gap: 0.6rem;">
+            <button id="prevBtn" class="btn btn-secondary" style="padding: 0.6rem 1.1rem; min-height: 40px;"
+                onclick="changePage(-1)">Previous</button>
+            <button id="nextBtn" class="btn btn-secondary" style="padding: 0.6rem 1.1rem; min-height: 40px;"
+                onclick="changePage(1)">Next</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const CLUB_ID = {{ club_id | tojson }};
+    const PAGE_SIZE = 10;
+    let offset = 0;
+    let total = 0;
+    let searchDebounce = null;
+
+    async function loadRoster() {
+        const rosterBody = document.getElementById("rosterBody");
+        const search = document.getElementById("searchInput").value.trim();
+
+        rosterBody.innerHTML = `<tr><td colspan="5" style="padding: 1.5rem 0.5rem; text-align: center; color: var(--text-muted);">Loading roster...</td></tr>`;
+
+        const params = new URLSearchParams({ search, limit: PAGE_SIZE, offset });
+        const res = await fetch(`/api/clubs/${CLUB_ID}/athletes?${params.toString()}`);
+
+        if (!res.ok) {
+            rosterBody.innerHTML = `<tr><td colspan="5" style="padding: 1.5rem 0.5rem; text-align: center; color: var(--red-text);">Couldn't load athletes.</td></tr>`;
+            return;
+        }
+
+        const data = await res.json();
+        total = data.total;
+
+        if (data.athletes.length === 0) {
+            rosterBody.innerHTML = `<tr><td colspan="5" style="padding: 1.5rem 0.5rem; text-align: center; color: var(--text-muted);">No athletes found.</td></tr>`;
+        } else {
+            rosterBody.innerHTML = data.athletes.map(a => `
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 0.7rem 0.5rem; font-weight: 600; color: var(--ink);">${escapeHtml(a.displayName)}</td>
+                    <td style="padding: 0.7rem 0.5rem; text-transform: capitalize;">${escapeHtml(a.gender || "—")}</td>
+                    <td style="padding: 0.7rem 0.5rem;" class="mono">${a.birthYear || "—"}</td>
+                    <td style="padding: 0.7rem 0.5rem;" class="mono">${escapeHtml(a.country || "—")}</td>
+                    <td style="padding: 0.7rem 0.5rem; text-transform: capitalize;">${(a.sports || []).join(", ") || "—"}</td>
+                </tr>
+            `).join("");
+        }
+
+        const start = total === 0 ? 0 : offset + 1;
+        const end = Math.min(offset + PAGE_SIZE, total);
+        document.getElementById("pageLabel").textContent = `${start}–${end} of ${total}`;
+        document.getElementById("prevBtn").disabled = offset === 0;
+        document.getElementById("nextBtn").disabled = offset + PAGE_SIZE >= total;
+    }
+
+    function changePage(direction) {
+        offset = Math.max(0, offset + direction * PAGE_SIZE);
+        loadRoster();
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement("div");
+        div.textContent = str ?? "";
+        return div.innerHTML;
+    }
+
+    document.getElementById("searchInput").addEventListener("input", () => {
+        clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(() => {
+            offset = 0;
+            loadRoster();
+        }, 300);
+    });
+
+    loadRoster();
+</script>
+{% endblock %}

@@ -6,6 +6,7 @@ from infrastructure.routers.api_router import router as tournament_router
 from infrastructure.routers.youtube_router import router as youtube_router
 from infrastructure.routers.dashboard_router import router as dashboard_router
 from infrastructure.routers.auth_router import router as auth_router
+from infrastructure.routers.club_router import router as club_router
 
 from dotenv import load_dotenv
 
@@ -33,6 +34,7 @@ app.include_router(tournament_router, prefix="/api")
 app.include_router(youtube_router)
 app.include_router(dashboard_router, prefix="/dashboard")
 app.include_router(auth_router)
+app.include_router(club_router)
 
 
 @app.get("/")

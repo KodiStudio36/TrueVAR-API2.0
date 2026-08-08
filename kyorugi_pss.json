@@ -7,7 +7,7 @@
     "label": "DAEDO PSS HITLEVEL (2023)",
     "note": "pupils_1/pupils_2/younger_cadets rows are fit from DAEDO's Kids 8-10/11-12 charts by age proximity + nearest weight, not exact DAEDO-published values for those exact weight classes. juniors/seniors/veterans are exact matches to DAEDO's own tables. See generate_pss_hitlevels.py's docstring for the full mapping.",
     "pssHitLevels": {
-        "pupils_1|male": [
+        "pupils_1|men": [
             {
                 "maxWeight": 18,
                 "pssSize": 0,
@@ -69,7 +69,7 @@
                 "hitLevel": 12
             }
         ],
-        "pupils_1|female": [
+        "pupils_1|women": [
             {
                 "maxWeight": 18,
                 "pssSize": 0,
@@ -131,7 +131,7 @@
                 "hitLevel": 12
             }
         ],
-        "pupils_2|male": [
+        "pupils_2|men": [
             {
                 "maxWeight": 22,
                 "pssSize": 0,
@@ -190,10 +190,10 @@
             {
                 "maxWeight": null,
                 "pssSize": 3,
-                "hitLevel": 15
+                "hitLevel": 13
             }
         ],
-        "pupils_2|female": [
+        "pupils_2|women": [
             {
                 "maxWeight": 22,
                 "pssSize": 0,
@@ -252,10 +252,10 @@
             {
                 "maxWeight": null,
                 "pssSize": 3,
-                "hitLevel": 15
+                "hitLevel": 13
             }
         ],
-        "younger_cadets|male": [
+        "younger_cadets|men": [
             {
                 "maxWeight": 26,
                 "pssSize": 0,
@@ -317,7 +317,7 @@
                 "hitLevel": 15
             }
         ],
-        "younger_cadets|female": [
+        "younger_cadets|women": [
             {
                 "maxWeight": 26,
                 "pssSize": 0,
@@ -379,7 +379,7 @@
                 "hitLevel": 15
             }
         ],
-        "cadets|male": [
+        "cadets|men": [
             {
                 "maxWeight": 33,
                 "pssSize": 0,
@@ -431,7 +431,7 @@
                 "hitLevel": 20
             }
         ],
-        "cadets|female": [
+        "cadets|women": [
             {
                 "maxWeight": 29,
                 "pssSize": 0,
@@ -483,7 +483,7 @@
                 "hitLevel": 18
             }
         ],
-        "juniors|male": [
+        "juniors|men": [
             {
                 "maxWeight": 45,
                 "pssSize": 1,
@@ -535,7 +535,7 @@
                 "hitLevel": 23
             }
         ],
-        "juniors|female": [
+        "juniors|women": [
             {
                 "maxWeight": 42,
                 "pssSize": 1,
@@ -587,7 +587,7 @@
                 "hitLevel": 20
             }
         ],
-        "seniors|male": [
+        "seniors|men": [
             {
                 "maxWeight": 54,
                 "pssSize": 2,
@@ -629,7 +629,7 @@
                 "hitLevel": 23
             }
         ],
-        "seniors|female": [
+        "seniors|women": [
             {
                 "maxWeight": 46,
                 "pssSize": 2,
@@ -671,7 +671,7 @@
                 "hitLevel": 21
             }
         ],
-        "veterans|male": [
+        "veterans|men": [
             {
                 "maxWeight": 54,
                 "pssSize": 2,
@@ -713,7 +713,7 @@
                 "hitLevel": 23
             }
         ],
-        "veterans|female": [
+        "veterans|women": [
             {
                 "maxWeight": 46,
                 "pssSize": 2,
