@@ -510,6 +510,12 @@
             for (let i = 0; i < numMatches; i++) {
                 const matchId = `${categoryCode}_r${roundNum}_m${i + 1}`;
                 let blue, red, status, winnerEntryId = null;
+                // The walkover winner's ENTIRE corner object, copied
+                // wholesale into whatever match is next for them — no id,
+                // no lookup, nothing to reconstruct. This is a plain
+                // JS object assignment, done once, right here, before
+                // this walkover match is even finished being built.
+                let winnerCorner = null;
 
                 // Denormalizes name/country/clubId straight onto the
                 // corner at the moment an entry is known — so every
@@ -526,17 +532,33 @@
                     const p1 = slots[i * 2], p2 = slots[i * 2 + 1];
                     blue = cornerFrom(p1);
                     red = cornerFrom(p2);
-                    if (p1 && !p2) { status = "walkover"; winnerEntryId = p1.entryId; }
-                    else if (p2 && !p1) { status = "walkover"; winnerEntryId = p2.entryId; }
-                    else if (p1 && p2) { status = "ready"; }
-                    else { status = "walkover"; }
+                    // winnerCorner is set RIGHT HERE, not in a later pass —
+                    // the next round is built later in this SAME function
+                    // call and pastes this exact object into its own
+                    // blue/red directly.
+                    if (p1 && !p2) {
+                        status = "walkover";
+                        winnerCorner = { entryId: p1.entryId, athleteIds: p1.athleteIds, name: p1.name, country: p1.country, clubId: p1.clubId };
+                    } else if (p2 && !p1) {
+                        status = "walkover";
+                        winnerCorner = { entryId: p2.entryId, athleteIds: p2.athleteIds, name: p2.name, country: p2.country, clubId: p2.clubId };
+                    } else if (p1 && p2) {
+                        status = "ready";
+                    } else {
+                        status = "walkover";
+                    }
                 } else {
                     const m1 = prevRoundMatches[i * 2], m2 = prevRoundMatches[i * 2 + 1];
+                    // Straight paste of the walkover match's winnerCorner —
+                    // same object shape as any known entry. A real,
+                    // not-yet-fought feeder gets a source pointer instead,
+                    // resolved later by the cloud function once that fight
+                    // actually happens.
                     blue = m1.status === "walkover"
-                        ? { entryId: m1.winnerEntryId, athleteIds: m1.winnerAthleteIds, name: m1.winnerName, country: m1.winnerCountry, clubId: m1.winnerClubId }
+                        ? m1.winnerCorner
                         : { entryId: null, source: { matchId: m1.matchId, slot: "winner" } };
                     red = m2.status === "walkover"
-                        ? { entryId: m2.winnerEntryId, athleteIds: m2.winnerAthleteIds, name: m2.winnerName, country: m2.winnerCountry, clubId: m2.winnerClubId }
+                        ? m2.winnerCorner
                         : { entryId: null, source: { matchId: m2.matchId, slot: "winner" } };
                     status = (blue.entryId && red.entryId) ? "ready" : "pending";
                 }
@@ -545,7 +567,9 @@
                 roundMatches.push({
                     matchId, categoryCode, round: roundNum, matchNumber: i + 1,
                     roundPhase: roundPhaseCode(playersEnteringRound),
-                    blue, red, status, winnerEntryId, courtId: null, queuePosition: null,
+                    blue, red, status, winnerEntryId,
+                    winnerCorner, // internal use only, for pasting into the next round — never sent to Firestore (walkovers are filtered out entirely before push, see pushToFirebase)
+                    courtId: null, queuePosition: null,
                 });
             }
 
@@ -784,20 +808,15 @@
             const built = bracketFn(cat.code, seeded, placementFn);
             totalConflicts += built.conflictCount || 0;
 
-            // Fill in winner* fields for walkover matches so later rounds
-            // (which may become "ready" purely from bye-cascading, or
-            // need the gap constraint's athleteIds) have real denormalized
-            // data to carry forward, even before an actual "match
-            // completed" event happens.
+            // winnerCorner for a walkover match is already set inside
+            // generateSingleElimination itself, at the moment the
+            // walkover is detected — not here. That timing matters: the
+            // NEXT round is built later in that same function call and
+            // pastes m.winnerCorner directly into its own blue/red, so
+            // it has to exist before that happens, not after this loop
+            // runs.
             const vestInfo = vestInfoFor(cat);
             built.rounds.forEach(roundMatches => roundMatches.forEach(m => {
-                if (m.status === "walkover") {
-                    const winner = m.blue.entryId === m.winnerEntryId ? m.blue : m.red;
-                    m.winnerAthleteIds = winner.athleteIds || [];
-                    m.winnerName = winner.name;
-                    m.winnerCountry = winner.country;
-                    m.winnerClubId = winner.clubId;
-                }
                 // Vest size / hit-level are a property of the CATEGORY
                 // (weight bracket), so every match within it — every
                 // round — gets the same values, set once here.
@@ -1085,8 +1104,7 @@
                     // Bye: just the one real fighter's name, centered in
                     // the slot — no "BYE" row, no badge (nothing fought),
                     // straight line through to the next real box.
-                    const winnerParticipant = match.blue.entryId === match.winnerEntryId ? match.blue : match.red;
-                    const winnerStr = participantDisplay(bracket, winnerParticipant);
+                    const winnerStr = participantDisplay(bracket, match.winnerCorner);
                     text(nameX, y + 3, anchor, winnerStr, { size: nameFontSize });
                     const winnerFeedX = dir === 1 ? nameX + estimateTextWidth(winnerStr, nameFontSize) + 4 : nameX - estimateTextWidth(winnerStr, nameFontSize) - 4;
                     line(winnerFeedX, y, boxX, y);

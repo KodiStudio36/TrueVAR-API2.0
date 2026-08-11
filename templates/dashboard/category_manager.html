@@ -18,6 +18,33 @@
             <h1 class="panel-title" style="font-size:1.5rem;">Manage Categories</h1>
         </div>
         <span id="totalBadge" class="badge badge-grey"></span>
+
+        {# ── Backup document generation — real PDFs built entirely
+        client-side with jsPDF (vector-drawn, not the browser's print
+        engine), so the output is byte-identical regardless of which
+        browser/OS/printer generates it. Pulls from
+        /api/tournaments/{id}/weighin-data; nothing is persisted
+        server-side by these. ─────────────────────────────────────── #}
+        <button type="button" class="btn btn-ghost btn-sm" onclick="generateRegistrationSheet(this)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+                <path d="M9 15h6" />
+                <path d="M9 11h6" />
+            </svg>
+            Generate Registration Sheet
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="generateWeighInSheet(this)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 3v3" />
+                <path d="M5.5 6.5l1.5 1.5" />
+                <path d="M18.5 6.5l-1.5 1.5" />
+                <circle cx="12" cy="14" r="7" />
+                <path d="M12 14l3-2" />
+            </svg>
+            Generate Weigh-in Sheet
+        </button>
+
         <a href="/dashboard/tournaments/{{ tournament.id }}/brackets" class="btn btn-primary btn-sm">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M6 3v18" />
@@ -64,8 +91,17 @@
 </div>
 <div id="addAthleteBackdrop" class="cm-add-backdrop hidden" onclick="closeAddAthlete()"></div>
 
+{# jsPDF + autoTable — loaded synchronously (no defer/async) so the
+generation functions below can rely on window.jspdf being ready by
+the time a person clicks a button. Both are pure client-side vector
+PDF renderers: identical output on every machine, unlike relying on
+each browser's own print-to-PDF engine. #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
 <script>
     const TOURNAMENT_ID = "{{ tournament.id }}";
+    const TOURNAMENT_TITLE = {{ tournament.title | tojson }};
     const TOURNAMENT_SPORT = "{{ tournament.sport | default('') | lower }}";
     const TOURNAMENT_DISCIPLINE = "{{ tournament.discipline | default('') | lower }}";
 
@@ -352,7 +388,7 @@
         resultsEl.innerHTML = `<p class="text-muted" style="font-size: 0.85rem; padding: 0.6rem;">Searching…</p>`;
 
         try {
-            const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&limit=10`);
+            const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&sport=${encodeURIComponent(TOURNAMENT_SPORT)}&limit=10`);
             if (!res.ok) throw new Error(`Search failed: ${res.status}`);
             const data = await res.json();
             renderAddAthleteResults(data.athletes || []);
@@ -510,6 +546,207 @@
         }[ch]));
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // BACKUP DOCUMENT GENERATION — real PDFs, drawn client-side.
+    //
+    // Both documents pull from the same endpoint
+    // (/api/tournaments/{id}/weighin-data), which returns active
+    // registrations already grouped by club and sorted A→Z. Clubs with
+    // no clubId on file (e.g. entries added via the admin-add path with
+    // no requesting club) come back separately under "unassigned" and
+    // are rendered as their own trailing, unnumbered page(s) — never
+    // merged into a real club's roster.
+    //
+    // Why jsPDF instead of window.print(): print-to-PDF goes through
+    // each browser's own print engine, and margins/scaling/page breaks
+    // drift across browsers, OSes, and printer drivers — exactly the
+    // "stretched" inconsistency this replaces. jsPDF draws the document
+    // as vectors directly, so the .pdf file downloaded is byte-for-byte
+    // the same no matter whose machine generated it.
+    // ═══════════════════════════════════════════════════════════════
+
+    const PDF_MARGIN = 14; // mm, both sides — matches A4 page width math below
+    const PDF_PAGE_WIDTH = 210; // A4, mm
+    const PDF_USABLE_WIDTH = PDF_PAGE_WIDTH - PDF_MARGIN * 2; // 182mm
+
+    function assertPdfLibsLoaded() {
+        if (!window.jspdf || !window.jspdf.jsPDF) {
+            throw new Error("PDF library failed to load — check your connection and try again.");
+        }
+    }
+
+    async function fetchWeighInData() {
+        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/weighin-data`);
+        if (!res.ok) throw new Error(`Failed to load registrations (${res.status})`);
+        return res.json();
+    }
+
+    function pdfFilename(kind) {
+        const safeTitle = TOURNAMENT_TITLE.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase();
+        return `${safeTitle || "tournament"}_${kind}.pdf`;
+    }
+
+    // Draws the shared page header (tournament title + club line) at the
+    // top of whatever page is currently active in `doc`.
+    function drawPageHeader(doc, index, clubName, sectionLabel) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.setTextColor(17, 17, 17);
+        doc.text(TOURNAMENT_TITLE, PDF_MARGIN, 18);
+
+        doc.setFontSize(13);
+        const clubLine = (index != null ? `${index}   ` : "") + (clubName || "No Club");
+        doc.text(clubLine, PDF_MARGIN, 26);
+
+        if (sectionLabel) {
+            doc.setFontSize(11);
+            doc.setTextColor(220, 38, 38);
+            doc.text(sectionLabel, PDF_MARGIN, 33);
+            doc.setTextColor(17, 17, 17);
+        }
+    }
+
+    // ── Weigh-in sheet: per club, one page per gender that has entries ──
+    function buildWeighInDoc(data) {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: "mm", format: "a4" });
+        let isFirstPage = true;
+
+        const columns = [
+            { header: "ID no.", dataKey: "id", width: 10 },
+            { header: "Surname", dataKey: "name", width: 34 },
+            { header: "Category", dataKey: "category", width: 34 },
+            { header: "Length", dataKey: "length", width: 14 },
+            { header: "Change", dataKey: "change", width: 14 },
+            { header: "1st weighin", dataKey: "w1", width: 16 },
+            { header: "Final weighin", dataKey: "w2", width: 16 },
+            { header: "Passport", dataKey: "passport", width: 12 },
+            { header: "Signature", dataKey: "sig", width: 32 },
+        ];
+
+        function addSectionPage(index, clubName, sectionLabel, rows) {
+            if (!isFirstPage) doc.addPage();
+            isFirstPage = false;
+
+            drawPageHeader(doc, index, clubName, sectionLabel);
+
+            const body = rows.map((e, i) => [
+                String(i + 1), `${e.lastName}, ${e.firstName}`, e.categoryLabel || "",
+                "", "", "", "", "", "",
+            ]);
+
+            doc.autoTable({
+                startY: 37,
+                head: [columns.map(c => c.header)],
+                body,
+                columnStyles: Object.fromEntries(columns.map((c, i) => [i, { cellWidth: c.width }])),
+                styles: { fontSize: 8, cellPadding: 1.8, lineColor: [17, 17, 17], lineWidth: 0.2, minCellHeight: 8 },
+                headStyles: { fillColor: [255, 255, 255], textColor: [17, 17, 17], fontStyle: "bold", lineWidth: 0.3 },
+                theme: "grid",
+                margin: { left: PDF_MARGIN, right: PDF_MARGIN },
+            });
+        }
+
+        function addClubPages(index, club) {
+            const male = club.entries.filter(e => (e.gender || "").toLowerCase().startsWith("m"));
+            const female = club.entries.filter(e => (e.gender || "").toLowerCase().startsWith("f"));
+            const other = club.entries.filter(e => !male.includes(e) && !female.includes(e));
+
+            if (male.length) addSectionPage(index, club.clubName, "Male", male);
+            if (female.length) addSectionPage(index, club.clubName, "Female", female);
+            if (other.length) addSectionPage(index, club.clubName, "Other", other);
+        }
+
+        data.clubs.forEach((club, i) => addClubPages(i + 1, club));
+        if (data.unassigned && data.unassigned.entries.length) addClubPages(null, data.unassigned);
+
+        return doc;
+    }
+
+    async function generateWeighInSheet(btn) {
+        if (btn) btn.disabled = true;
+        showFlash("Generating weigh-in sheet…");
+        try {
+            assertPdfLibsLoaded();
+            const data = await fetchWeighInData();
+            const hasRows = data.clubs.some(c => c.entries.length) || (data.unassigned && data.unassigned.entries.length);
+            if (!hasRows) {
+                showFlash("No active registrations to generate a sheet from.", true);
+                return;
+            }
+            buildWeighInDoc(data).save(pdfFilename("weighin"));
+            showFlash("Weigh-in sheet downloaded.");
+        } catch (err) {
+            console.error(err);
+            showFlash(err.message || "Failed to generate sheet.", true);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // ── Backup registration sheet: per club, one page, no gender split ──
+    function buildRegistrationDoc(data) {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: "mm", format: "a4" });
+        let isFirstPage = true;
+
+        const columnWidths = { id: 12, name: 50, category: 60, sig: 60 };
+
+        function addClubPage(index, club) {
+            if (!club.entries.length) return;
+            if (!isFirstPage) doc.addPage();
+            isFirstPage = false;
+
+            drawPageHeader(doc, index, club.clubName, null);
+
+            const body = club.entries.map((e, i) => [
+                String(i + 1), `${e.lastName}, ${e.firstName}`, e.categoryLabel || "", "",
+            ]);
+
+            doc.autoTable({
+                startY: 32,
+                head: [["ID no.", "Surname", "Category", "Signature"]],
+                body,
+                columnStyles: {
+                    0: { cellWidth: columnWidths.id },
+                    1: { cellWidth: columnWidths.name },
+                    2: { cellWidth: columnWidths.category },
+                    3: { cellWidth: columnWidths.sig, minCellHeight: 12 },
+                },
+                styles: { fontSize: 9, cellPadding: 2.2, lineColor: [17, 17, 17], lineWidth: 0.2 },
+                headStyles: { fillColor: [255, 255, 255], textColor: [17, 17, 17], fontStyle: "bold", lineWidth: 0.3 },
+                theme: "grid",
+                margin: { left: PDF_MARGIN, right: PDF_MARGIN },
+            });
+        }
+
+        data.clubs.forEach((club, i) => addClubPage(i + 1, club));
+        if (data.unassigned && data.unassigned.entries.length) addClubPage(null, data.unassigned);
+
+        return doc;
+    }
+
+    async function generateRegistrationSheet(btn) {
+        if (btn) btn.disabled = true;
+        showFlash("Generating registration sheet…");
+        try {
+            assertPdfLibsLoaded();
+            const data = await fetchWeighInData();
+            const hasRows = data.clubs.some(c => c.entries.length) || (data.unassigned && data.unassigned.entries.length);
+            if (!hasRows) {
+                showFlash("No active registrations to generate a sheet from.", true);
+                return;
+            }
+            buildRegistrationDoc(data).save(pdfFilename("registration"));
+            showFlash("Registration sheet downloaded.");
+        } catch (err) {
+            console.error(err);
+            showFlash(err.message || "Failed to generate sheet.", true);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
     init();
 </script>
 
@@ -597,6 +834,11 @@
         white-space: nowrap;
     }
 
+    .btn:disabled {
+        opacity: .55;
+        cursor: not-allowed;
+    }
+
     .btn-primary {
         background: var(--accent);
         color: #fff;
@@ -612,7 +854,7 @@
         border: 1px solid var(--border);
     }
 
-    .btn-ghost:hover {
+    .btn-ghost:hover:not(:disabled) {
         background: #f8fafc;
         color: var(--text);
     }
@@ -654,12 +896,13 @@
     .cm-topbar {
         display: flex;
         align-items: center;
-        gap: 1.25rem;
+        flex-wrap: wrap;
+        gap: .75rem 1.25rem;
     }
 
     .cm-topbar-title {
         flex: 1;
-        min-width: 0;
+        min-width: 220px;
     }
 
     .cm-hint {

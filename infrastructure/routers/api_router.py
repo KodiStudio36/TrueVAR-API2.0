@@ -94,6 +94,7 @@ class CreateAthleteRequest(BaseModel):
     country: str
     sport: str     # "taekwondo" or "boxing"
     rank: int
+    associationId: Optional[str] = None  # optional, sport-scoped national/association federation ID
 
 VALID_STATUSES = {"active", "archived"}
 
@@ -107,7 +108,7 @@ def create_tournament_endpoint(
     repo: FirebaseTournamentRepository = Depends(get_tournament_repo)
 ):
     use_case = CreateTournamentUseCase(repo)
-    
+
     # 1. Create core tournament entity with registration settings
     created_tournament = use_case.execute(
         title=payload.title,
@@ -153,9 +154,12 @@ def list_tournaments_paginated(
     status: str = Query("active", pattern="^(active|archived)$"),
     limit: int = Query(10, ge=1, le=50),
     offset: int = Query(0, ge=0),
+    isExternalPublic: Optional[bool] = Query(None, description="Filter to publicly-listed tournaments only"),
     repo: TournamentPort = Depends(get_tournament_repo),
 ):
-    tournaments = repo.getTournamentsPaginated(status=status, limit=limit, offset=offset)
+    tournaments = repo.getTournamentsPaginated(
+        status=status, limit=limit, offset=offset, isExternalPublic=isExternalPublic
+    )
     return {
         "tournaments": [
             {
@@ -201,6 +205,8 @@ def _build_roster_member(athlete_id: str, athlete: dict, sport: Optional[str]) -
     }
     if sport_data.get("rank") is not None:
         entry["rank"] = sport_data["rank"]
+    if sport_data.get("associationId"):
+        entry["associationId"] = sport_data["associationId"]
     return entry
 
 
@@ -385,9 +391,18 @@ def _execute_registration_create(
 
     entry_id = "-".join(sorted(payload.athleteIds))
 
+    club_id = requesting_club_id or (members[0].get("clubId") if members else None)
+    club_name = members[0].get("club") if members else None
+
     reg_ref = tournament_ref.collection("registrations").document(f"{payload.categoryCode}_{entry_id}")
     roster_ref = tournament_ref.collection("division_rosters").document(payload.ageCode)
     counts_ref = tournament_ref.collection("meta").document("categoryCounts")
+    # Denormalized club roll-up: which clubs have >=1 active registration in
+    # this tournament, and how many, so the admin panel and the weigh-in /
+    # backup sheet generator can group by club without scanning every
+    # registration doc. Kept in the SAME transaction as the registration
+    # write so it never drifts out of sync with the real registration count.
+    clubs_ref = tournament_ref.collection("meta").document("registeredClubs")
 
     transaction = db.transaction()
 
@@ -405,7 +420,7 @@ def _execute_registration_create(
             "categoryCode": payload.categoryCode,
             "categoryLabel": payload.categoryLabel,
             "athleteIds": payload.athleteIds,
-            "clubId": requesting_club_id or (members[0].get("clubId") if members else None),
+            "clubId": club_id,
             "status": "active",
             "registeredAt": firestore.SERVER_TIMESTAMP,
         })
@@ -415,6 +430,11 @@ def _execute_registration_create(
         }, merge=True)
 
         tx.set(counts_ref, {payload.categoryCode: firestore.Increment(1)}, merge=True)
+
+        if club_id:
+            tx.set(clubs_ref, {
+                club_id: {"clubName": club_name, "count": firestore.Increment(1)}
+            }, merge=True)
 
     try:
         _register(transaction)
@@ -465,6 +485,7 @@ def get_athlete_endpoint(athlete_id: str, user: Optional[dict] = Depends(get_cur
         "displayName": data.get("displayName") or f"{data.get('firstName','')} {data.get('lastName','')}".strip(),
         "club": sport_data.get("clubName", ""),
         "clubId": sport_data.get("clubId"),
+        "associationId": sport_data.get("associationId"),
         "gender": data.get("gender"),
         "birthYear": _birth_year(data),
     }
@@ -555,6 +576,12 @@ def _execute_registration_move(
             payload.newCategoryCode: firestore.Increment(1),
         }, merge=True)
 
+        # NOTE: no registeredClubs write here on purpose — moving a
+        # registration between categories never changes which club owns
+        # the entry (old_data["clubId"] carries straight over to the new
+        # registration doc above), so the club roll-up counts stay correct
+        # without touching them.
+
     try:
         _move(transaction)
     except HTTPException:
@@ -599,6 +626,7 @@ def remove_registration_endpoint(
     reg_ref = tournament_ref.collection("registrations").document(f"{category_code}_{entry_id}")
     roster_ref = tournament_ref.collection("division_rosters").document(age_code)
     counts_ref = tournament_ref.collection("meta").document("categoryCounts")
+    clubs_ref = tournament_ref.collection("meta").document("registeredClubs")  # keep club roll-up in sync
 
     transaction = db.transaction()
 
@@ -616,6 +644,10 @@ def remove_registration_endpoint(
         tx.update(roster_ref, {f"athletes.{category_code}.{entry_id}": firestore.DELETE_FIELD})
         tx.set(counts_ref, {category_code: firestore.Increment(-1)}, merge=True)
 
+        club_id = reg_data.get("clubId")
+        if club_id:
+            tx.set(clubs_ref, {club_id: {"count": firestore.Increment(-1)}}, merge=True)
+
     try:
         _remove(transaction)
     except HTTPException:
@@ -632,6 +664,26 @@ def get_category_counts(tournament_id: str):
     counts = doc.to_dict() if doc.exists else {}
     total = sum(v for v in counts.values() if isinstance(v, (int, float)))
     return {"tournamentId": tournament_id, "categoryCounts": counts, "totalRegistered": total}
+
+
+@router.get("/tournaments/{tournament_id}/registered-clubs")
+def get_registered_clubs(tournament_id: str):
+    """
+    Admin-panel-facing read of the denormalized club roll-up: every club
+    with at least one active registration in this tournament, and how
+    many. Not used by the weigh-in/backup sheet generator (that endpoint
+    below groups fresh off live registrations instead) — this is purely
+    for fast "who's registered so far" UI.
+    """
+    doc = db.collection("tournaments").document(tournament_id).collection("meta").document("registeredClubs").get()
+    data = doc.to_dict() if doc.exists else {}
+    clubs = [
+        {"clubId": cid, "clubName": info.get("clubName", ""), "count": info.get("count", 0)}
+        for cid, info in data.items()
+        if info.get("count", 0) > 0
+    ]
+    clubs.sort(key=lambda c: c["clubName"].lower())
+    return {"tournamentId": tournament_id, "clubs": clubs}
 
 
 @router.get("/tournaments/{tournament_id}/division-rosters/{age_code}")
@@ -716,10 +768,11 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
         .collection("matches")
     )
 
-    real_id_by_local_id = {
-        m.matchId: f"{tournament_id}_{m.displayNumber if m.displayNumber is not None else m.matchId}"
-        for m in payload.matches
-    }
+
+    real_id_by_local_id = {}
+    for m in payload.matches:
+        match_number = m.displayNumber if m.displayNumber is not None else m.matchId
+        real_id_by_local_id[m.matchId] = f"{tournament_id}_{str(int(match_number)) if isinstance(match_number, float) and match_number.is_integer() else str(match_number)}"
 
     for m in payload.matches:
         doc_id = real_id_by_local_id[m.matchId]
@@ -748,12 +801,9 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
             "queuePosition": m.queuePosition,
             "pssSize": m.pssSize,
             "hitLevel": m.hitLevel,
-            "pssHitLevelSetId": m.pssHitLevelSetId,
             "roundTime": m.roundTime,
             "breakTime": m.breakTime,
             "isRanked": m.isRanked,
-            "source": "tournament_system",
-            "assignment": "auto",
         }, merge=True)
 
     batch.commit()
@@ -1067,6 +1117,79 @@ def insert_match_endpoint(
     }
 
 
+@router.get("/tournaments/{tournament_id}/weighin-data")
+def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tournament_repo)):
+    """
+    Single source of truth for the two client-generated backup documents
+    (weigh-in sheet, backup registration sheet) — see
+    dashboard/category_manager.html's "Generate Weigh-in Sheet" /
+    "Generate Registration Sheet" buttons, which fetch this once and
+    render an actual PDF entirely client-side with jsPDF (drawn as
+    vectors — not the browser's print engine — specifically so the
+    output is byte-identical regardless of which browser/OS/printer
+    driver opens it). Nothing here is persisted; it's a fresh read of
+    active registrations, grouped by club, every time it's called.
+
+    Registrations with no clubId (e.g. entries added via admin-add
+    without a requesting club) are returned separately under
+    "unassigned" rather than folded into any real club's roster, so the
+    client can render them as their own unlabeled page(s).
+    """
+    tournament = repo.getTournament(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    tournament_ref = db.collection("tournaments").document(tournament_id)
+    regs = [
+        d.to_dict() for d in tournament_ref.collection("registrations").stream()
+        if d.to_dict().get("status", "active") == "active"
+    ]
+
+    # Batch-resolve every referenced athlete once, instead of one read per
+    # registration entry.
+    athlete_ids = {aid for r in regs for aid in r.get("athleteIds", [])}
+    athlete_refs = [db.collection("athletes").document(aid) for aid in athlete_ids]
+    athletes = {snap.id: snap.to_dict() for snap in db.get_all(athlete_refs) if snap.exists}
+
+    clubs_meta_doc = tournament_ref.collection("meta").document("registeredClubs").get()
+    club_names = {cid: info.get("clubName", "") for cid, info in (clubs_meta_doc.to_dict() or {}).items()}
+
+    by_club: Dict[str, Dict] = {}
+    for r in regs:
+        club_id = r.get("clubId")
+        bucket_key = club_id or "__unassigned__"
+        club = by_club.setdefault(bucket_key, {
+            "clubId": club_id,
+            "clubName": club_names.get(club_id, "") if club_id else None,
+            "entries": [],
+        })
+        for athlete_id in r.get("athleteIds", []):
+            a = athletes.get(athlete_id, {})
+            club["entries"].append({
+                "athleteId": athlete_id,
+                "lastName": (a.get("lastName") or "").title(),
+                "firstName": (a.get("firstName") or "").title(),
+                "gender": r.get("genderCode"),
+                "categoryLabel": r.get("categoryLabel"),
+            })
+
+    for club in by_club.values():
+        club["entries"].sort(key=lambda e: (e["lastName"], e["firstName"]))
+
+    real_clubs = sorted(
+        (c for c in by_club.values() if c["clubId"]),
+        key=lambda c: (c["clubName"] or "").lower(),
+    )
+    unassigned = by_club.get("__unassigned__")
+
+    return {
+        "tournamentId": tournament_id,
+        "tournamentTitle": tournament.title,
+        "clubs": real_clubs,
+        "unassigned": unassigned,  # null if every registration has a real club
+    }
+
+
 @router.get("/tournaments/{tournament_id}", response_model=TournamentResponse)
 def tournament_page_endpoint(tournament_id: str, repo=Depends(get_tournament_repo)):
     """Acts as the dedicated view state for a single tournament profile."""
@@ -1170,6 +1293,11 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid birthday format. Expected YYYY-MM-DD.")
 
+    sport_entry = {"rank": payload.rank, "clubId": admin_club_id, "clubName": club_name}
+    association_id = (payload.associationId or "").strip()
+    if association_id:
+        sport_entry["associationId"] = association_id
+
     athlete_data = {
         "firstName": payload.firstName.lower(),
         "lastName": payload.lastName.lower(),
@@ -1178,7 +1306,7 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
         "birthday": birth_dt,
         "country": payload.country.upper(),
         "sports": {
-            club_sport: {"rank": payload.rank, "clubId": admin_club_id, "clubName": club_name},
+            club_sport: sport_entry,
         },
         "createdAt": firestore.SERVER_TIMESTAMP,
     }

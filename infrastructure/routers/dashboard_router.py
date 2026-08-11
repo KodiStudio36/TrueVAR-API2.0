@@ -3,7 +3,7 @@ from fastapi.templating import Jinja2Templates
 
 from infrastructure.routers.api_router import get_case_repo
 from usecases.case_usecase import GetAllCasesUseCase
-from usecases.tournament_usecase import GetTournamentUseCase
+from usecases.tournament_usecase import GetAllTournamentsUseCase, GetTournamentUseCase
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
 from infrastructure.firebase_client import init_firestore
 
@@ -16,18 +16,19 @@ def get_tournament_repo() -> FirebaseTournamentRepository:
 
 @router.get("/")
 async def dashboard_page(
-    request: Request, 
+    request: Request,
     tournament_repo=Depends(get_tournament_repo),
     case_repo=Depends(get_case_repo)  # Inject the Case repo here
 ):
     """Renders the main dashboard with all tournaments and cases."""
     # Fetch Tournaments
+    tournament_use_case = GetAllTournamentsUseCase(tournament_repo)
     tournaments = tournament_repo.getTournamentsPaginated(status="active", limit=10, offset=0)
-    
+
     # Fetch Cases
     case_use_case = GetAllCasesUseCase(case_repo)
     cases = case_use_case.execute()
-    
+
     return templates.TemplateResponse(request, "dashboard/dashboard.html", {
         "request": request,
         "tournaments": tournaments,
@@ -38,8 +39,8 @@ async def dashboard_page(
 async def create_tournament_page(request: Request):
     """Renders the form to create a new tournament."""
     return templates.TemplateResponse(
-        request, 
-        "dashboard/tournament_create.html", 
+        request,
+        "dashboard/tournament_create.html",
         {"request": request}
     )
 
@@ -48,13 +49,13 @@ async def tournament_detail_page(request: Request, tournament_id: str, repo=Depe
     """Renders the details of a specific tournament."""
     use_case = GetTournamentUseCase(repo)
     tournament = use_case.execute(tournament_id)
-    
+
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
-        
+
     return templates.TemplateResponse(
         request,
-        "dashboard/tournament_detail.html", 
+        "dashboard/tournament_detail.html",
         {"request": request, "tournament": tournament}
     )
 
@@ -67,6 +68,13 @@ async def tournament_category_manager_page(request: Request, tournament_id: str,
     bracket generation. See tournament_detail.html's "Manage Categories"
     link (shown only when isRegistrationOpen is true) for where this is
     linked from.
+
+    Also hosts the two client-side backup document generators — Generate
+    Registration Sheet / Generate Weigh-in Sheet buttons next to Create
+    Brackets — which pull straight from GET
+    /api/tournaments/{tournament_id}/weighin-data and build/print the
+    PDFs entirely in the browser. Nothing server-side to render for
+    those; see category_manager.html's script block.
     """
     use_case = GetTournamentUseCase(repo)
     tournament = use_case.execute(tournament_id)

@@ -58,6 +58,13 @@
                 </select>
             </div>
 
+            <div>
+                <label class="field-label" for="a_association_id">
+                    Association ID <span class="text-muted" style="font-weight: 400;">(optional)</span>
+                </label>
+                <input type="text" id="a_association_id" placeholder="e.g. national federation ID for this sport">
+            </div>
+
             <!-- Taekwondo Specifics -->
             <div id="tkd_specifics" class="hidden"
                 style="background: var(--bg-alt); padding: 1rem; border-radius: 6px; border: 1px solid var(--border);">
@@ -212,6 +219,8 @@
             rankValue = parseInt(document.getElementById("tkd_rank").value, 10);
         }
 
+        const associationId = document.getElementById("a_association_id").value.trim();
+
         const payload = {
             firstName: document.getElementById("a_firstname").value.trim(),
             lastName: document.getElementById("a_lastname").value.trim(),
@@ -221,6 +230,12 @@
             sport: sport,
             rank: rankValue
         };
+
+        // Optional, sport-scoped on the backend — only send it if filled in,
+        // rather than sending an empty string.
+        if (associationId) {
+            payload.associationId = associationId;
+        }
 
         try {
             const res = await fetch("/api/athletes", {
