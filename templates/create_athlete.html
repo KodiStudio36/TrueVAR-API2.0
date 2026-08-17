@@ -1,18 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="max-width: 600px; margin: 2rem auto;">
+<div style="max-width: 600px; margin: clamp(1.25rem, 5vw, 2rem) auto;">
     <a href="javascript:history.back()" class="text-muted" style="font-size: 0.95rem; text-decoration: none;">&larr;
         Back to tournament</a>
 
-    <div class="panel" style="padding: 2.5rem; margin-top: 1rem;">
+    <div class="panel" style="padding: clamp(1.25rem, 5vw, 2.5rem); margin-top: 1rem;">
         <h2 style="margin-bottom: 0.5rem;">Create Athlete</h2>
-        <p class="text-muted" style="margin-bottom: 2rem;">Add a new athlete to your club roster.</p>
+        <p class="text-muted" style="margin-bottom: clamp(1.25rem, 4vw, 2rem);">Add a new athlete to your club roster.
+        </p>
 
         <form id="createAthleteForm" onsubmit="submitAthlete(event)" data-club-country="{{ club_country }}"
-            data-club-sport="{{ club_sport }}" style="display: flex; flex-direction: column; gap: 1.25rem;">
+            data-club-sport="{{ club_sport }}" style="display: flex; flex-direction: column; gap: 1.1rem;">
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-grid-2">
                 <div>
                     <label class="field-label" for="a_firstname">First Name</label>
                     <input type="text" id="a_firstname" required>
@@ -23,7 +24,7 @@
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-grid-2">
                 <div>
                     <label class="field-label" for="a_gender">Gender</label>
                     <select id="a_gender" required>
@@ -46,7 +47,7 @@
                 </select>
             </div>
 
-            <hr style="border: 0; border-top: 1px solid var(--border); margin: 0.5rem 0;">
+            <hr style="border: 0; border-top: 1px solid var(--border); margin: 0.25rem 0;">
 
             <div>
                 <label class="field-label" for="a_sport">Primary Sport</label>
@@ -67,7 +68,7 @@
 
             <!-- Taekwondo Specifics -->
             <div id="tkd_specifics" class="hidden"
-                style="background: var(--bg-alt); padding: 1rem; border-radius: 6px; border: 1px solid var(--border);">
+                style="background: var(--bg-alt); padding: clamp(0.85rem, 3vw, 1rem); border-radius: 6px; border: 1px solid var(--border);">
                 <label class="field-label" for="tkd_rank">Taekwondo Rank</label>
                 <select id="tkd_rank"
                     style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border);">
@@ -99,12 +100,12 @@
 
             <!-- Boxing Specifics (Placeholder for future fields) -->
             <div id="boxing_specifics" class="hidden"
-                style="background: var(--bg-alt); padding: 1rem; border-radius: 6px; border: 1px solid var(--border);">
+                style="background: var(--bg-alt); padding: clamp(0.85rem, 3vw, 1rem); border-radius: 6px; border: 1px solid var(--border);">
                 <p class="text-muted" style="font-size: 0.85rem; margin: 0;">Boxing specific fields will appear here.
                 </p>
             </div>
 
-            <div style="margin-top: 1rem;">
+            <div style="margin-top: 0.75rem;">
                 <button type="submit" id="submitBtn" class="btn btn-primary" style="width: 100%;">Create
                     Athlete</button>
             </div>

@@ -1,3 +1,5 @@
+import unicodedata
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
@@ -1275,6 +1277,12 @@ def delete_tournament_endpoint(
         raise HTTPException(status_code=404, detail=str(exc))
     return {"message": "Tournament deleted."}
 
+def normalize_name(value: str) -> str:
+    """Lowercase and strip diacritics, e.g. 'Vidinská' -> 'vidinska'."""
+    decomposed = unicodedata.normalize("NFD", value)
+    stripped = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    return stripped.lower().strip()
+
 @router.post("/athletes", status_code=status.HTTP_201_CREATED)
 async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[dict] = Depends(get_current_user)):
     admin_club_id = get_admin_club_id(user)
@@ -1299,9 +1307,9 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
         sport_entry["associationId"] = association_id
 
     athlete_data = {
-        "firstName": payload.firstName.lower(),
-        "lastName": payload.lastName.lower(),
-        "displayName": f"{payload.firstName.capitalize()} {payload.lastName.capitalize()}",
+        "firstName": normalize_name(payload.firstName),
+        "lastName": normalize_name(payload.lastName),
+        "displayName": f"{payload.firstName} {payload.lastName}",
         "gender": payload.gender.lower(),
         "birthday": birth_dt,
         "country": payload.country.upper(),
@@ -1312,3 +1320,63 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
     }
     _, doc_ref = db.collection("athletes").add(athlete_data)
     return {"id": doc_ref.id, "message": "Athlete created successfully"}
+
+import secrets  # add to imports at top
+
+# ── SCHEMAS ────────────────────────────────────────────────────────────
+class CreateTokenRequest(BaseModel):
+    token: Optional[str] = None          # optional custom name; becomes the doc id
+    role: str
+    clubId: str
+    clubName: Optional[str] = ""
+    expiresAt: Optional[datetime] = None
+
+
+# ── ENDPOINTS ──────────────────────────────────────────────────────────
+@router.post("/tokens", status_code=status.HTTP_201_CREATED)
+def create_token_endpoint(payload: CreateTokenRequest):
+    token_id = (payload.token or "").strip() or secrets.token_urlsafe(12)
+
+    token_ref = db.collection("permission_tokens").document(token_id)
+    if token_ref.get().exists:
+        raise HTTPException(status_code=409, detail="A token with this name already exists.")
+
+    token_ref.set({
+        "clubId": payload.clubId,
+        "clubName": payload.clubName or "",
+        "role": payload.role,
+        "permissions": [],
+        "expiresAt": payload.expiresAt.isoformat() if payload.expiresAt else None,
+        "createdAt": firestore.SERVER_TIMESTAMP,
+    })
+
+    return {"token": token_id, "message": "Token created successfully"}
+
+
+@router.get("/tokens/paginated")
+def list_tokens_paginated(
+    limit: int = Query(5, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+):
+    query = (
+        db.collection("permission_tokens")
+        .order_by("createdAt", direction=firestore.Query.DESCENDING)
+        .offset(offset)
+        .limit(limit)
+    )
+    tokens = []
+    for doc in query.stream():
+        data = doc.to_dict()
+        tokens.append({
+            "token": doc.id,
+            "role": data.get("role"),
+            "clubId": data.get("clubId"),
+            "clubName": data.get("clubName", ""),
+            "expiresAt": data.get("expiresAt"),
+        })
+
+    return {
+        "tokens": tokens,
+        "has_more": len(tokens) == limit,
+        "next_offset": offset + len(tokens),
+    }

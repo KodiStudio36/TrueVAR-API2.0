@@ -1,42 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="margin-bottom: 2.5rem;">
+<div style="margin-bottom: 2rem;">
     <a href="/" class="text-muted" style="font-size: 0.95rem; text-decoration: none;">&larr; All tournaments</a>
 
-    <div
-        style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 1rem; margin-top: 1rem;">
-        <div>
-            <span class="tag tag-navy">{{ tournament.sport | default('Multi-Sport') }}</span>
-            <h2 style="margin-top: 0.9rem;">{{ tournament.title }}</h2>
-            <p class="text-muted" style="font-size: 1rem; margin-top: 0.5rem;">
-                {{ tournament.location | default('TBD') }} &middot; {{ tournament.dateTime | default('Date TBD') }}
-            </p>
-        </div>
-        <div class="panel" style="padding: 1rem 1.5rem; text-align: center;">
-            <div style="font-size: 1.7rem; font-weight: 700; color: var(--ink);" id="slotCount">{{
-                tournament.slotsFilled | default(0) }}</div>
-            <div class="text-muted" style="font-size: 0.85rem;">of {{ tournament.slotsTotal | default('—') }} spots
-                filled</div>
-        </div>
+    <div style="margin-top: 0.85rem;">
+        <span class="tag tag-navy">{{ tournament.sport | default('Multi-Sport') }}</span>
+        <h2 style="margin-top: 0.75rem;">{{ tournament.title }}</h2>
+        <p class="text-muted" style="font-size: 1rem; margin-top: 0.4rem;">
+            {{ tournament.location | default('TBD') }} &middot; {{ tournament.dateTime | default('Date TBD') }}
+        </p>
     </div>
 </div>
 
 <!-- ── CATEGORIES ──────────────────────────────────────────────────── -->
-<div style="margin-bottom: 3rem;">
+<div style="margin-bottom: clamp(1.75rem, 6vw, 3rem);">
     <div
-        style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+        style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
         <h3>Categories</h3>
         <span id="categoryCount" class="text-muted" style="font-size: 0.9rem;"></span>
     </div>
-    <p class="text-muted" style="font-size: 0.95rem; margin-top: -0.5rem; margin-bottom: 1.5rem;">
+    <p class="text-muted" style="font-size: 0.95rem; margin-top: -0.3rem; margin-bottom: 1.1rem;">
         For club owners. Search for an athlete and register them — age, gender, and (where more than
         one applies) eligible age division are resolved automatically. Only brackets with registered
         athletes are listed.
     </p>
 
     <div id="categoriesContainer">
-        <div class="panel" style="padding: 1.5rem;">
+        <div class="panel" style="padding: clamp(0.9rem, 3vw, 1.5rem);">
             <p class="text-muted">Loading categories…</p>
         </div>
     </div>
@@ -191,7 +182,6 @@
 
     async function init() {
         await Promise.all([loadCategorySchema(), loadCategoryCounts()]);
-        document.getElementById("slotCount").textContent = totalRegistered;
         renderCategories();
     }
 
@@ -329,7 +319,7 @@
 
         if (entryTypes.length === 0) {
             container.innerHTML = `
-                <div class="panel" style="padding: 1.5rem;">
+                <div class="panel" style="padding: clamp(0.9rem, 3vw, 1.5rem);">
                     <p class="text-muted">No categories have been configured for this tournament yet.</p>
                 </div>
             `;
@@ -349,13 +339,13 @@
 
                 const bodyId = `divisionBody_${entryType.code}_${division.code}`;
                 return `
-                    <details style="margin-top: 0.6rem; border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.9rem;"
+                    <details style="margin-top: 0.5rem; border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.75rem;"
                         ontoggle="if (this.open) loadDivisionRoster('${entryType.code}', '${division.code}')">
                         <summary style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 0.92rem; font-weight: 600; list-style: revert;">
                             <span>${escapeHtml(division.label)}</span>
                             <span class="text-muted" style="font-weight: 400; font-size: 0.82rem;">${divisionTotal} registered</span>
                         </summary>
-                        <div id="${bodyId}" style="margin-top: 0.6rem;">
+                        <div id="${bodyId}" style="margin-top: 0.55rem;">
                             <p class="text-muted" style="font-size: 0.85rem;">Click to load roster…</p>
                         </div>
                     </details>
@@ -372,12 +362,12 @@
             ` : '';
 
             return `
-                <details class="panel" style="padding: 1.25rem 1.5rem; margin-bottom: 1rem;" ${i === 0 ? "open" : ""}>
+                <details class="panel" style="padding: clamp(0.9rem, 3vw, 1.25rem) clamp(1rem, 3.5vw, 1.5rem); margin-bottom: 0.85rem;" ${i === 0 ? "open" : ""}>
                     <summary style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; list-style: revert; gap: 1rem;">
                         <span style="font-weight: 700; font-size: 1.05rem;">${entryType.label}</span>
                         ${registerButtonHtml}
                     </summary>
-                    <div style="margin-top: 0.75rem;">
+                    <div style="margin-top: 0.65rem;">
                         ${divisionsHtml}
                     </div>
                 </details>
@@ -508,7 +498,6 @@
             // Optimistically update counts and totals
             categoryCounts[categoryCode] = Math.max(0, (categoryCounts[categoryCode] || 1) - 1);
             totalRegistered = Math.max(0, totalRegistered - 1);
-            document.getElementById("slotCount").textContent = totalRegistered;
 
             // Invalidate division roster cache and re-render
             delete divisionRosterCache[ageCode];
@@ -902,7 +891,6 @@
             } else {
                 categoryCounts[resolvedCategory.code] = (categoryCounts[resolvedCategory.code] || 0) + 1;
                 totalRegistered += 1;
-                document.getElementById("slotCount").textContent = totalRegistered;
             }
             // Drop the cached roster for the (possibly new) division — it's
             // now stale either way. Re-expanding it will re-fetch.

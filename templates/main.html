@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div style="margin-bottom: 2.5rem;">
+<div style="margin-bottom: clamp(1.25rem, 5vw, 2.5rem);">
     <h2>Active Tournaments</h2>
     <p class="text-muted" style="font-size: 1.05rem; margin-top: 0.5rem;">
         Browse open competitions and register your club below.
@@ -9,9 +9,10 @@
 </div>
 
 {% if tournaments %}
-<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 1.5rem;">
+<div class="card-grid">
     {% for t in tournaments %}
-    <div class="panel" style="padding: 1.75rem; display: flex; flex-direction: column; justify-content: space-between;">
+    <div class="panel"
+        style="padding: clamp(0.9rem, 3vw, 1.5rem); display: flex; flex-direction: column; justify-content: space-between;">
 
         <div>
             <span class="tag tag-navy">{{ t.sport | default('Multi-Sport') }}</span>
@@ -23,13 +24,9 @@
             <p class="text-muted" style="font-size: 0.95rem;">
                 {{ t.dateTime | default('Date to be announced') }}
             </p>
-
-            <p style="font-size: 0.95rem; font-weight: 600; margin-top: 1rem; color: var(--ink);">
-                {{ t.slotsFilled | default(0) }} of {{ t.slotsTotal | default('—') }} spots filled
-            </p>
         </div>
 
-        <div style="margin-top: 1.5rem;">
+        <div style="margin-top: 1.1rem;">
             <a href="/tournaments/{{ t.id }}" class="btn btn-primary" style="width: 100%;">
                 View &amp; Register
             </a>
@@ -38,7 +35,7 @@
     {% endfor %}
 </div>
 {% else %}
-<div class="panel" style="text-align: center; padding: 3.5rem 1.5rem;">
+<div class="panel" style="text-align: center; padding: clamp(2rem, 8vw, 3.5rem) 1.25rem;">
     <p class="text-muted" style="font-size: 1.05rem;">
         No active tournaments right now — check back soon.
     </p>
