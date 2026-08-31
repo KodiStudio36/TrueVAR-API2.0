@@ -1,11 +1,19 @@
 {
     "sport": "taekwondo",
     "discipline": "kyorugi",
-    "setId": "daedo_2023",
+    "setId": "satkd_extraleague",
     "provider": "DAEDO",
-    "year": 2023,
-    "label": "DAEDO PSS HITLEVEL (2023)",
-    "note": "pupils_1/pupils_2/younger_cadets rows are fit from DAEDO's Kids 8-10/11-12 charts by age proximity + nearest weight, not exact DAEDO-published values for those exact weight classes. juniors/seniors/veterans are exact matches to DAEDO's own tables. See generate_pss_hitlevels.py's docstring for the full mapping.",
+    "year": 2026,
+    "label": "SATKD Extraleague",
+    "requiresPlexiHelmet": {
+        "pupils_1": false,
+        "pupils_2": false,
+        "younger_cadets": true,
+        "cadets": true,
+        "juniors": false,
+        "seniors": false,
+        "veterans": false
+    },
     "pssHitLevels": {
         "pupils_1|men": [
             {
@@ -625,7 +633,7 @@
             },
             {
                 "maxWeight": null,
-                "pssSize": 5,
+                "pssSize": 4,
                 "hitLevel": 23
             }
         ],
@@ -709,7 +717,7 @@
             },
             {
                 "maxWeight": null,
-                "pssSize": 5,
+                "pssSize": 4,
                 "hitLevel": 23
             }
         ],

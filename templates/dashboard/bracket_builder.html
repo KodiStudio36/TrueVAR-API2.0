@@ -6,7 +6,7 @@
 <div class="bb-wrapper">
 
     <div class="bb-topbar">
-        <a href="/tournaments/{{ tournament.id }}/categories" class="btn btn-ghost btn-sm">
+        <a href="/dashboard/tournaments/{{ tournament.id }}/categories" class="btn btn-ghost btn-sm">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M19 12H5" />
                 <path d="M12 19l-7-7 7-7" />
@@ -32,7 +32,7 @@
     {# ── CONFIG ROW: courts (local only) + vest sizes (auto-derived) ────── #}
     <div class="bb-config-row">
 
-        <div class="card-panel bb-pane">
+        <div class="card-panel bb-pane bb-pane--courts">
             <div class="bb-pane-header">
                 <h2 class="panel-title" style="font-size:1.05rem;">Courts</h2>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="addCourtRow()">+ Add Court</button>
@@ -47,7 +47,7 @@
             <div id="courtsList" class="bb-courts-list"></div>
         </div>
 
-        <div class="card-panel bb-pane">
+        <div class="card-panel bb-pane bb-pane--vest">
             <div class="bb-pane-header">
                 <h2 class="panel-title" style="font-size:1.05rem;">Vest Size &amp; Hit-Level</h2>
             </div>
@@ -56,6 +56,54 @@
                 assigned per tournament. Switching tables updates this preview immediately.
             </p>
             <div id="vestList" class="bb-vest-list"></div>
+        </div>
+
+        <div class="card-panel bb-pane bb-pane--equipment">
+            <div class="bb-pane-header">
+                <h2 class="panel-title" style="font-size:1.05rem;">Equipment</h2>
+            </div>
+            <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+                Session-only, like Courts. Vest counts are keyed by size + generation — the scheduler
+                won't double-book more vests of a size/gen than you enter here, accounting for a
+                transfer buffer when a vest is reused on a different court. Plexi helmets work the same
+                way: the "Plexi" checkbox on a court above is a soft preference (categories needing one
+                incline toward that court), not a hard requirement — actual availability is governed by
+                the helmet count below plus the same transfer buffer.
+            </p>
+
+            <div class="bb-equip-block">
+                <h3 class="bb-equip-subhead">Vest inventory (by size &amp; generation)</h3>
+                <div id="vestInventoryList" class="bb-equip-inventory"></div>
+            </div>
+
+            <div class="bb-equip-block">
+                <h3 class="bb-equip-subhead">Vest generation policy by age division</h3>
+                <div id="vestGenPolicyList" class="bb-equip-genpolicy"></div>
+            </div>
+
+            <div class="bb-equip-block bb-equip-row">
+                <label class="bb-field">
+                    <span>Plexi helmets available</span>
+                    <input type="number" min="0" id="plexiHelmetCountInput" value="2"
+                        onchange="plexiHelmetCount = parseInt(this.value) || 0">
+                </label>
+                <label class="bb-field">
+                    <span>Transfer buffer (min)</span>
+                    <input type="number" min="0" id="transferBufferInput" value="5"
+                        onchange="transferBufferSeconds = (parseInt(this.value) || 0) * 60">
+                </label>
+                <label class="bb-field">
+                    <span>Assumed rounds/match</span>
+                    <input type="number" min="1" max="3" id="assumedRoundsInput" value="3"
+                        onchange="assumedRoundsPerMatch = parseInt(this.value) || 3">
+                </label>
+                <label class="bb-field"
+                    title="Hard cap — no court may be scheduled more than this many fights ahead of the currently least-busy court">
+                    <span>Court balance threshold (fights)</span>
+                    <input type="number" min="1" id="courtBalanceThresholdInput" value="5"
+                        onchange="courtBalanceThreshold = parseInt(this.value) || 5">
+                </label>
+            </div>
         </div>
 
     </div>
@@ -112,8 +160,12 @@
                 <button type="button" id="pinCourtOrder" class="bb-pin" onclick="showView('courtOrder')">Court
                     Order</button>
             </div>
-            <button type="button" id="downloadAllPdfBtn" class="btn btn-ghost btn-sm" style="margin-left:auto;"
-                onclick="downloadAllBracketsPDF()">Download All (PDF)</button>
+            <div style="margin-left:auto; display:flex; gap:0.5rem;">
+                <button type="button" id="downloadClubSheetsBtn" class="btn btn-ghost btn-sm"
+                    onclick="downloadClubSheetsPDF()">Download Club Sheets (PDF)</button>
+                <button type="button" id="downloadAllPdfBtn" class="btn btn-ghost btn-sm"
+                    onclick="downloadAllBracketsPDF()">Download All (PDF)</button>
+            </div>
         </div>
 
         <div id="bracketsView" class="card-panel bb-pane" style="margin-top: 0.75rem;">
@@ -151,6 +203,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
     const TOURNAMENT_ID = "{{ tournament.id }}";
     const TOURNAMENT_SPORT = "{{ tournament.sport | default('') | lower }}";
@@ -158,12 +211,22 @@
     const TOURNAMENT_TITLE = "{{ tournament.title | default('') }}";
     const TOURNAMENT_DATE = "{{ tournament.dateTime | default('') }}";
 
-    let courts = [];             // [{label, vestNumbers, minGapBetweenSameAthlete, ageOrder}] — TRUE local state, never written to Firestore
+    let courts = [];             // [{label, vestNumbers, minGapBetweenSameAthlete, ageOrder, plexiCapable}] — TRUE local state, never written to Firestore
+
+    // ── Equipment state: session-local, same lifecycle as `courts` — never
+    // written to Firestore, resets if you leave the page. ────────────────
+    let vestInventory = {};        // key "{pssSize}-{gen}" -> count, e.g. "3-gen3": 6, "3-gen2": 4
+    let vestGenPolicy = {};        // ageCode -> "either" | "gen2" | "gen3"
+    let plexiHelmetCount = 2;      // total physical plexi helmets available
+    let transferBufferSeconds = 300; // time required before a vest/helmet can be reused elsewhere (walk-over + fit time)
+    let assumedRoundsPerMatch = 3; // used only to estimate match duration for equipment interval checks — see estimateMatchDurationSeconds
+    let courtBalanceThreshold = 5; // HARD cap: no court may be scheduled more than this many fights ahead of the currently least-busy court (category-to-court itself stays a soft preference — see generateCourtOrdering)
     let flatCategories = [];     // populated categories only: {code, ageCode, genderCode, entryTypeCode, groupLabel, label, ageMin, ageMax, weightIndex}
     let divisionRosterCache = {};
 
     let generatedBrackets = [];  // [{categoryCode, categoryLabel, entries, rounds}]
     let generatedMatches = [];   // flat list across every category, mutated in place by drag-and-drop
+    let __measureCanvasCtx = null; // lazily-created scratch <canvas> 2D context, reused purely to measure real text widths (see estimateTextWidth in buildBracketSVG) — far more accurate than a char-count heuristic, and no point/px unit-conversion pitfalls
     let pssHitLevelSets = [];    // [{id, provider, year, label, note, pssHitLevels}] — every set available for this discipline
     let leftLogoDataUrl = "/static/assets/logos/world_taekwondo.png";  // base64 data URL, embedded directly into the SVG so it's self-contained (no external image reference to break on download/print)
     let rightLogoDataUrl = "/static/assets/logos/truevar.png";
@@ -180,15 +243,54 @@
     }
     let selectedPssHitLevelSetId = null;
 
+    // Both default logo paths are same-origin static assets, but the SVG
+    // they end up embedded in gets rasterized onto a <canvas> for the
+    // "Download All (PDF)" / "Download Club Sheets" exports (see
+    // svgStringToPngDataUrl) — and a <canvas> that has ever drawn an
+    // <image> loaded from anything other than a data: URL is treated as
+    // tainted by most browsers once that SVG is itself loaded via a
+    // blob: URL, so canvas.toDataURL() silently fails and the logos
+    // never make it into the PDF. They render fine in the inline browser
+    // preview (openBracketPreview just sets innerHTML), which is what
+    // made this easy to miss. Converting both logos to self-contained
+    // base64 data URLs up front — not just the ones a user manually
+    // re-uploads via onLogoSelected — avoids the taint entirely.
+    async function loadLogoAsDataUrl(url) {
+        if (!url || url.startsWith("data:")) return url || null;
+        try {
+            const res = await fetch(url);
+            if (!res.ok) return null;
+            const blob = await res.blob();
+            return await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        } catch (err) {
+            console.error("Failed to load logo as data URL:", url, err);
+            return null;
+        }
+    }
+
     async function init() {
         loadCourtsLocal();  // no fetch — courts never touch Firestore
-        await Promise.all([loadPssHitLevelSets(), loadPopulatedCategories()]);
+        const [, , leftLogo, rightLogo] = await Promise.all([
+            loadPssHitLevelSets(),
+            loadPopulatedCategories(),
+            loadLogoAsDataUrl(leftLogoDataUrl),
+            loadLogoAsDataUrl(rightLogoDataUrl),
+        ]);
+        if (leftLogo) leftLogoDataUrl = leftLogo;
+        if (rightLogo) rightLogoDataUrl = rightLogo;
         renderCourtsList();
         renderPssHitLevelSetSelect();
         renderVestList();
+        renderVestInventory();
+        renderVestGenPolicyList();
     }
 
-    // ── Courts: TRUE local state, never written to Firestore ──────────
+
     // Pre-seeds from the tournament's own courtNum field (already an
     // existing tournament property) so there's something sensible to
     // start editing instead of an empty list.
@@ -209,12 +311,12 @@
     }};
     courts = [];
     for (let i = 0; i < courtNum; i++) {
-        courts.push({ id: String(i + 1), label: `Court ${i + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first" });
+        courts.push({ id: String(i + 1), label: `Court ${i + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first", plexiCapable: false, allowedVestGen: "any" });
     }
     }
 
     function addCourtRow() {
-        courts.push({ id: String(courts.length + 1), label: `Court ${courts.length + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first" });
+        courts.push({ id: String(courts.length + 1), label: `Court ${courts.length + 1}`, vestNumbers: [], minGapBetweenSameAthlete: 3, ageOrder: "oldest_first", plexiCapable: false, allowedVestGen: "any" });
         renderCourtsList();
     }
 
@@ -236,6 +338,15 @@
                 <select onchange="courts[${i}].ageOrder = this.value">
                     <option value="oldest_first" ${c.ageOrder === "oldest_first" ? "selected" : ""}>Oldest first</option>
                     <option value="youngest_first" ${c.ageOrder === "youngest_first" ? "selected" : ""}>Youngest first</option>
+                </select>
+                <label class="bb-plexi-check" title="Soft preference — plexi-requiring categories incline toward this court, but the fight-count balance threshold can still send some elsewhere. Actual helmet availability is enforced separately via the helmet count below.">
+                    <input type="checkbox" ${c.plexiCapable ? "checked" : ""} onchange="courts[${i}].plexiCapable = this.checked">
+                    Plexi
+                </label>
+                <select title="Hard lock — this court can ONLY use the selected vest generation, regardless of inventory elsewhere" onchange="courts[${i}].allowedVestGen = this.value">
+                    <option value="any" ${c.allowedVestGen === "any" || !c.allowedVestGen ? "selected" : ""}>Any gen</option>
+                    <option value="gen2" ${c.allowedVestGen === "gen2" ? "selected" : ""}>Gen2 only</option>
+                    <option value="gen3" ${c.allowedVestGen === "gen3" ? "selected" : ""}>Gen3 only</option>
                 </select>
                 <button type="button" class="cm-bin-btn-inline" onclick="deleteCourtRow(${i})" title="Remove court">✕</button>
             </div>
@@ -280,11 +391,37 @@
     function onPssSetChange() {
         selectedPssHitLevelSetId = document.getElementById("pssSetSelect").value || null;
         renderVestList(); // different sets can give a category a different size/hit-level — refresh the preview
+        renderVestInventory(); // available sizes can differ per set
     }
 
     function currentPssHitLevels() {
         const set = pssHitLevelSets.find(s => s.id === selectedPssHitLevelSetId);
         return set ? (set.pssHitLevels || {}) : {};
+    }
+
+    // requiresPlexiHelmet lives on the SELECTED PSS SET document itself
+    // (keyed by age division code, e.g. "cadets"), not on the tournament's
+    // category schema — it's a competition-rule fact tied to which
+    // hit-level table/provider is in force, so it travels with the set.
+    // Looked up lazily (like currentPssHitLevels) rather than baked onto
+    // each flattened category at load time, since loadPssHitLevelSets and
+    // loadPopulatedCategories run concurrently in init() and there's no
+    // guaranteed order between them.
+    function currentRequiresPlexiHelmetMap() {
+        const set = pssHitLevelSets.find(s => s.id === selectedPssHitLevelSetId);
+        return set ? (set.requiresPlexiHelmet || {}) : {};
+    }
+
+    function categoryRequiresPlexiHelmet(cat) {
+        if (!cat) return false;
+        return !!currentRequiresPlexiHelmetMap()[cat.ageCode];
+    }
+
+    // Tournament-local policy for which vest generation an age division
+    // should be told to use — "either" lets the scheduler pick whichever
+    // pool has room at assignment time (see checkVestAvailability).
+    function resolveVestGenPolicy(ageCode) {
+        return vestGenPolicy[ageCode] || "either";
     }
 
     // Looks up pssSize/hitLevel for one leaf category by its weightIndex
@@ -294,7 +431,9 @@
     function vestInfoFor(cat) {
         const rows = currentPssHitLevels()[`${cat.ageCode}|${cat.genderCode}`];
         if (!rows || cat.weightIndex == null) return null;
-        return rows[cat.weightIndex] || null;
+        const row = rows[cat.weightIndex];
+        if (!row) return null;
+        return { ...row, vestGenPolicy: resolveVestGenPolicy(cat.ageCode) };
     }
 
     async function loadPopulatedCategories() {
@@ -390,11 +529,26 @@
             el.innerHTML = `<p class="text-muted" style="padding: 0.5rem 0;">No populated categories yet — register some athletes first.</p>`;
             return;
         }
-        el.innerHTML = flatCategories.map(c => {
+        // If the SELECTED PSS set has no requiresPlexiHelmet map at all
+        // (an older uploaded document, from before this field existed),
+        // every category silently resolves to "doesn't need plexi" —
+        // categories that actually do need one can then land on any
+        // court, including non-plexi ones, with no warning anywhere else
+        // in the UI. This is exactly that failure mode made visible.
+        const plexiMapMissing = Object.keys(currentRequiresPlexiHelmetMap()).length === 0;
+        const warning = plexiMapMissing
+            ? `<p style="color:#b91c1c; font-size:0.82rem; padding:0.4rem 0; border-bottom:1px solid #fecaca; margin-bottom:0.5rem;">
+                 ⚠ The selected PSS set has no plexi-helmet data. Every category below will be treated as
+                 NOT needing a plexi helmet, even if some really do — re-upload the PSS set with a
+                 <code>requiresPlexiHelmet</code> map to fix court routing.
+               </p>`
+            : "";
+        el.innerHTML = warning + flatCategories.map(c => {
             const info = vestInfoFor(c);
+            const plexi = categoryRequiresPlexiHelmet(c) ? ` · <span title="Requires plexi helmet">🪖 plexi</span>` : "";
             const display = info
-                ? `PSS ${info.pssSize} · hit-level ${info.hitLevel}`
-                : `<span class="text-muted">no data</span>`;
+                ? `PSS ${info.pssSize} · hit-level ${info.hitLevel} · gen: ${info.vestGenPolicy}${plexi}`
+                : `<span class="text-muted">no data</span>${plexi}`;
             return `
                 <div class="bb-vest-row">
                     <span>${escapeHtml(c.groupLabel)} · ${escapeHtml(c.label)}</span>
@@ -402,6 +556,257 @@
                 </div>
             `;
         }).join("");
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // EQUIPMENT: vest inventory (by size+gen), vest gen policy, plexi
+    // helmets. Session-local, same lifecycle as `courts` — see the state
+    // block at the top of this script.
+    // ══════════════════════════════════════════════════════════════════
+
+    // Auto-derives the size list from whichever PSS set is selected —
+    // same pattern as renderVestList — so admins only fill in COUNTS,
+    // not sizes.
+    function allPssSizesInCurrentSet() {
+        const sizes = new Set();
+        Object.values(currentPssHitLevels()).forEach(rows => rows.forEach(r => sizes.add(r.pssSize)));
+        return [...sizes].sort((a, b) => a - b);
+    }
+
+    function vestKey(pssSize, gen) { return `${pssSize}-${gen}`; }
+
+    function renderVestInventory() {
+        const el = document.getElementById("vestInventoryList");
+        const sizes = allPssSizesInCurrentSet();
+        if (sizes.length === 0) {
+            el.innerHTML = `<p class="text-muted" style="padding:0.4rem 0;">Select a PSS table above first.</p>`;
+            return;
+        }
+        el.innerHTML = sizes.map(size => `
+            <div class="bb-equip-row">
+                <span style="font-weight:600; width:60px;">PSS ${size}</span>
+                <label class="bb-field" style="flex:1;">
+                    <span>gen2 count</span>
+                    <input type="number" min="0" value="${vestInventory[vestKey(size, 'gen2')] || 0}"
+                        onchange="vestInventory['${vestKey(size, 'gen2')}'] = parseInt(this.value) || 0">
+                </label>
+                <label class="bb-field" style="flex:1;">
+                    <span>gen3 count</span>
+                    <input type="number" min="0" value="${vestInventory[vestKey(size, 'gen3')] || 0}"
+                        onchange="vestInventory['${vestKey(size, 'gen3')}'] = parseInt(this.value) || 0">
+                </label>
+            </div>
+        `).join("");
+    }
+
+    // One dropdown per age division actually present among this
+    // tournament's populated categories — no point listing age groups
+    // nobody registered for.
+    function renderVestGenPolicyList() {
+        const el = document.getElementById("vestGenPolicyList");
+        const ageCodes = [...new Set(flatCategories.map(c => c.ageCode))];
+        if (ageCodes.length === 0) {
+            el.innerHTML = `<p class="text-muted" style="padding:0.4rem 0;">No populated categories yet.</p>`;
+            return;
+        }
+        el.innerHTML = ageCodes.map(ageCode => {
+            const label = (flatCategories.find(c => c.ageCode === ageCode) || {}).groupLabel || ageCode;
+            const current = vestGenPolicy[ageCode] || "either";
+            return `
+                <div class="bb-vest-row">
+                    <span>${escapeHtml(label)} <span class="text-muted">(${escapeHtml(ageCode)})</span></span>
+                    <select onchange="vestGenPolicy['${ageCode}'] = this.value; renderVestList();">
+                        <option value="either" ${current === "either" ? "selected" : ""}>Either</option>
+                        <option value="gen2" ${current === "gen2" ? "selected" : ""}>Gen2 only</option>
+                        <option value="gen3" ${current === "gen3" ? "selected" : ""}>Gen3 only</option>
+                    </select>
+                </div>
+            `;
+        }).join("");
+    }
+
+    // mm:ss -> seconds. Falls back to 2min on anything unparsable.
+    function parseMinSec(str) {
+        const m = /^(\d+):(\d{2})$/.exec(str || "");
+        return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : 120;
+    }
+
+    // Rough duration for EQUIPMENT interval purposes only — never used
+    // for the athlete rest-gap check (that stays position-based,
+    // unchanged from before). Real fights rarely go the full assumed
+    // round count, so this deliberately overestimates a little: better
+    // to hold a vest slightly too long than to double-book it.
+    function estimateMatchDurationSeconds(cat) {
+        if (!cat) return 180;
+        const round = parseMinSec(cat.roundTime);
+        const brk = parseMinSec(cat.breakTime);
+        return round * assumedRoundsPerMatch + brk * (assumedRoundsPerMatch - 1) + 60; // +60s callout/prep buffer
+    }
+
+    // Count-based (not serial-number-based) interval tracker: tracks how
+    // many UNITS of a resource key are in simultaneous use, not which
+    // physical vest — enough to answer "is one free", without needing
+    // to route specific physical items between courts.
+    function makeEquipmentTracker() {
+        return { intervals: {}, plexiIntervals: [] };
+    }
+
+    // excludeCourtId: a court reusing its OWN previously-used vest never
+    // needs to wait out the transfer buffer — the vest never left that
+    // court, so there's nothing to "transfer." The buffer only matters
+    // when a DIFFERENT court wants the same size/gen. Without this
+    // exclusion, every court's own very next match of the same size
+    // would falsely collide with its own prior match's buffer tail —
+    // that was the actual bug behind conflicts showing up with no other
+    // court fighting at the same time.
+    function overlapCount(list, start, end, excludeCourtId) {
+        return list.filter(iv => start < iv.end && end > iv.start && iv.courtId !== excludeCourtId).length;
+    }
+
+    // Returns { ok, resolvedGen, reason }. Tries gen3 first when policy
+    // is "either" (prefer showcasing newer sensors when there's room),
+    // then gen2. unitsNeeded=2 because both corners in a kyorugi match
+    // wear a vest of the same size.
+    // allowedGens: the COURT's own hard lock (see the court row's "Vest
+    // gen" dropdown) — e.g. a court locked to "gen2" can never resolve
+    // gen3 for a match, even if gen3 inventory is sitting free elsewhere
+    // and the category's own genPolicy would otherwise allow it. This is
+    // intersected with genPolicy's own candidate list; if the two don't
+    // overlap at all (e.g. a "gen3 only" category on a "gen2 only"
+    // court), this court was never a legal home for that category in
+    // the first place — see courtSupportsGenPolicy, which is what keeps
+    // such a court out of eligibleCourtIds before scheduling even
+    // reaches this check.
+    function checkVestAvailability(tracker, pssSize, genPolicy, allowedGens, start, end, courtId) {
+        const policyCandidates = genPolicy === "either" ? ["gen3", "gen2"] : [genPolicy];
+        const candidates = policyCandidates.filter(g => allowedGens.includes(g));
+        if (candidates.length === 0) {
+            return { ok: false, reason: `this court is locked to a vest generation this category can't use` };
+        }
+        for (const gen of candidates) {
+            const key = vestKey(pssSize, gen);
+            const capacity = vestInventory[key] || 0;
+            if (capacity < 2) continue; // never enough units to cover one match
+            const used = overlapCount(tracker.intervals[key] || [], start, end, courtId);
+            if (capacity - used >= 2) return { ok: true, resolvedGen: gen };
+        }
+        return { ok: false, reason: `no gen${candidates.length > 1 ? "2/3" : candidates[0].replace("gen", "")} size-${pssSize} VESTS free` };
+    }
+
+    // A court whose allowedVestGen is "any" supports every genPolicy.
+    // Otherwise the court's single locked gen must actually be usable by
+    // the category: exact match for a "gen2"/"gen3"-only category, or
+    // simply present as ONE of the two options for an "either" category
+    // (that category can still be scheduled there — checkVestAvailability
+    // above will just never try the other gen on this particular court).
+    function courtSupportsGenPolicy(court, genPolicy) {
+        if (!court.allowedVestGen || court.allowedVestGen === "any") return true;
+        if (genPolicy === "either") return true;
+        return court.allowedVestGen === genPolicy;
+    }
+
+    function checkPlexiAvailability(tracker, start, end, courtId) {
+        const used = overlapCount(tracker.plexiIntervals, start, end, courtId);
+        return (plexiHelmetCount - used >= 2)
+            ? { ok: true }
+            : { ok: false, reason: "no plexi HELMETS free" };
+    }
+
+    function reserveVest(tracker, pssSize, gen, start, end, courtId) {
+        const key = vestKey(pssSize, gen);
+        (tracker.intervals[key] = tracker.intervals[key] || []).push({ start, end, courtId });
+    }
+    function reservePlexi(tracker, start, end, courtId) {
+        tracker.plexiIntervals.push({ start, end, courtId });
+    }
+
+    // Same duration estimate as estimateMatchDurationSeconds, but reads
+    // straight off an already-generated MATCH's own stamped roundTime/
+    // breakTime instead of a flatCategory — used by the revalidator
+    // below, which runs after generation/dragging when we no longer have
+    // (or want to re-derive) the category object.
+    function estimateMatchDurationSecondsFromMatch(m) {
+        const round = parseMinSec(m.roundTime);
+        const brk = parseMinSec(m.breakTime);
+        return round * assumedRoundsPerMatch + brk * (assumedRoundsPerMatch - 1) + 60;
+    }
+
+    // Re-checks vest/plexi availability against the CURRENT courtId +
+    // queuePosition layout of every match — called after initial
+    // generation (to flag anything the guard-limit "relaxed constraints"
+    // overflow path skipped) AND after every manual drag-and-drop (which
+    // can move a match onto a different court/time slot that no longer
+    // has an equipment pairing that was valid before). This is purely
+    // diagnostic: it flags conflicts via m.equipmentConflict without
+    // reassigning courts or bumping anyone — staff fix it by hand.
+    //
+    // Each court's matches are processed in that court's own local
+    // queuePosition order (which is all that's guaranteed meaningful
+    // after a drag — see onColumnDrop, which renumbers 0..N PER COURT,
+    // not globally). To interleave equipment checks across courts in
+    // real time order, this simulates all courts running in parallel: a
+    // priority-queue-style loop that always advances whichever court's
+    // own clock is currently earliest, one match at a time — the
+    // correct way to reconstruct "what's actually happening at once"
+    // once cross-court queuePosition values can no longer be compared
+    // directly against each other.
+    function revalidateEquipmentAfterManualEdit() {
+        const tracker = makeEquipmentTracker();
+        const courtClockSeconds = {};
+        const queues = {};
+        const pointer = {};
+        courts.forEach(c => {
+            courtClockSeconds[c.id] = 0;
+            pointer[c.id] = 0;
+            queues[c.id] = generatedMatches
+                .filter(m => m.status !== "walkover" && m.courtId === c.id)
+                .sort((a, b) => a.queuePosition - b.queuePosition);
+        });
+
+        generatedMatches.forEach(m => { delete m.equipmentConflict; });
+
+        let remaining = Object.values(queues).reduce((n, q) => n + q.length, 0);
+        while (remaining > 0) {
+            let bestCourt = null;
+            courts.forEach(c => {
+                if (pointer[c.id] >= queues[c.id].length) return;
+                if (bestCourt === null || courtClockSeconds[c.id] < courtClockSeconds[bestCourt.id]) bestCourt = c;
+            });
+            if (!bestCourt) break; // safety — shouldn't happen given the remaining count above
+
+            const m = queues[bestCourt.id][pointer[bestCourt.id]];
+            pointer[bestCourt.id]++;
+            remaining--;
+
+            const start = courtClockSeconds[bestCourt.id];
+            const duration = estimateMatchDurationSecondsFromMatch(m);
+            const end = start + duration + transferBufferSeconds;
+
+            let conflict = null;
+            if (m.requiresPlexiHelmet) {
+                const plexiCheck = checkPlexiAvailability(tracker, start, end, bestCourt.id);
+                if (!plexiCheck.ok) conflict = plexiCheck.reason;
+                else reservePlexi(tracker, start, end, bestCourt.id);
+            }
+            if (m.pssSize != null) {
+                // Re-check the SAME generation that was already resolved
+                // (falling back to "either" if none) rather than letting
+                // it float freely — silently reassigning an athlete's
+                // vest generation after the fact would be confusing on
+                // the equipment handout sheet.
+                const allowedGens = (!bestCourt.allowedVestGen || bestCourt.allowedVestGen === "any") ? ["gen2", "gen3"] : [bestCourt.allowedVestGen];
+                const vestCheck = checkVestAvailability(tracker, m.pssSize, m.resolvedVestGen || "either", allowedGens, start, end, bestCourt.id);
+                if (!vestCheck.ok) {
+                    conflict = conflict ? `${conflict}; ${vestCheck.reason}` : vestCheck.reason;
+                } else {
+                    reserveVest(tracker, m.pssSize, vestCheck.resolvedGen, start, end, bestCourt.id);
+                    m.resolvedVestGen = vestCheck.resolvedGen;
+                }
+            }
+            if (conflict) m.equipmentConflict = conflict;
+
+            courtClockSeconds[bestCourt.id] = end - transferBufferSeconds;
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -496,6 +901,16 @@
         const slots = placementFn(entries, bracketSize);
         const conflictCount = slots.conflictCount || 0;
 
+        // slotIndex per entry — the STRUCTURAL position each entry starts
+        // at, independent of match outcomes. This is what lets the club
+        // sheet (see computeEntryFights) list every fight an entry COULD
+        // have across the whole bracket, not just ones already resolved:
+        // the round-by-round match index + corner an entry lands in is a
+        // pure function of this starting slot, walked forward via
+        // floor(index/2) each round — nothing about who actually wins.
+        const entrySlotIndex = {};
+        slots.forEach((entry, idx) => { if (entry) entrySlotIndex[entry.entryId] = idx; });
+
         const rounds = [];
         let prevRoundMatches = null;
         let roundParticipantCount = bracketSize;
@@ -579,7 +994,7 @@
             roundNum++;
         }
 
-        return { rounds, conflictCount, bracketSize };
+        return { rounds, conflictCount, bracketSize, entrySlotIndex };
     }
 
     const BRACKET_SYSTEMS = {
@@ -611,6 +1026,19 @@
     // earliest position plus the court's own minGap as a buffer, on the
     // reasonable assumption that whoever the eventual winner is will
     // still want roughly that much rest before playing again.
+    //
+    // EQUIPMENT: plexi-helmet categories can ONLY use plexi-capable
+    // courts — a hard eligibility filter, same shape the old vestNumbers
+    // filter used to be. Vest SIZE is no longer a hard filter though:
+    // court.vestNumbers is now a soft preference (tie-break only) used
+    // to minimize how often a vest actually has to be physically carried
+    // between courts, while the REAL vest-size/generation constraint is
+    // enforced precisely via a count-based interval tracker keyed on
+    // each court's own estimated running clock (see estimateMatchDurationSeconds
+    // / checkVestAvailability / checkPlexiAvailability). This is what
+    // makes cross-court vest borrowing safe: a candidate is only placed
+    // if enough units of its size+gen (or plexi helmets) are free for
+    // the whole estimated duration of the match plus a transfer buffer.
     // ══════════════════════════════════════════════════════════════════
     function generateCourtOrdering(brackets) {
         const activeCourts = courts;
@@ -621,16 +1049,43 @@
         brackets.forEach(b => {
             const cat = flatCategories.find(c => c.code === b.categoryCode);
             const info = cat ? vestInfoFor(cat) : null;
-            const pssSizeNum = info ? info.pssSize : null;
-            const eligibleCourts = activeCourts.filter(c => pssSizeNum == null || (c.vestNumbers || []).includes(pssSizeNum));
+            const requiresPlexiHelmet = categoryRequiresPlexiHelmet(cat);
+            const genPolicy = info ? info.vestGenPolicy : "either";
+            // eligibleCourtIds only enforces the HARD vest-gen lock now —
+            // that's a genuine physical impossibility (a gen2-only court
+            // can never produce a gen3 vest). Plexi is NOT filtered here
+            // anymore: checkPlexiAvailability (helmet count + transfer
+            // buffer, further down) already enforces the real physical
+            // constraint on ITS OWN, independent of which court hosts the
+            // match — a helmet can be carried over just like a vest can.
+            // The Plexi checkbox on a court is now a SOFT preference (see
+            // the candidate sort below): plexi categories incline toward
+            // plexi-marked courts, but the hard fight-count threshold can
+            // still send some to a non-plexi court to keep courts
+            // balanced, same as any other category.
+            const eligibleCourts = activeCourts.filter(c => info == null || courtSupportsGenPolicy(c, genPolicy));
             categoryMeta[b.categoryCode] = {
                 eligibleCourtIds: eligibleCourts.map(c => c.id),
                 avgBirthYear: cat ? (cat.ageMin + cat.ageMax) / 2 : 0,
+                pssSize: info ? info.pssSize : null,
+                genPolicy,
+                requiresPlexiHelmet,
+                durationSeconds: estimateMatchDurationSeconds(cat),
+                homeCourtId: null,
             };
         });
 
         const unassigned = [];
-        const placed = []; // {position, athleteIds} across the WHOLE tournament so far — feeds the gap check
+        const placed = []; // {position, athleteIds} across the WHOLE tournament so far — feeds the athlete rest-gap check
+        const tracker = makeEquipmentTracker();
+        const courtClockSeconds = {}; // per-court estimated running time — drives ONLY the equipment interval checks now, not court ordering
+        const courtMatchCount = {};   // per-court count of matches actually scheduled so far — THIS is the hard-balanced quantity, per fight count not estimated time
+        activeCourts.forEach(c => { courtClockSeconds[c.id] = 0; courtMatchCount[c.id] = 0; });
+
+        function minMatchCount() {
+            return activeCourts.reduce((min, c) => Math.min(min, courtMatchCount[c.id]), Infinity);
+        }
+
         let globalPosition = 0;
         let totalScheduled = 0;
         const maxRounds = brackets.reduce((max, b) => Math.max(max, b.rounds.length), 0);
@@ -643,7 +1098,11 @@
                 round.forEach(m => {
                     if (m.status === "walkover") return; // resolves instantly — never needs a court slot
                     const meta = categoryMeta[b.categoryCode];
-                    if (meta.eligibleCourtIds.length === 0) { unassigned.push(m); return; }
+                    if (meta.eligibleCourtIds.length === 0) {
+                        m.unassignedReason = "no court supports this category's required vest generation";
+                        unassigned.push(m);
+                        return;
+                    }
 
                     // Earliest position this match may be scheduled at:
                     // one slot after whichever of its feeder matches
@@ -658,15 +1117,52 @@
                     });
 
                     const knownAthleteIds = m.status === "ready" ? [...(m.blue.athleteIds || []), ...(m.red.athleteIds || [])] : null;
-                    roundPool.push({ match: m, avgBirthYear: meta.avgBirthYear, eligibleCourtIds: meta.eligibleCourtIds, athleteIds: knownAthleteIds, earliestPosition });
+                    roundPool.push({ match: m, meta, athleteIds: knownAthleteIds, earliestPosition });
                 });
             });
             if (roundPool.length === 0) continue;
 
             const remainingByCourtId = {};
             activeCourts.forEach(c => {
-                const candidates = roundPool.filter(p => p.eligibleCourtIds.includes(c.id));
-                candidates.sort((a, b) => c.ageOrder === "youngest_first" ? b.avgBirthYear - a.avgBirthYear : a.avgBirthYear - b.avgBirthYear);
+                const candidates = roundPool.filter(p => p.meta.eligibleCourtIds.includes(c.id));
+                candidates.sort((a, b) => {
+                    // 1) SOFT home-court affinity — a category already
+                    // anchored to THIS court sorts first, an unclaimed
+                    // category is next, a category anchored to a
+                    // DIFFERENT court sorts last (only picked up here as
+                    // a last resort, when nothing better fits this
+                    // slot). This is a preference only — the hard fight-
+                    // count threshold below is what can actually force a
+                    // category to spread across courts when needed.
+                    const aHome = a.meta.homeCourtId === c.id ? 0 : a.meta.homeCourtId ? 2 : 1;
+                    const bHome = b.meta.homeCourtId === c.id ? 0 : b.meta.homeCourtId ? 2 : 1;
+                    if (aHome !== bHome) return aHome - bHome;
+
+                    // 2) SOFT plexi preference — a category that needs a
+                    // plexi helmet inclines toward courts checked "Plexi"
+                    // (mainly matters here on ROUND 1, before any home
+                    // court exists yet; tier 1 above then keeps it there
+                    // for later rounds). NOT a hard filter — the real
+                    // physical constraint is checkPlexiAvailability
+                    // (helmet count + transfer buffer) further down,
+                    // which doesn't care which court the checkbox is on.
+                    // The hard fight-count threshold can still push some
+                    // plexi matches onto a non-plexi court once the
+                    // preferred court is running too far ahead — that's
+                    // the "majority there, a few elsewhere for balance"
+                    // behavior this is meant to produce.
+                    const aPlexiPref = a.meta.requiresPlexiHelmet ? (c.plexiCapable ? 0 : 1) : 0;
+                    const bPlexiPref = b.meta.requiresPlexiHelmet ? (c.plexiCapable ? 0 : 1) : 0;
+                    if (aPlexiPref !== bPlexiPref) return aPlexiPref - bPlexiPref;
+
+                    // 3) vestNumbers soft preference (tie-break only).
+                    const aPref = (c.vestNumbers || []).includes(a.meta.pssSize) ? 0 : 1;
+                    const bPref = (c.vestNumbers || []).includes(b.meta.pssSize) ? 0 : 1;
+                    if (aPref !== bPref) return aPref - bPref;
+
+                    // 4) age order, as before.
+                    return c.ageOrder === "youngest_first" ? b.meta.avgBirthYear - a.meta.avgBirthYear : a.meta.avgBirthYear - b.meta.avgBirthYear;
+                });
                 remainingByCourtId[c.id] = candidates;
             });
 
@@ -677,13 +1173,37 @@
             while (assignedIds.size < roundPool.length && guard < roundPool.length * 6 + 30) {
                 guard++;
                 let placedThisRow = false;
-                for (const court of activeCourts) {
+                // Courts behind on FIGHT COUNT get first claim on the
+                // next slot each tick — this is what keeps the two
+                // courts' match counts converging instead of drifting.
+                const courtsByCount = activeCourts.slice().sort((a, b) => courtMatchCount[a.id] - courtMatchCount[b.id]);
+                const floorCount = minMatchCount();
+
+                for (const court of courtsByCount) {
                     const queue = remainingByCourtId[court.id];
                     let pickIndex = -1;
+                    let pickEquip = null;
+
+                    // HARD THRESHOLD: once this court is already
+                    // courtBalanceThreshold fights ahead of the
+                    // currently least-busy court, it may not take
+                    // another match this tick — UNLESS that specific
+                    // candidate has genuinely nowhere else to go (e.g. a
+                    // plexi/gen-restricted category whose only eligible
+                    // court is this one), in which case forcing it here
+                    // is unavoidable and correctness wins over balance.
+                    const overThreshold = courtMatchCount[court.id] - floorCount >= courtBalanceThreshold;
+
                     for (let i = 0; i < queue.length; i++) {
                         const cand = queue[i];
                         if (assignedIds.has(cand.match.matchId)) continue;
                         if (position < cand.earliestPosition) continue; // its feeder(s) haven't happened by this point yet
+
+                        if (overThreshold) {
+                            const hasAlternative = cand.meta.eligibleCourtIds.some(id => id !== court.id);
+                            if (hasAlternative) continue; // let the lagging court(s) catch up first
+                        }
+
                         if (cand.athleteIds) {
                             const violates = placed.some(p =>
                                 Math.abs(p.position - position) < court.minGapBetweenSameAthlete &&
@@ -691,14 +1211,52 @@
                             );
                             if (violates) continue;
                         }
+
+                        // Equipment check, using this court's own
+                        // estimated running clock as the candidate
+                        // window's start.
+                        const start = courtClockSeconds[court.id];
+                        const end = start + cand.meta.durationSeconds + transferBufferSeconds;
+
+                        if (cand.meta.requiresPlexiHelmet) {
+                            const plexiCheck = checkPlexiAvailability(tracker, start, end, court.id);
+                            if (!plexiCheck.ok) { cand.match.unassignedReason = plexiCheck.reason; continue; }
+                        }
+                        let vestCheck = { ok: true, resolvedGen: null };
+                        if (cand.meta.pssSize != null) {
+                            const allowedGens = (!court.allowedVestGen || court.allowedVestGen === "any") ? ["gen2", "gen3"] : [court.allowedVestGen];
+                            vestCheck = checkVestAvailability(tracker, cand.meta.pssSize, cand.meta.genPolicy, allowedGens, start, end, court.id);
+                            if (!vestCheck.ok) { cand.match.unassignedReason = vestCheck.reason; continue; }
+                        }
+
                         pickIndex = i;
+                        pickEquip = { start, end, vestCheck, requiresPlexiHelmet: cand.meta.requiresPlexiHelmet };
                         break;
                     }
                     if (pickIndex === -1) continue;
+
                     const chosen = queue[pickIndex];
                     chosen.match.courtId = court.id;
                     chosen.match.queuePosition = position;
+                    delete chosen.match.unassignedReason;
+                    if (!chosen.meta.homeCourtId) chosen.meta.homeCourtId = court.id; // soft preference, anchored on first placement
+
+                    // Commit position-based (rest-gap) and time-based
+                    // (equipment) bookkeeping together, only once a
+                    // candidate has passed every check.
                     placed.push({ position, athleteIds: chosen.athleteIds || [] });
+                    if (pickEquip.requiresPlexiHelmet) reservePlexi(tracker, pickEquip.start, pickEquip.end, court.id);
+                    if (pickEquip.vestCheck.resolvedGen) {
+                        reserveVest(tracker, chosen.meta.pssSize, pickEquip.vestCheck.resolvedGen, pickEquip.start, pickEquip.end, court.id);
+                        chosen.match.resolvedVestGen = pickEquip.vestCheck.resolvedGen; // stamped for the live queue / club sheets
+                    }
+                    // Next match on this court starts when THIS one ends
+                    // — the transfer buffer only matters for equipment
+                    // reused on a DIFFERENT court, not this court's own
+                    // next match.
+                    courtClockSeconds[court.id] = pickEquip.end - transferBufferSeconds;
+                    courtMatchCount[court.id]++;
+
                     assignedIds.add(chosen.match.matchId);
                     totalScheduled++;
                     placedThisRow = true;
@@ -708,17 +1266,28 @@
             }
 
             // Anything left after the guard limit (genuinely unsatisfiable
-            // within this round) gets appended right after, dependency
-            // respected, gap/age-order ignored — scheduled late beats
-            // not scheduled.
+            // within this round — often the fight-count threshold itself
+            // stalling every court at once) gets appended right after:
+            // dependency respected, gap/age-order/equipment/threshold all
+            // ignored — scheduled late beats not scheduled. Prefers the
+            // category's home court when it's eligible, otherwise the
+            // currently least-busy eligible court. Flagged so the UI can
+            // warn staff this one wasn't fully constraint-checked.
             roundPool.forEach(p => {
                 if (assignedIds.has(p.match.matchId)) return;
-                const court = activeCourts.find(c => p.eligibleCourtIds.includes(c.id));
+                const eligible = activeCourts.filter(c => p.meta.eligibleCourtIds.includes(c.id));
+                let court = p.meta.homeCourtId ? eligible.find(c => c.id === p.meta.homeCourtId) : null;
+                if (!court) court = eligible.slice().sort((a, b) => courtMatchCount[a.id] - courtMatchCount[b.id])[0];
                 if (!court) { unassigned.push(p.match); return; }
                 const pos = Math.max(position, p.earliestPosition);
                 p.match.courtId = court.id;
                 p.match.queuePosition = pos;
+                p.match.unassignedReason = null;
+                p.match.scheduledWithRelaxedConstraints = true;
+                if (!p.meta.homeCourtId) p.meta.homeCourtId = court.id;
                 placed.push({ position: pos, athleteIds: p.athleteIds || [] });
+                courtClockSeconds[court.id] += p.meta.durationSeconds;
+                courtMatchCount[court.id]++;
                 totalScheduled++;
                 position = pos + 1;
             });
@@ -778,6 +1347,7 @@
         generatedBrackets = [];
         generatedMatches = [];
         let totalConflicts = 0;
+        let skippedSingleEntryCount = 0;
 
         for (const cat of flatCategories) {
             if (!(cat.ageCode in divisionRosterCache)) {
@@ -797,11 +1367,22 @@
                     entryId,
                     athleteIds: members.map(m => m.athleteId),
                     clubId: members[0] ? members[0].clubId : null,
+                    clubName: members[0] ? members[0].club : null,
                     country: members[0] ? members[0].country : null,
                     name: members.map(m => m.name).join(" & "),
                 };
             });
             if (entries.length === 0) continue;
+            if (entries.length < 2) {
+                // A single registrant has no one to fight — building a
+                // bracket (and the SVG/PDF that render it) for this case
+                // used to produce a nonsensical "Final vs BYE" page since
+                // a 1-slot bracket has no real Final. There's genuinely
+                // no bracket to generate here, so skip it rather than
+                // fake one.
+                skippedSingleEntryCount++;
+                continue;
+            }
 
             const seeded = orderingFn(entries);
             seeded.forEach((e, i) => { e.seed = i + 1; });
@@ -827,6 +1408,11 @@
                 // AGE DIVISION (see flattenCategories), not the match.
                 m.roundTime = cat.roundTime;
                 m.breakTime = cat.breakTime;
+                // Competition-rule fact resolved from the selected PSS
+                // set (see categoryRequiresPlexiHelmet) — resolvedVestGen
+                // is NOT set here; it's only known once generateCourtOrdering
+                // actually reserves a vest for this match.
+                m.requiresPlexiHelmet = categoryRequiresPlexiHelmet(cat);
             }));
 
             generatedBrackets.push({
@@ -836,9 +1422,10 @@
                 orderingStrategy: document.getElementById("orderingSelect").value,
                 placementStrategy: document.getElementById("placementSelect").value,
                 pssHitLevelSetId: selectedPssHitLevelSetId,
-                entries: seeded.map(e => ({ entryId: e.entryId, athleteIds: e.athleteIds, clubId: e.clubId, country: e.country, name: e.name, seed: e.seed })),
+                entries: seeded.map(e => ({ entryId: e.entryId, athleteIds: e.athleteIds, clubId: e.clubId, clubName: e.clubName, country: e.country, name: e.name, seed: e.seed })),
                 rounds: built.rounds,
                 bracketSize: built.bracketSize,
+                entrySlotIndex: built.entrySlotIndex,
             });
             built.rounds.forEach(roundMatches => roundMatches.forEach(m => generatedMatches.push(m)));
         }
@@ -848,11 +1435,13 @@
         // isn't treated specially anymore.
         const orderingResult = generateCourtOrdering(generatedBrackets);
         computeMatchNumbers();
+        revalidateEquipmentAfterManualEdit(); // flags conflicts left by the guard-limit overflow path, which skips equipment checks
         rebuildMatchById();
 
         document.getElementById("generateSummary").innerHTML = `
             ${generatedBrackets.length} bracket(s) generated ·
             ${orderingResult.placedCount} match(es) scheduled onto courts ·
+            ${skippedSingleEntryCount > 0 ? `<span style="color:#b45309;">${skippedSingleEntryCount} categor${skippedSingleEntryCount === 1 ? "y" : "ies"} skipped (only 1 entrant, nothing to bracket)</span> · ` : ""}
             ${totalConflicts > 0 ? `<span style="color:#b45309;">${totalConflicts} unavoidable club/country pairing(s)</span> · ` : ""}
             ${orderingResult.unassigned.length > 0 ? `<span style="color:#b91c1c;">${orderingResult.unassigned.length} match(es) have no eligible court (check vest numbers)</span>` : ""}
         `;
@@ -970,6 +1559,17 @@
         return participantLabel(bracket.entries, participant);
     }
 
+    // Club name for a resolved participant, or "" for BYE / "Winner of"
+    // placeholders — those have no known club yet. Looked up from the
+    // bracket's own entries list, so it's always in sync with whatever
+    // clubName the entry carries (see generateEverything, which pulls it
+    // from the roster's first member).
+    function participantClubName(bracket, participant) {
+        if (!participant || !participant.entryId) return "";
+        const e = bracket.entries.find(x => x.entryId === participant.entryId);
+        return e && e.clubName ? e.clubName : "";
+    }
+
     // A4 landscape @ 96dpi: 297mm x 210mm -> 1123 x 794px. Fixed
     // regardless of bracket size — spacing (MATCH_H, ROUND_W) is derived
     // FROM this fixed canvas and the bracket's own structure (how many
@@ -992,62 +1592,68 @@
         }
         function text(x, y, anchor, str, opts) {
             opts = opts || {};
-            svgParts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-size="${opts.size || 10}" font-weight="${opts.bold ? 700 : 400}" font-family="Arial, sans-serif" fill="#0f172a">${escapeXml(str)}</text>`);
+            svgParts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-size="${opts.size || 10}" font-weight="${opts.bold ? 700 : 400}" font-family="Arial, sans-serif" fill="${opts.color || "#0f172a"}">${escapeXml(str)}</text>`);
         }
         function badge(x, y, str) {
             svgParts.push(`<rect x="${(x - BOX_HALF_W).toFixed(1)}" y="${(y - 8).toFixed(1)}" width="${BOX_HALF_W * 2}" height="16" fill="#fff" stroke="#1e293b" stroke-width="1"/>`);
             text(x, y + 3.5, "middle", str, { size: 8.5 });
         }
-        // No live DOM to measure real text width against (this is built
-        // as a plain string, not rendered yet) — estimated from character
-        // count instead, so a connector line starts right after each
-        // name's own text ends instead of a fixed reserved width that's
-        // wrong for every name shorter or longer than average.
+        // No live DOM element renders this text (it's built as a plain
+        // string), so a real width still needs measuring some other
+        // way. Canvas 2D's measureText() is the right tool for that: it
+        // measures in actual CSS px at the exact font-family/size given,
+        // matching this SVG's own font-family ("Arial, sans-serif") and
+        // px-based coordinate system with no unit conversion at all —
+        // unlike routing through jsPDF's point-sized font model, which
+        // needs a px<->pt conversion that's easy to get wrong (and did,
+        // in an earlier version of this function: both the connector-
+        // line start AND the club-name left-alignment depend on this
+        // value, which is why a bad width broke both at once for
+        // whichever names it happened to be most wrong on). measureText
+        // always returns a real finite number, even for weird input, so
+        // there's no risk of a NaN silently producing an invisible line.
         function estimateTextWidth(str, fontSize) {
-            return String(str ?? "").length * fontSize * 0.55;
+            if (!__measureCanvasCtx) {
+                try { __measureCanvasCtx = document.createElement("canvas").getContext("2d"); } catch (err) { __measureCanvasCtx = null; }
+            }
+            if (!__measureCanvasCtx) return String(str ?? "").length * fontSize * 0.55; // canvas unavailable — fall back
+            __measureCanvasCtx.font = `${fontSize}px Arial, sans-serif`;
+            return __measureCanvasCtx.measureText(String(str ?? "")).width;
         }
-        // Draws the elbow connecting two feeders into one output badge.
-        // xFeed1/xFeed2 are independent (not assumed equal) specifically
-        // for the bye case: a real feeder's edge sits at a badge's edge,
-        // but a bye feeder has no badge to have an edge — its line runs
-        // straight from wherever it actually started. dir is +1 for the
-        // left side (progressing rightward) or -1 for the right
-        // (mirrored) — determines which edge of the output badge the
-        // line stops at.
-        function drawMerge(xFeed1, y1, xFeed2, y2, xOutCenter, yOut, dir) {
-            const xOutEdge = xOutCenter - dir * BOX_HALF_W;
-            // The join sits at the midpoint between the OUTPUT edge and
-            // whichever feeder is further along — normally both feeders
-            // are equal (a real badge edge on each side) so this is just
-            // the usual symmetric elbow midpoint. For a bye pairing, one
-            // feeder is further along than the other; the join still
-            // uses that further one, and the shorter (bye) feed's line
-            // simply travels the extra distance to reach the same join
-            // point instead of stopping short.
-            const furtherFeed = dir === 1 ? Math.max(xFeed1, xFeed2) : Math.min(xFeed1, xFeed2);
-            const xJoin = (furtherFeed + xOutEdge) / 2;
-            line(xFeed1, y1, xJoin, y1);
-            line(xFeed2, y2, xJoin, y2);
-            line(xJoin, y1, xJoin, y2);
-            line(xJoin, yOut, xOutEdge, yOut);
+        // Draws the two feed lines straight into the badge's own x
+        // position (xOutCenter) — no separate elbow-then-travel segment.
+        // The badge is drawn centered on the resulting vertical bridge,
+        // so the fight number sits exactly where the two fighters' lines
+        // meet, instead of floating further along a trailing connector.
+        // xFeed1/xFeed2 don't need to be equal — a bye's feed naturally
+        // starts closer to xOutCenter than a real feeder's does, and it
+        // just travels a shorter distance to reach the same point.
+        function drawMerge(xFeed1, y1, xFeed2, y2, xOutCenter) {
+            line(xFeed1, y1, xOutCenter, y1);
+            line(xFeed2, y2, xOutCenter, y2);
+            line(xOutCenter, y1, xOutCenter, y2);
         }
-        // Single-line elbow (used for the Final, where each side's
-        // input is independent rather than two feeders merging).
-        function drawElbowInto(xFeedCenter, yFeed, xOutCenter, yOut, dir) {
-            const xFeedEdge = xFeedCenter + dir * BOX_HALF_W;
-            const xOutEdge = xOutCenter - dir * BOX_HALF_W;
-            const xMid = (xFeedEdge + xOutEdge) / 2;
-            line(xFeedEdge, yFeed, xMid, yFeed);
-            line(xMid, yFeed, xMid, yOut);
-            line(xMid, yOut, xOutEdge, yOut);
+        // Single-line elbow (used for the Final, where each side's own
+        // exit point — already correct for both the real-badge and bye
+        // cases, see exitX below — feeds in independently rather than
+        // two feeders merging).
+        function drawElbowInto(xFeedEdge, yFeed, xOutCenter, yOut) {
+            line(xFeedEdge, yFeed, xOutCenter, yFeed);
+            if (yFeed !== yOut) line(xOutCenter, yFeed, xOutCenter, yOut);
         }
 
         // Trivial case: a 2-entry bracket is just the Final, no left/right split.
         if (bracketSize <= 2) {
             const finalMatch = bracket.rounds[0][0];
             const cx = totalWidth / 2, cy = HEADER_H + (totalHeight - HEADER_H - FOOTER_H) / 2;
-            text(cx, cy - 12, "middle", participantDisplay(bracket, finalMatch.blue), { size: 11 });
-            text(cx, cy + 16, "middle", participantDisplay(bracket, finalMatch.red), { size: 11 });
+            const blueName = participantDisplay(bracket, finalMatch.blue);
+            const blueClub = participantClubName(bracket, finalMatch.blue);
+            const redName = participantDisplay(bracket, finalMatch.red);
+            const redClub = participantClubName(bracket, finalMatch.red);
+            text(cx, cy - 16, "middle", blueName, { size: 11 });
+            if (blueClub) text(cx, cy - 3, "middle", blueClub, { size: 10, color: "#64748b" });
+            text(cx, cy + 16, "middle", redName, { size: 11 });
+            if (redClub) text(cx, cy + 29, "middle", redClub, { size: 10, color: "#64748b" });
             badge(cx, cy, finalMatch.displayNumber ?? "");
             return { svg: wrapSVG(totalWidth, totalHeight, svgParts, bracket, totalWidth / 2), width: totalWidth, height: totalHeight };
         }
@@ -1058,11 +1664,14 @@
         // Spacing derived from the fixed page + this bracket's own shape,
         // not fixed constants — a small bracket (few round-1 matches)
         // gets a tall MATCH_H filling the available height; a large one
-        // compresses to fit rather than overflowing the page.
+        // compresses to fit rather than overflowing the page. ROW_H and
+        // the two font sizes are a bit larger than a single-line sheet
+        // needs, since each fighter now gets two lines (name + club).
         const bodyHeight = totalHeight - HEADER_H - FOOTER_H;
         const MATCH_H = bodyHeight / halfCount;
-        const ROW_H = Math.min(20, MATCH_H * 0.42);
-        const nameFontSize = Math.max(7, Math.min(10, MATCH_H * 0.24));
+        const ROW_H = Math.min(26, MATCH_H * 0.5);
+        const nameFontSize = Math.max(6, Math.min(9, MATCH_H * 0.2));
+        const clubFontSize = Math.max(6.5, nameFontSize * 0.9);
 
         const bodyWidthPerSide = centerX - MARGIN_X - NAME_W - FINAL_GAP;
         const ROUND_W = numRounds > 1 ? bodyWidthPerSide / (numRounds - 1) : 0;
@@ -1088,60 +1697,87 @@
         }
 
         // ── Round 0: names + connector into the round-1 badge ────────────
-        // A BYE (status "walkover") gets no badge at all — a blank box
-        // there was the bug being fixed. Its exit point for the next
-        // round's merge is recorded as xRoundLeft(0)/xRoundRight(0)
-        // directly (no badge-edge offset, since there's no badge), so
-        // the line runs straight through to the next real box instead
-        // of stopping at an empty rectangle.
-        const round0ExitX = { left: [], right: [] }; // per-match exit x, parallel to leftRounds[0]/rightRounds[0]
+        // A BYE (status "walkover") gets no badge at all — nothing
+        // fought. Each entry's own correct exit x (whether that's a real
+        // badge's edge, or — for a bye — the bare pass-through point
+        // with no offset) is stored directly on its descriptor object as
+        // `.exitX`, so every later stage (the round-2+ merge loop, and
+        // the Final) reads the right value instead of re-deriving it —
+        // that re-derivation is what used to leave a visible gap in a
+        // bye's line before it reached the Final.
         [
-            { side: leftRounds[0], nameX: MARGIN_X, anchor: "start", boxX: xRoundLeft(0), dir: 1, exitArr: round0ExitX.left },
-            { side: rightRounds[0], nameX: totalWidth - MARGIN_X, anchor: "end", boxX: xRoundRight(0), dir: -1, exitArr: round0ExitX.right },
-        ].forEach(({ side, nameX, anchor, boxX, dir, exitArr }) => {
-            side.forEach(({ match, y }) => {
+            { side: leftRounds[0], nameX: MARGIN_X, anchor: "start", boxX: xRoundLeft(0), dir: 1 },
+            { side: rightRounds[0], nameX: totalWidth - MARGIN_X, anchor: "end", boxX: xRoundRight(0), dir: -1 },
+        ].forEach(({ side, nameX, anchor, boxX, dir }) => {
+            side.forEach((entry) => {
+                const { match, y } = entry;
                 if (match.status === "walkover") {
-                    // Bye: just the one real fighter's name, centered in
-                    // the slot — no "BYE" row, no badge (nothing fought),
-                    // straight line through to the next real box.
+                    // Bye: just the one real fighter's name + club,
+                    // centered in the slot — no "BYE" row, no badge
+                    // (nothing fought), straight line through to the
+                    // next real box. Club name is always left-aligned,
+                    // starting at the same x where the NAME text itself
+                    // starts — on the mirrored right side that's not a
+                    // fixed x (the name is right-aligned, so its own
+                    // left edge shifts with how long the name is).
                     const winnerStr = participantDisplay(bracket, match.winnerCorner);
-                    text(nameX, y + 3, anchor, winnerStr, { size: nameFontSize });
-                    const winnerFeedX = dir === 1 ? nameX + estimateTextWidth(winnerStr, nameFontSize) + 4 : nameX - estimateTextWidth(winnerStr, nameFontSize) - 4;
+                    const winnerClub = participantClubName(bracket, match.winnerCorner);
+                    text(nameX, y - 1.5, anchor, winnerStr, { size: nameFontSize });
+                    const nameW = estimateTextWidth(winnerStr, nameFontSize);
+                    const nameStartX = dir === 1 ? nameX : nameX - nameW;
+                    if (winnerClub) text(nameStartX, y + clubFontSize + 0.5, "start", winnerClub, { size: clubFontSize, color: "#64748b" });
+                    const winnerFeedX = dir === 1 ? nameX + nameW + 4 : nameX - nameW - 4;
                     line(winnerFeedX, y, boxX, y);
-                    exitArr.push(boxX); // no badge -> exit edge is the bare box position itself, not offset
+                    entry.exitX = boxX; // no badge -> exit edge is the bare box position itself, not offset
                     return;
                 }
 
                 const topY = y - ROW_H / 2, botY = y + ROW_H / 2;
                 const topStr = participantDisplay(bracket, match.blue);
+                const topClub = participantClubName(bracket, match.blue);
                 const botStr = participantDisplay(bracket, match.red);
-                text(nameX, topY + 3, anchor, topStr, { size: nameFontSize });
-                text(nameX, botY + 3, anchor, botStr, { size: nameFontSize });
+                const botClub = participantClubName(bracket, match.red);
 
-                // Line starts right where each name's own text ends —
-                // "the name on top of the line" — not a fixed column width.
-                const topFeedX = dir === 1 ? nameX + estimateTextWidth(topStr, nameFontSize) + 4 : nameX - estimateTextWidth(topStr, nameFontSize) - 4;
-                const botFeedX = dir === 1 ? nameX + estimateTextWidth(botStr, nameFontSize) + 4 : nameX - estimateTextWidth(botStr, nameFontSize) - 4;
+                text(nameX, topY - 1.5, anchor, topStr, { size: nameFontSize });
+                text(nameX, botY - 1.5, anchor, botStr, { size: nameFontSize });
 
-                drawMerge(topFeedX, topY, botFeedX, botY, boxX, y, dir);
+                // Line starts right where each fighter's own NAME text
+                // ends. Club text always starts at that same left edge
+                // (dir === 1: that edge is just nameX itself; dir === -1:
+                // the name is right-aligned, so its left edge is nameX
+                // minus its own width) rather than mirroring outward
+                // like the name does.
+                const topW = estimateTextWidth(topStr, nameFontSize);
+                const botW = estimateTextWidth(botStr, nameFontSize);
+                const topStartX = dir === 1 ? nameX : nameX - topW;
+                const botStartX = dir === 1 ? nameX : nameX - botW;
+                if (topClub) text(topStartX, topY + clubFontSize + 0.5, "start", topClub, { size: clubFontSize, color: "#64748b" });
+                if (botClub) text(botStartX, botY + clubFontSize + 0.5, "start", botClub, { size: clubFontSize, color: "#64748b" });
+
+                const topFeedX = dir === 1 ? nameX + topW + 4 : nameX - topW - 4;
+                const botFeedX = dir === 1 ? nameX + botW + 4 : nameX - botW - 4;
+
+                drawMerge(topFeedX, topY, botFeedX, botY, boxX);
                 badge(boxX, y, match.displayNumber ?? "");
-                exitArr.push(boxX + dir * BOX_HALF_W); // real badge -> exit from its far edge
+                entry.exitX = boxX + dir * BOX_HALF_W; // real badge -> exit from its far edge
             });
         });
 
         // ── Merge connectors for every round after the first ─────────────
         for (let r = 1; r < leftRounds.length; r++) {
-            leftRounds[r].forEach(({ match, y }, i) => {
-                const feed1 = r === 1 ? round0ExitX.left[2 * i] : xRoundLeft(r - 1) + BOX_HALF_W;
-                const feed2 = r === 1 ? round0ExitX.left[2 * i + 1] : xRoundLeft(r - 1) + BOX_HALF_W;
-                drawMerge(feed1, leftRounds[r - 1][2 * i].y, feed2, leftRounds[r - 1][2 * i + 1].y, xRoundLeft(r), y, 1);
-                badge(xRoundLeft(r), y, match.displayNumber ?? "");
+            leftRounds[r].forEach((entry, i) => {
+                const feed1 = leftRounds[r - 1][2 * i].exitX;
+                const feed2 = leftRounds[r - 1][2 * i + 1].exitX;
+                drawMerge(feed1, leftRounds[r - 1][2 * i].y, feed2, leftRounds[r - 1][2 * i + 1].y, xRoundLeft(r));
+                badge(xRoundLeft(r), entry.y, entry.match.displayNumber ?? "");
+                entry.exitX = xRoundLeft(r) + BOX_HALF_W;
             });
-            rightRounds[r].forEach(({ match, y }, i) => {
-                const feed1 = r === 1 ? round0ExitX.right[2 * i] : xRoundRight(r - 1) - BOX_HALF_W;
-                const feed2 = r === 1 ? round0ExitX.right[2 * i + 1] : xRoundRight(r - 1) - BOX_HALF_W;
-                drawMerge(feed1, rightRounds[r - 1][2 * i].y, feed2, rightRounds[r - 1][2 * i + 1].y, xRoundRight(r), y, -1);
-                badge(xRoundRight(r), y, match.displayNumber ?? "");
+            rightRounds[r].forEach((entry, i) => {
+                const feed1 = rightRounds[r - 1][2 * i].exitX;
+                const feed2 = rightRounds[r - 1][2 * i + 1].exitX;
+                drawMerge(feed1, rightRounds[r - 1][2 * i].y, feed2, rightRounds[r - 1][2 * i + 1].y, xRoundRight(r));
+                badge(xRoundRight(r), entry.y, entry.match.displayNumber ?? "");
+                entry.exitX = xRoundRight(r) - BOX_HALF_W;
             });
         }
 
@@ -1151,8 +1787,8 @@
         const yFinal = (lastLeft.y + lastRight.y) / 2;
         const finalMatch = bracket.rounds[numRounds - 1][0];
 
-        drawElbowInto(xRoundLeft(leftRounds.length - 1), lastLeft.y, centerX, yFinal, 1);
-        drawElbowInto(xRoundRight(rightRounds.length - 1), lastRight.y, centerX, yFinal, -1);
+        drawElbowInto(lastLeft.exitX, lastLeft.y, centerX, yFinal);
+        drawElbowInto(lastRight.exitX, lastRight.y, centerX, yFinal);
         badge(centerX, yFinal, finalMatch.displayNumber ?? "");
 
         // ── Round header row: ONE wide bordered strip, dividers between
@@ -1216,12 +1852,29 @@
             parts.push(`<text x="${clsX + 8}" y="${rowY + 13}" font-size="9">${label}</text>`);
         });
 
-        // Legend
+        // Legend — one row, spaced by each item's own text width plus a
+        // fixed gap (not fixed-width grid cells, which either crowd long
+        // entries or leave short ones swimming in space) and no internal
+        // divider lines, just a single outer border around the row.
         const legendY = footerTop + 110;
         const legendMargin = 16;
-        parts.push(`<rect x="${legendMargin}" y="${legendY}" width="${totalWidth - 2 * legendMargin}" height="34" fill="none" stroke="#1e293b"/>`);
-        parts.push(`<text x="${legendMargin + 8}" y="${legendY + 14}" font-size="8.5">LEGEND    RSC: Win by Referee Stops Contest    WDR: Win by Withdrawal    DQB: Win by Disqualification for unsportsmanlike behavior</text>`);
-        parts.push(`<text x="${legendMargin + 8}" y="${legendY + 27}" font-size="8.5">(x): Seed    PTF: Win by final score    DSQ: Win by Disqualification    R: Round</text>`);
+        const legendW = totalWidth - 2 * legendMargin;
+        const legendRowH = 20;
+        const legendFontSize = 8.5;
+        const legendGap = 30;
+        const legendItems = [
+            "RSC: Win by Referee Stops Contest",
+            "WDR: Win by Withdrawal",
+            "DQB: Disqualification (unsportsmanlike)",
+            "PTF: Win by final score",
+            "DSQ: Disqualification",
+        ];
+        parts.push(`<rect x="${legendMargin}" y="${legendY}" width="${legendW}" height="${legendRowH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
+        let legendX = legendMargin + 10;
+        legendItems.forEach(itemText => {
+            parts.push(`<text x="${legendX}" y="${legendY + legendRowH / 2 + 3}" font-size="${legendFontSize}" font-family="Arial, sans-serif" fill="#0f172a">${escapeXml(itemText)}</text>`);
+            legendX += itemText.length * legendFontSize * 0.55 + legendGap;
+        });
 
         parts.push(`</svg>`);
         return parts.join("\n");
@@ -1311,6 +1964,189 @@
         }
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // CLUB SHEETS — one PDF page per club: every one of that club's
+    // fighters, which category they're entered in, and EVERY fight they
+    // could structurally have across the whole bracket — not just fights
+    // already resolved to a known opponent. Since the whole tournament
+    // is scheduled up front (see generateCourtOrdering), every real round
+    // already has its own fight number even when the opponent is still
+    // "winner of an earlier match" — so a fighter's full path to the
+    // Final can be listed today.
+    //
+    // Layout: rather than one "Fights" column with a comma-joined list
+    // (which wrapped unpredictably and got messy for anyone with 3+
+    // fights), each possible round gets its OWN fixed column — R32, R16,
+    // QF, SF, F — so every row lines up the same way regardless of how
+    // far that fighter's bracket goes. A category that doesn't reach a
+    // given round just leaves that cell blank. Standard taekwondo
+    // corner format inside each cell: "<corner letter> <fight number>",
+    // e.g. "B 308" / "R 312" — see computeEntryFightsByPhase.
+    // ══════════════════════════════════════════════════════════════════
+    const CLUB_SHEET_MARGIN = 14; // mm, both sides — A4 width is 210mm
+    const ROUND_PHASE_COLUMNS = ["R32", "R16", "QF", "SF", "F"];
+
+    // Every fight an entry could structurally have across the WHOLE
+    // bracket, keyed by round phase ("R32"/"R16"/"QF"/"SF"/"F") instead
+    // of a flat list. The round-by-round match index + corner (blue/red)
+    // an entry lands in is a pure function of its starting slot (see
+    // entrySlotIndex on generateSingleElimination) — walked forward one
+    // round at a time via floor(index/2), the same recursion the bracket
+    // tree itself is built from, so this works whether or not the
+    // opponent at any given round is known yet.
+    //
+    // A round is skipped entirely when it resolves to a walkover for
+    // this entry (a bye — nothing to fight), matching the reference
+    // sheet, which only lists rounds from wherever an entry's first real
+    // opponent-slot appears through to the Final. A match that IS real
+    // but has no displayNumber yet (no eligible court was found for its
+    // category — see generateCourtOrdering's `unassigned`) is also left
+    // out rather than printed as some placeholder: a fight number a
+    // coach can't act on isn't useful on this sheet.
+    function computeEntryFightsByPhase(bracket, entryId) {
+        const slotIndex = bracket.entrySlotIndex ? bracket.entrySlotIndex[entryId] : undefined;
+        const byPhase = {};
+        if (slotIndex == null) return byPhase;
+
+        let matchIndex = Math.floor(slotIndex / 2);
+        let corner = slotIndex % 2 === 0 ? "blue" : "red";
+
+        for (let r = 0; r < bracket.rounds.length; r++) {
+            const match = bracket.rounds[r][matchIndex];
+            if (!match) break;
+
+            if (match.status !== "walkover" && match.displayNumber != null && match.roundPhase) {
+                const cornerLetter = corner === "blue" ? "B" : "R";
+                byPhase[match.roundPhase] = `${cornerLetter} ${match.displayNumber}`;
+            }
+
+            corner = matchIndex % 2 === 0 ? "blue" : "red";
+            matchIndex = Math.floor(matchIndex / 2);
+        }
+
+        return byPhase;
+    }
+
+    // clubId (or "__none__" for entries with no club on file) -> { clubName, rows }
+    // rows: one per (fighter, category) pair — the same athlete can be
+    // entered in more than one category, and each entry gets its own row
+    // so the category and fight list stay unambiguous.
+    function collectClubSheetRows() {
+        const byClub = {};
+        generatedBrackets.forEach(b => {
+            b.entries.forEach(e => {
+                const clubKey = e.clubId || "__none__";
+                const bucket = byClub[clubKey] || (byClub[clubKey] = { clubName: null, rows: [] });
+                if (!bucket.clubName && e.clubName) bucket.clubName = e.clubName;
+
+                const phases = computeEntryFightsByPhase(b, e.entryId);
+                bucket.rows.push({ name: e.name, categoryLabel: b.categoryLabel, phases });
+            });
+        });
+        return byClub;
+    }
+
+    function buildClubSheetsDoc() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: "mm", format: "a4" });
+        let isFirstPage = true;
+
+        const byClub = collectClubSheetRows();
+        const clubKeys = Object.keys(byClub).filter(k => k !== "__none__")
+            .sort((a, b) => (byClub[a].clubName || "").localeCompare(byClub[b].clubName || ""));
+        if (byClub["__none__"]) clubKeys.push("__none__"); // no club on file — trailing, unlabeled page
+
+        // No. / Participant (name + category merged, drawn manually
+        // below since autoTable can't mix two font styles in one cell) /
+        // one fixed column per round phase.
+        const columnWidths = { id: 8, participant: 60, phase: (182 - 8 - 60) / ROUND_PHASE_COLUMNS.length };
+        const PARTICIPANT_COL_INDEX = 1;
+
+        clubKeys.forEach(key => {
+            const club = byClub[key];
+            if (!isFirstPage) doc.addPage();
+            isFirstPage = false;
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(14);
+            doc.setTextColor(17, 17, 17);
+            doc.text(TOURNAMENT_TITLE, CLUB_SHEET_MARGIN, 18);
+            doc.setFontSize(13);
+            doc.text(club.clubName || "No Club", CLUB_SHEET_MARGIN, 26);
+
+            // Participant cell's own text is left blank — didDrawCell
+            // below draws the name + category label manually — this is
+            // just a placeholder so autoTable still allocates the cell.
+            const body = club.rows.map((r, i) => [
+                String(i + 1), "",
+                ...ROUND_PHASE_COLUMNS.map(phase => r.phases[phase] || ""),
+            ]);
+
+            const columnStyles = {
+                0: { cellWidth: columnWidths.id, halign: "center" },
+                1: { cellWidth: columnWidths.participant, halign: "left" },
+            };
+            ROUND_PHASE_COLUMNS.forEach((_, i) => {
+                columnStyles[i + 2] = { cellWidth: columnWidths.phase, halign: "center" };
+            });
+
+            doc.autoTable({
+                startY: 32,
+                head: [["No.", "Participant", ...ROUND_PHASE_COLUMNS]],
+                body,
+                columnStyles,
+                styles: { fontSize: 8, cellPadding: 1.3, lineColor: [17, 17, 17], lineWidth: 0.2, minCellHeight: 10, valign: "middle" },
+                headStyles: { fillColor: [255, 255, 255], textColor: [17, 17, 17], fontStyle: "bold", lineWidth: 0.3, halign: "center", valign: "middle" },
+                theme: "grid",
+                margin: { left: CLUB_SHEET_MARGIN, right: CLUB_SHEET_MARGIN },
+                didDrawCell: (hook) => {
+                    if (hook.section !== "body" || hook.column.index !== PARTICIPANT_COL_INDEX) return;
+                    const r = club.rows[hook.row.index];
+                    const { x, y, width, height } = hook.cell;
+                    const padX = x + 1.8;
+
+                    doc.setFont("helvetica", "bold");
+                    doc.setFontSize(8);
+                    doc.setTextColor(17, 17, 17);
+                    doc.text(r.name, padX, y + height / 2 - 1.8);
+
+                    doc.setFont("helvetica", "normal");
+                    doc.setFontSize(6.5);
+                    doc.setTextColor(100, 100, 100);
+                    doc.text(r.categoryLabel, padX, y + height / 2 + 1.6, { maxWidth: width - 3.6 });
+                    doc.setTextColor(17, 17, 17);
+                },
+            });
+        });
+
+        return doc;
+    }
+
+    async function downloadClubSheetsPDF() {
+        if (generatedBrackets.length === 0) {
+            showFlash("Generate brackets first.", true);
+            return;
+        }
+        if (!window.jspdf || !window.jspdf.jsPDF) {
+            showFlash("PDF library failed to load — check your connection and retry.", true);
+            return;
+        }
+
+        const btn = document.getElementById("downloadClubSheetsBtn");
+        if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
+
+        try {
+            const doc = buildClubSheetsDoc();
+            const safeTitle = (TOURNAMENT_TITLE || "tournament").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase();
+            doc.save(`${safeTitle || "tournament"}_club_sheets.pdf`);
+        } catch (err) {
+            console.error("Failed to build club sheets PDF", err);
+            showFlash("Failed to build the PDF — try again.", true);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "Download Club Sheets (PDF)"; }
+        }
+    }
+
     // ── Rendering: court columns with drag-and-drop ─────────────────────
     let draggedMatchId = null;
 
@@ -1335,9 +2171,30 @@
 
         const unassignedEl = document.getElementById("unassignedWarning");
         const unassignedMatches = generatedMatches.filter(m => m.status !== "walkover" && !m.courtId);
-        if (unassignedMatches.length > 0) {
+        const relaxedMatches = generatedMatches.filter(m => m.scheduledWithRelaxedConstraints);
+        const conflictMatches = generatedMatches.filter(m => m.equipmentConflict);
+        if (unassignedMatches.length > 0 || relaxedMatches.length > 0 || conflictMatches.length > 0) {
             unassignedEl.classList.remove("hidden");
-            unassignedEl.innerHTML = `<p style="color:#b91c1c; font-size:0.85rem;">${unassignedMatches.length} match(es) have no eligible court — set a matching vest number or add a court that carries it.</p>`;
+            const reasons = [...new Set(unassignedMatches.map(m => m.unassignedReason || "no eligible court"))];
+            unassignedEl.innerHTML = `
+                ${unassignedMatches.length > 0 ? `
+                    <p style="color:#b91c1c; font-size:0.85rem;">
+                        ${unassignedMatches.length} match(es) couldn't be scheduled — ${escapeHtml(reasons.join("; "))}.
+                        Check court vest/plexi setup and equipment counts.
+                    </p>` : ""}
+                ${conflictMatches.length > 0 ? `
+                    <p style="color:#b91c1c; font-size:0.85rem;">
+                        ${conflictMatches.length} match(es) on the board right now have an equipment conflict
+                        (hover the ⚠ badge on the card for details) — usually caused by a drag onto a court/time
+                        where the vest size/gen or plexi helmet isn't actually free. Move the match or free up
+                        equipment nearby to resolve.
+                    </p>` : ""}
+                ${relaxedMatches.length > 0 ? `
+                    <p style="color:#b45309; font-size:0.85rem;">
+                        ${relaxedMatches.length} match(es) were scheduled with relaxed constraints (rest-gap/equipment
+                        timing not guaranteed) — double-check these before printing.
+                    </p>` : ""}
+            `;
         } else {
             unassignedEl.classList.add("hidden");
         }
@@ -1348,10 +2205,22 @@
         const n1 = participantLabel(bracket.entries, m.blue);
         const n2 = participantLabel(bracket.entries, m.red);
         const badge = m.status === "pending" ? `<span class="badge badge-grey">pending</span>` : "";
+        const equipBadge = m.resolvedVestGen ? `<span class="badge badge-grey">${escapeHtml(m.resolvedVestGen)}</span>` : "";
+        const plexiBadge = m.requiresPlexiHelmet ? `<span class="badge badge-grey">plexi</span>` : "";
+        const relaxedBadge = m.scheduledWithRelaxedConstraints ? `<span class="badge" style="background:#fef3c7; color:#b45309;">relaxed</span>` : "";
+        // Label reflects what's ACTUALLY short — VEST and HELMET are the
+        // words reserveVest/reservePlexi's reason strings use (see
+        // checkVestAvailability/checkPlexiAvailability), so this never
+        // says "equipment" ambiguously when the real problem is one but
+        // not the other (e.g. Pupils categories never need a helmet at
+        // all, so a conflict there is always about vests).
+        const conflictBadge = m.equipmentConflict
+            ? `<span class="badge" style="background:#fee2e2; color:#b91c1c;" title="${escapeAttr(m.equipmentConflict)}">⚠ ${m.equipmentConflict.toUpperCase().includes("VEST") && m.equipmentConflict.toUpperCase().includes("HELMET") ? "vest+helmet" : m.equipmentConflict.toUpperCase().includes("HELMET") ? "helmet" : "vest"}</span>`
+            : "";
         return `
             <div class="bb-court-match" draggable="true" data-match-id="${m.matchId}"
                 ondragstart="onMatchDragStart(event, this)" ondragend="onMatchDragEnd(event, this)">
-                <div class="text-muted" style="font-size:0.72rem;">${m.displayNumber ?? "—"} · ${m.roundPhase ? escapeHtml(m.roundPhase) + " · " : ""}${escapeHtml(bracket.categoryLabel)} ${badge}</div>
+                <div class="text-muted" style="font-size:0.72rem;">${m.displayNumber ?? "—"} · ${m.roundPhase ? escapeHtml(m.roundPhase) + " · " : ""}${escapeHtml(bracket.categoryLabel)} ${badge} ${equipBadge} ${plexiBadge} ${relaxedBadge} ${conflictBadge}</div>
                 <div style="font-size:0.88rem; font-weight:600;">${escapeHtml(n1)} vs ${escapeHtml(n2)}</div>
             </div>
         `;
@@ -1452,6 +2321,7 @@
 
         draggedMatchId = null;
         computeMatchNumbers();
+        revalidateEquipmentAfterManualEdit(); // a drag can move a match onto a court/time slot with a stale equipment pairing
         renderCourtColumns();
         renderBracketsPreview(); // "101 Winner" labels may reference a match whose number just changed
     }
@@ -1675,12 +2545,81 @@
 
     .bb-config-row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr 1fr 1.2fr;
         gap: 1.25rem;
+    }
+
+    @media (max-width: 1100px) {
+        .bb-config-row {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .bb-pane--equipment {
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+        max-height: 480px;
+        overflow-y: auto;
+    }
+
+    .bb-equip-block {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+    }
+
+    .bb-equip-subhead {
+        font-size: 0.8rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 0;
+    }
+
+    .bb-equip-row {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+    }
+
+    .bb-equip-inventory .bb-equip-row {
+        align-items: center;
+        border-bottom: 1px solid #f1f5f9;
+        padding: 0.3rem 0;
+    }
+
+    .bb-equip-inventory input,
+    .bb-equip-genpolicy select {
+        padding: 0.35rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 0.85rem;
+        box-sizing: border-box;
+        width: 100%;
     }
 
     .bb-pane {
         padding: 1.25rem;
+    }
+
+    /* Straightforward fixed cap + internal scroll — no longer tries to
+       match Courts pane's height via JS (that approach didn't account
+       for the third Equipment pane, and broke down the moment content
+       got long). Courts itself stays unconstrained since its own row
+       count is naturally small and self-limiting. */
+    .bb-pane--vest {
+        display: flex;
+        flex-direction: column;
+        max-height: 480px;
+        overflow-y: auto;
+    }
+
+    .bb-vest-list {
+        flex: 1;
+        min-height: 0;
     }
 
     .bb-pane-header {
@@ -1692,10 +2631,19 @@
 
     .bb-court-row {
         display: grid;
-        grid-template-columns: 70px 1fr 1.3fr 90px 130px auto auto;
+        grid-template-columns: 70px 1fr 1.3fr 90px 130px 60px 110px auto auto;
         gap: 0.5rem;
         align-items: center;
         padding: 0.4rem 0;
+    }
+
+    .bb-plexi-check {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+        white-space: nowrap;
     }
 
     .bb-court-row input,
@@ -1800,6 +2748,8 @@
         padding: 0.9rem;
         border: 1px solid var(--border);
         border-radius: 10px;
+        max-height: 350px;
+        overflow-y: auto;
     }
 
     .bb-bracket-title-row {
@@ -1888,7 +2838,7 @@
     }
 
     .bb-court-column {
-        flex: 0 0 340px;
+        flex: 0 0 350px;
         border: 1px solid var(--border);
         border-radius: 10px;
         background: #f8fafc;

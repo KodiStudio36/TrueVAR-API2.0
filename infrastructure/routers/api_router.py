@@ -395,6 +395,12 @@ def _execute_registration_create(
 
     club_id = requesting_club_id or (members[0].get("clubId") if members else None)
     club_name = members[0].get("club") if members else None
+    # Sport-scoped national/association federation ID, same source as the
+    # roster member's own "associationId" field (see _build_roster_member)
+    # — captured here too so it's on the registration doc itself, not just
+    # buried inside division_rosters. Needed downstream (club sheets,
+    # results reporting) without a second athlete lookup.
+    association_id = members[0].get("associationId") if members else None
 
     reg_ref = tournament_ref.collection("registrations").document(f"{payload.categoryCode}_{entry_id}")
     roster_ref = tournament_ref.collection("division_rosters").document(payload.ageCode)
@@ -423,6 +429,8 @@ def _execute_registration_create(
             "categoryLabel": payload.categoryLabel,
             "athleteIds": payload.athleteIds,
             "clubId": club_id,
+            "clubName": club_name,
+            "associationId": association_id,
             "status": "active",
             "registeredAt": firestore.SERVER_TIMESTAMP,
         })
@@ -553,6 +561,14 @@ def _execute_registration_move(
 
         tx.set(old_reg_ref, {"status": "moved", "movedTo": new_reg_ref.id}, merge=True)
 
+        # clubName / associationId carry straight over from the existing
+        # registration (the club/athlete didn't change, only the
+        # category did) — falling back to a fresh lookup off the just-
+        # rebuilt `members` list for any older registration doc that
+        # predates these fields.
+        club_name = old_data.get("clubName") or (members[0].get("club") if members else None)
+        association_id = old_data.get("associationId") or (members[0].get("associationId") if members else None)
+
         tx.set(new_reg_ref, {
             "tournamentId": tournament_id,
             "entryTypeCode": payload.newEntryTypeCode,
@@ -562,6 +578,8 @@ def _execute_registration_move(
             "categoryLabel": payload.newCategoryLabel,
             "athleteIds": payload.athleteIds,
             "clubId": old_data.get("clubId"),
+            "clubName": club_name,
+            "associationId": association_id,
             "status": "active",
             "registeredAt": firestore.SERVER_TIMESTAMP,
             "movedFrom": old_reg_ref.id,
@@ -612,18 +630,14 @@ def admin_move_registration_endpoint(tournament_id: str, payload: MoveRegistrati
     return {"message": "Registration updated", "categoryCode": payload.newCategoryCode}
 
 
-@router.delete("/tournaments/{tournament_id}/registrations/{category_code}/{entry_id}")
-def remove_registration_endpoint(
+def _execute_registration_remove(
     tournament_id: str,
     category_code: str,
     entry_id: str,
-    age_code: str = Query(..., description="Age division the roster entry lives under"),
-    user: Optional[dict] = Depends(get_current_user),
-):
-    admin_club_id = get_admin_club_id(user)
-    if not admin_club_id:
-        raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
-
+    age_code: str,
+    requesting_club_id: Optional[str],
+    enforce_ownership: bool,
+) -> None:
     tournament_ref = db.collection("tournaments").document(tournament_id)
     reg_ref = tournament_ref.collection("registrations").document(f"{category_code}_{entry_id}")
     roster_ref = tournament_ref.collection("division_rosters").document(age_code)
@@ -639,7 +653,7 @@ def remove_registration_endpoint(
             raise HTTPException(status_code=404, detail="Registration not found.")
 
         reg_data = reg_snap.to_dict()
-        if reg_data.get("clubId") != admin_club_id:
+        if enforce_ownership and reg_data.get("clubId") != requesting_club_id:
             raise HTTPException(status_code=403, detail="You can only remove registrations for your own club.")
 
         tx.set(reg_ref, {"status": "withdrawn"}, merge=True)
@@ -657,6 +671,50 @@ def remove_registration_endpoint(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Remove failed: {exc}")
 
+
+@router.delete("/tournaments/{tournament_id}/registrations/{category_code}/{entry_id}")
+def remove_registration_endpoint(
+    tournament_id: str,
+    category_code: str,
+    entry_id: str,
+    age_code: str = Query(..., description="Age division the roster entry lives under"),
+    user: Optional[dict] = Depends(get_current_user),
+):
+    admin_club_id = get_admin_club_id(user)
+    if not admin_club_id:
+        raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
+
+    _execute_registration_remove(
+        tournament_id, category_code, entry_id, age_code,
+        requesting_club_id=admin_club_id, enforce_ownership=True,
+    )
+    return {"message": "Registration removed"}
+
+
+@router.delete("/tournaments/{tournament_id}/registrations/admin-remove/{category_code}/{entry_id}")
+def admin_remove_registration_endpoint(
+    tournament_id: str,
+    category_code: str,
+    entry_id: str,
+    age_code: str = Query(..., description="Age division the roster entry lives under"),
+):
+    """
+    Staff-only unguarded remove — the DELETE counterpart to
+    admin_register_entry_endpoint / admin_move_registration_endpoint.
+    Backs category_manager.html's trash-can button: that page already
+    lets staff add and move ANY club's entries with no ownership check
+    (see its "no eligibility checks" hint text), so the remove button
+    needs the same unguarded treatment — otherwise staff could add and
+    move freely but hit a 403 the moment they tried to remove an entry
+    that wasn't their own club's.
+
+    TODO: same as the other admin-* endpoints in this file — gate behind
+    real staff auth once it exists.
+    """
+    _execute_registration_remove(
+        tournament_id, category_code, entry_id, age_code,
+        requesting_club_id=None, enforce_ownership=False,
+    )
     return {"message": "Registration removed"}
 
 

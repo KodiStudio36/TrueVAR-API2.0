@@ -17,103 +17,32 @@
         </div>
     </div>
 
-    {# ═══════════════════════════════════════════════════════════════════════
-    COURT TABS
-    ═══════════════════════════════════════════════════════════════════════ #}
-    <div class="lq-courts" id="court-tabs">
-        <div class="lq-court-skeleton">Loading courts…</div>
-    </div>
+    <p class="lq-hint">
+        Every court's full running order, live, side by side. Drag the ⠿ handle to reorder within a court or drop
+        onto another court's column to re-court. Click a fight to preview its TA sheet, or use the print icon for
+        an instant print.
+    </p>
 
     {# ═══════════════════════════════════════════════════════════════════════
-    TOOLBAR
+    COURTS — rendered side by side, all matches, all statuses (including
+    done). Populated entirely from the single realtime listener below; see
+    subscribeAll()'s comment for why this is the only Firestore query on
+    this whole page.
     ═══════════════════════════════════════════════════════════════════════ #}
-    <div class="lq-toolbar">
-        <input id="search-box" type="search" placeholder="Filter loaded matches by athlete, club or category…"
-            class="lq-search">
-        <div class="lq-toolbar-hint">Hover the gap between two fights to insert one. Drag the ⠿ handle to reorder or
-            drop onto another court tab to re-court.</div>
-    </div>
-
-    {# ═══════════════════════════════════════════════════════════════════════
-    QUEUE LIST
-    ═══════════════════════════════════════════════════════════════════════ #}
-    <div class="lq-list-panel">
-        <div id="queue-list" class="lq-list"></div>
-        <div id="queue-empty" class="lq-empty hidden">No matches on this court yet.</div>
-        <div id="queue-sentinel" class="lq-sentinel"><span id="sentinel-text" class="hidden">Loading more…</span></div>
+    <div id="courts-row" class="lq-courts-row">
+        <div class="lq-loading">Loading matches…</div>
     </div>
 
 </div>{# /lq-wrapper #}
 
 {# ═══════════════════════════════════════════════════════════════════════
-MATCH DETAIL MODAL
+GENERIC MODAL HOST — reused for both the drag-drop move confirmation and
+the fight detail/edit view. Content is swapped in via openModal(); see
+the script below.
 ═══════════════════════════════════════════════════════════════════════ #}
-<div id="detail-modal" class="lq-modal-overlay hidden" onclick="if(event.target===this) closeDetailModal()">
-    <div class="lq-modal">
-        <div class="lq-modal-header">
-            <h3 id="detail-title">Match</h3>
-            <button class="lq-modal-close" onclick="closeDetailModal()">&times;</button>
-        </div>
-        <div id="detail-body" class="lq-modal-body"></div>
-    </div>
+<div id="modal-overlay" class="lq-modal-overlay hidden" onclick="if(event.target===this) closeModal()">
+    <div class="lq-modal" id="modal-panel"></div>
 </div>
-
-{# ═══════════════════════════════════════════════════════════════════════
-INSERT MATCH MODAL
-═══════════════════════════════════════════════════════════════════════ #}
-<div id="insert-modal" class="lq-modal-overlay hidden" onclick="if(event.target===this) closeInsertModal()">
-    <div class="lq-modal">
-        <div class="lq-modal-header">
-            <h3>Insert Match</h3>
-            <button class="lq-modal-close" onclick="closeInsertModal()">&times;</button>
-        </div>
-        <div class="lq-modal-body">
-            <p class="lq-insert-hint" id="insert-position-hint"></p>
-
-            <div class="lq-form-field">
-                <label>Category</label>
-                <select id="insert-category"></select>
-                <div id="insert-category-custom" class="hidden lq-custom-category">
-                    <input id="insert-category-code" type="text" placeholder="categoryCode e.g. exhibition_open"
-                        class="lq-text-input">
-                    <input id="insert-category-label" type="text" placeholder="Label e.g. Exhibition · Open"
-                        class="lq-text-input">
-                </div>
-            </div>
-
-            <div class="lq-form-field">
-                <label class="lq-checkbox-label">
-                    <input type="checkbox" id="insert-ranked" checked>
-                    <span>Official / ranked bout (counts toward standings)</span>
-                </label>
-            </div>
-
-            <div class="lq-corners">
-                <div class="lq-corner lq-corner-blue">
-                    <label>Blue Corner</label>
-                    <input type="search" id="search-blue" placeholder="Search athlete…" class="lq-text-input">
-                    <div id="results-blue" class="lq-athlete-results"></div>
-                    <div id="picked-blue" class="lq-picked-athletes"></div>
-                </div>
-                <div class="lq-corner lq-corner-red">
-                    <label>Red Corner</label>
-                    <input type="search" id="search-red" placeholder="Search athlete…" class="lq-text-input">
-                    <div id="results-red" class="lq-athlete-results"></div>
-                    <div id="picked-red" class="lq-picked-athletes"></div>
-                </div>
-            </div>
-
-            <div id="insert-error" class="lq-alert-error hidden"></div>
-
-            <div class="lq-modal-actions">
-                <button class="btn btn-primary" id="insert-submit-btn" onclick="submitInsertMatch()">Create
-                    Match</button>
-                <button class="btn btn-ghost" onclick="closeInsertModal()">Cancel</button>
-            </div>
-        </div>
-    </div>
-</div>
-
 
 {# ═══════════════════════════════════════════════════════════════════════
 STYLES
@@ -133,11 +62,13 @@ STYLES
     }
 
     .lq-wrapper {
-        max-width: 980px;
-        margin: 0 auto;
+        max-width: none;
+        width: 100%;
+        margin: 0;
         display: flex;
         flex-direction: column;
         gap: 1rem;
+        box-sizing: border-box;
     }
 
     .lq-header {
@@ -162,6 +93,12 @@ STYLES
         font-size: 1.5rem;
         font-weight: 700;
         color: var(--lq-text);
+    }
+
+    .lq-hint {
+        margin: -0.5rem 0 0;
+        font-size: .82rem;
+        color: var(--lq-muted);
     }
 
     .lq-conn {
@@ -209,175 +146,118 @@ STYLES
         }
     }
 
-    /* ── Court tabs ─────────────────────────────────────────────── */
-    .lq-courts {
-        display: flex;
-        gap: .5rem;
-        overflow-x: auto;
-        padding-bottom: .25rem;
-    }
-
-    .lq-court-skeleton,
-    .lq-court-tab-empty {
+    .lq-loading {
         font-size: .85rem;
         color: var(--lq-muted);
-        padding: .5rem 0;
+        padding: 2rem 0;
     }
 
-    .lq-court-tab {
-        flex-shrink: 0;
+    /* ── Courts row: side by side, like bracket_builder.html's court
+       columns — courts are never height-constrained (they just grow as
+       tall as their own match count), the ROW scrolls horizontally if
+       more courts exist than fit, and the PAGE scrolls vertically for
+       tall columns. align-items: flex-start keeps columns from
+       stretching to match each other's height. ─────────────────────── */
+    .lq-courts-row {
+        display: flex;
+        gap: 1rem;
+        align-items: flex-start;
+        overflow-x: auto;
+        padding-bottom: .5rem;
+    }
+
+    .lq-court-column {
+        flex: 0 0 380px;
+        background: var(--lq-surface);
+        border: 1px solid var(--lq-border);
+        border-radius: var(--lq-radius);
+        box-sizing: border-box;
+    }
+
+    .lq-court-column.drag-over {
+        border-color: var(--lq-green);
+        box-shadow: 0 0 0 3px rgba(22, 163, 74, .15);
+    }
+
+    /* Sticky relative to the PAGE's own scroll (the column itself has no
+       overflow set), so each court's header + counts stay visible while
+       scrolling down a long list — genuinely useful once a court has
+       50+ fights stacked underneath it. */
+    .lq-court-column-header {
+        position: sticky;
+        top: 0;
+        background: var(--lq-surface);
+        border-bottom: 1px solid var(--lq-border);
+        border-radius: var(--lq-radius) var(--lq-radius) 0 0;
+        padding: .75rem 1rem;
         display: flex;
         flex-direction: column;
         gap: .15rem;
-        padding: .6rem 1rem;
-        border-radius: var(--lq-radius);
-        border: 1px solid var(--lq-border);
-        background: var(--lq-surface);
-        cursor: pointer;
-        min-width: 130px;
-        transition: border-color .15s, box-shadow .15s;
+        z-index: 2;
     }
 
-    .lq-court-tab:hover {
-        border-color: var(--lq-accent);
-    }
-
-    .lq-court-tab.active {
-        border-color: var(--lq-accent);
-        box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
-    }
-
-    .lq-court-tab.drag-over {
-        border-color: var(--lq-green);
-        box-shadow: 0 0 0 3px rgba(22, 163, 74, .18);
-    }
-
-    .lq-court-tab-name {
-        font-size: .85rem;
+    .lq-court-column-name {
+        font-size: .95rem;
         font-weight: 700;
         color: var(--lq-text);
     }
 
-    .lq-court-tab-meta {
-        font-size: .7rem;
-        color: var(--lq-muted);
-    }
-
-    .lq-court-tab-next {
-        font-size: .68rem;
-        color: var(--lq-accent);
-        font-weight: 600;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 160px;
-    }
-
-    /* ── Toolbar ────────────────────────────────────────────────── */
-    .lq-toolbar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 1rem;
-        flex-wrap: wrap;
-    }
-
-    .lq-search {
-        flex: 1;
-        min-width: 220px;
-        padding: .55rem .8rem;
-        border: 1px solid var(--lq-border);
-        border-radius: 8px;
-        font-size: .85rem;
-        outline: none;
-    }
-
-    .lq-search:focus {
-        border-color: var(--lq-accent);
-    }
-
-    .lq-toolbar-hint {
+    .lq-court-column-meta {
         font-size: .75rem;
         color: var(--lq-muted);
     }
 
-    /* ── List panel ─────────────────────────────────────────────── */
-    .lq-list-panel {
-        background: var(--lq-surface);
-        border: 1px solid var(--lq-border);
-        border-radius: var(--lq-radius);
-        padding: 1rem;
-    }
-
-    .lq-list {
+    .lq-court-column-body {
+        padding: .5rem;
         display: flex;
         flex-direction: column;
+        gap: .4rem;
+        min-height: 80px;
     }
 
-    .lq-empty {
-        text-align: center;
+    .lq-court-column-empty {
+        font-size: .82rem;
         color: var(--lq-muted);
-        font-size: .9rem;
-        padding: 2rem 0;
+        padding: .75rem .25rem;
     }
 
-    .lq-sentinel {
-        text-align: center;
-        padding: .75rem 0;
-        color: var(--lq-muted);
-        font-size: .8rem;
-    }
-
-    /* ── Gap / insert affordance ────────────────────────────────── */
-    .lq-gap {
-        position: relative;
-        height: 14px;
-    }
-
-    .lq-gap.dragging-over {
-        height: 34px;
-        background: rgba(79, 70, 229, .08);
-        border-radius: 6px;
-    }
-
-    .lq-gap-btn {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%) scale(.6);
-        width: 22px;
-        height: 22px;
-        border-radius: 50%;
+    /* ── Drop indicator (drag-and-drop reorder / re-court target line) ── */
+    .lq-drop-indicator {
+        height: 3px;
+        border-radius: 2px;
         background: var(--lq-accent);
-        color: #fff;
-        border: none;
-        font-size: 15px;
-        line-height: 1;
-        cursor: pointer;
-        opacity: 0;
-        transition: opacity .12s, transform .12s;
+        margin: -.15rem 0;
+        animation: lq-drop-pulse .9s ease-in-out infinite;
     }
 
-    .lq-gap:hover .lq-gap-btn {
-        opacity: 1;
-        transform: translate(-50%, -50%) scale(1);
+    @keyframes lq-drop-pulse {
+
+        0%,
+        100% {
+            opacity: 1;
+        }
+
+        50% {
+            opacity: .4;
+        }
     }
 
     /* ── Match row ──────────────────────────────────────────────── */
     .lq-row {
         display: flex;
         align-items: center;
-        gap: .75rem;
-        padding: .75rem .6rem;
+        gap: .6rem;
+        padding: .6rem .5rem;
         border-radius: 10px;
-        border: 1px solid transparent;
+        border: 1px solid var(--lq-border);
+        background: var(--lq-surface);
         cursor: pointer;
         transition: background .12s, border-color .12s;
     }
 
     .lq-row:hover {
         background: #f8fafc;
-        border-color: var(--lq-border);
+        border-color: var(--lq-accent);
     }
 
     .lq-row.next-up {
@@ -404,9 +284,9 @@ STYLES
 
     .lq-row-number {
         flex-shrink: 0;
-        width: 56px;
+        width: 48px;
         font-family: 'Courier New', monospace;
-        font-size: .8rem;
+        font-size: .78rem;
         color: var(--lq-muted);
         font-weight: 700;
     }
@@ -422,8 +302,8 @@ STYLES
     .lq-row-corners {
         display: flex;
         align-items: center;
-        gap: .4rem;
-        font-size: .88rem;
+        gap: .35rem;
+        font-size: .85rem;
         font-weight: 600;
         color: var(--lq-text);
         white-space: nowrap;
@@ -442,16 +322,19 @@ STYLES
     .lq-vs {
         color: var(--lq-muted);
         font-weight: 400;
-        font-size: .78rem;
+        font-size: .75rem;
     }
 
     .lq-row-meta {
-        font-size: .72rem;
+        font-size: .7rem;
         color: var(--lq-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .lq-unranked-flag {
-        font-size: .65rem;
+        font-size: .63rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .04em;
@@ -460,12 +343,13 @@ STYLES
 
     .lq-status-pill {
         flex-shrink: 0;
-        font-size: .68rem;
+        font-size: .64rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .04em;
-        padding: .25rem .6rem;
+        padding: .22rem .5rem;
         border-radius: 99px;
+        white-space: nowrap;
     }
 
     .lq-status-pending {
@@ -490,27 +374,27 @@ STYLES
 
     .lq-next-badge {
         flex-shrink: 0;
-        font-size: .65rem;
+        font-size: .6rem;
         font-weight: 800;
         letter-spacing: .06em;
         background: var(--lq-accent);
         color: #fff;
-        padding: .25rem .5rem;
+        padding: .22rem .45rem;
         border-radius: 6px;
     }
 
     /* ── Row print button ───────────────────────────────────────── */
     .lq-print-btn {
         flex-shrink: 0;
-        width: 30px;
-        height: 30px;
+        width: 28px;
+        height: 28px;
         display: flex;
         align-items: center;
         justify-content: center;
         border: 1px solid var(--lq-border);
         background: #fff;
         border-radius: 8px;
-        font-size: .85rem;
+        font-size: .8rem;
         cursor: pointer;
         transition: background .12s, border-color .12s, transform .1s;
     }
@@ -535,7 +419,7 @@ STYLES
         color: #fff;
     }
 
-    /* ── Modals ─────────────────────────────────────────────────── */
+    /* ── Modals (fight detail/edit + drag-drop confirmation) ─────── */
     .lq-modal-overlay {
         position: fixed;
         inset: 0;
@@ -561,13 +445,13 @@ STYLES
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 1.25rem 1.5rem;
+        padding: 1.1rem 1.4rem;
         border-bottom: 1px solid var(--lq-border);
     }
 
     .lq-modal-header h3 {
         margin: 0;
-        font-size: 1.1rem;
+        font-size: 1.05rem;
     }
 
     .lq-modal-close {
@@ -580,42 +464,30 @@ STYLES
     }
 
     .lq-modal-body {
-        padding: 1.5rem;
+        padding: 1.4rem;
     }
 
     .lq-modal-actions {
         display: flex;
         gap: .6rem;
+        flex-wrap: wrap;
         margin-top: 1.25rem;
     }
 
-    .lq-detail-grid {
+    .lq-detail-corners {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 1rem;
-        margin-bottom: 1.25rem;
-    }
-
-    .lq-detail-cell dt {
-        font-size: .68rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .05em;
-        color: var(--lq-muted);
-        margin-bottom: .2rem;
-    }
-
-    .lq-detail-cell dd {
-        margin: 0;
-        font-size: .9rem;
-        color: var(--lq-text);
+        gap: .75rem;
+        margin-bottom: 1rem;
     }
 
     .lq-detail-corner {
         border: 1px solid var(--lq-border);
         border-radius: 10px;
-        padding: .85rem 1rem;
-        margin-bottom: .6rem;
+        padding: .75rem;
+        display: flex;
+        flex-direction: column;
+        gap: .4rem;
     }
 
     .lq-detail-corner.blue {
@@ -626,130 +498,81 @@ STYLES
         border-left: 4px solid var(--lq-red);
     }
 
-    .lq-action-row {
-        display: flex;
-        gap: .5rem;
-        flex-wrap: wrap;
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--lq-border);
-    }
-
-    .lq-form-field {
-        margin-bottom: 1rem;
-    }
-
-    .lq-form-field label {
-        display: block;
-        font-size: .75rem;
+    .lq-detail-corner label {
+        font-size: .7rem;
         font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .04em;
         color: var(--lq-muted);
-        margin-bottom: .3rem;
     }
 
-    .lq-text-input,
-    select {
-        width: 100%;
-        padding: .55rem .7rem;
-        border: 1px solid var(--lq-border);
-        border-radius: 8px;
-        font-size: .87rem;
-        outline: none;
-        box-sizing: border-box;
-    }
-
-    .lq-custom-category {
-        display: flex;
-        gap: .5rem;
-        margin-top: .5rem;
-    }
-
-    .lq-checkbox-label {
-        display: flex !important;
-        align-items: center;
-        gap: .5rem;
-        font-size: .85rem;
-        font-weight: 500 !important;
-        cursor: pointer;
-    }
-
-    .lq-corners {
+    .lq-detail-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 1rem;
+        gap: .75rem 1rem;
     }
 
-    .lq-corner label {
-        display: block;
-        font-size: .72rem;
-        font-weight: 700;
-        margin-bottom: .3rem;
-    }
-
-    .lq-corner-blue label {
-        color: var(--lq-blue);
-    }
-
-    .lq-corner-red label {
-        color: var(--lq-red);
-    }
-
-    .lq-athlete-results {
-        border: 1px solid var(--lq-border);
-        border-radius: 8px;
-        margin-top: .3rem;
-        max-height: 140px;
-        overflow-y: auto;
-    }
-
-    .lq-athlete-results:empty {
-        border: none;
-    }
-
-    .lq-athlete-result-item {
-        padding: .45rem .6rem;
-        font-size: .8rem;
-        cursor: pointer;
-        border-bottom: 1px solid #f1f5f9;
-    }
-
-    .lq-athlete-result-item:last-child {
-        border-bottom: none;
-    }
-
-    .lq-athlete-result-item:hover {
-        background: #f8fafc;
-    }
-
-    .lq-picked-athletes {
+    .lq-detail-grid label {
         display: flex;
         flex-direction: column;
         gap: .3rem;
-        margin-top: .5rem;
+        font-size: .72rem;
+        font-weight: 700;
+        color: var(--lq-muted);
+        text-transform: uppercase;
+        letter-spacing: .03em;
     }
 
-    .lq-picked-chip {
-        display: flex;
-        justify-content: space-between;
+    .lq-detail-grid label.lq-span-2 {
+        grid-column: span 2;
+    }
+
+    .lq-checkbox-label {
+        flex-direction: row !important;
         align-items: center;
-        background: #f1f5f9;
-        border-radius: 6px;
-        padding: .3rem .55rem;
-        font-size: .8rem;
-    }
-
-    .lq-picked-chip button {
-        border: none;
-        background: none;
-        color: var(--lq-muted);
+        gap: .5rem !important;
+        text-transform: none !important;
+        letter-spacing: normal !important;
+        font-weight: 500 !important;
+        font-size: .85rem !important;
         cursor: pointer;
-        font-size: .95rem;
     }
 
-    .lq-insert-hint {
-        font-size: .78rem;
+    .lq-text-input,
+    .lq-detail-grid input,
+    .lq-detail-grid select,
+    .lq-detail-corner input {
+        width: 100%;
+        padding: .5rem .65rem;
+        border: 1px solid var(--lq-border);
+        border-radius: 8px;
+        font-size: .85rem;
+        outline: none;
+        box-sizing: border-box;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: normal;
+        color: var(--lq-text);
+    }
+
+    .lq-detail-corner input:disabled {
+        background: #f8fafc;
         color: var(--lq-muted);
-        margin: 0 0 1rem;
+        cursor: not-allowed;
+    }
+
+    .lq-field-hint {
+        font-size: .68rem;
+        color: var(--lq-muted);
+        margin-top: -.15rem;
+    }
+
+    .lq-detail-readonly {
+        font-size: .75rem;
+        color: var(--lq-muted);
+        margin-top: 1rem;
+        padding-top: .85rem;
+        border-top: 1px solid var(--lq-border);
     }
 
     .lq-alert-error {
@@ -759,7 +582,13 @@ STYLES
         padding: .6rem .8rem;
         border-radius: 8px;
         font-size: .82rem;
-        margin-bottom: 1rem;
+        margin-top: 1rem;
+    }
+
+    .lq-drag-confirm-text {
+        font-size: .9rem;
+        line-height: 1.6;
+        color: var(--lq-text);
     }
 
     .btn {
@@ -774,12 +603,17 @@ STYLES
         border: none;
     }
 
+    .btn:disabled {
+        opacity: .55;
+        cursor: not-allowed;
+    }
+
     .btn-primary {
         background: var(--lq-accent);
         color: #fff;
     }
 
-    .btn-primary:hover {
+    .btn-primary:hover:not(:disabled) {
         background: #4338ca;
     }
 
@@ -789,35 +623,24 @@ STYLES
         border: 1px solid var(--lq-border);
     }
 
-    .btn-ghost:hover {
+    .btn-ghost:hover:not(:disabled) {
         background: #f8fafc;
     }
 
-    .btn-sm {
-        font-size: .75rem;
-        padding: .35rem .7rem;
-    }
+    @media (max-width: 480px) {
 
-    .btn-danger {
-        background: #fef2f2;
-        color: #dc2626;
-        border: 1px solid #fca5a5;
-    }
-
-    .hidden {
-        display: none !important;
-    }
-
-    @media (max-width: 640px) {
-
-        .lq-corners,
+        .lq-detail-corners,
         .lq-detail-grid {
             grid-template-columns: 1fr;
         }
 
-        .lq-row-number {
-            width: 40px;
+        .lq-detail-grid label.lq-span-2 {
+            grid-column: span 1;
         }
+    }
+
+    .hidden {
+        display: none !important;
     }
 </style>
 
@@ -835,32 +658,66 @@ JAVASCRIPT
     const DISCIPLINE = "{{ tournament.discipline }}";
     const TOURNAMENT_TITLE = "{{ tournament.title }}";
 
-    const PAGE_SIZE_STEP = 25;
-    let pageLimit = PAGE_SIZE_STEP;
-
-    let activeCourtId = null;
-    let courtsSummary = [];
-    let currentMatches = [];   // [{id, ...data}] in queuePosition order, as loaded
-    let unsubscribe = null;
     let fsDb = null;
+    let unsubscribe = null;
 
-    let dragState = null;      // { matchId, fromCourtId }
-    let insertContext = null;  // { prevQueuePosition, nextQueuePosition, prevDisplayNumber, nextDisplayNumber }
-    let pickedBlue = [];
-    let pickedRed = [];
+    // Single source of truth for every match in this tournament, kept in
+    // sync incrementally via docChanges() in subscribeAll() below — see
+    // that function's comment for why this replaces the old per-court,
+    // paginated, constantly-resubscribed approach.
+    let matchesById = new Map();
+
+    let dragState = null; // { matchId, fromCourtId }
+
+    // categoryCode -> categoryLabel, fetched ONCE (not a live listener —
+    // bracket definitions don't change after commit) from the tournament's
+    // own /brackets collection. Needed because match documents themselves
+    // never actually carry categoryLabel — commit_brackets_endpoint only
+    // writes categoryCode onto each match doc; the human-readable label
+    // lives solely on the bracket doc. Without this, category names would
+    // only ever show as raw slugs like "kyorugi_younger_cadets_women_42".
+    let categoryLabelByCode = {};
 
     // ── Bootstrapping ───────────────────────────────────────────────────────
     (async function init() {
         await initFirebase();
-        await loadCourts();
-        document.getElementById("search-box").addEventListener("input", renderQueue);
-
-        const sentinel = document.getElementById("queue-sentinel");
-        const observer = new IntersectionObserver((entries) => {
-            if (entries[0].isIntersecting) maybeLoadMore();
-        }, { rootMargin: "200px" });
-        observer.observe(sentinel);
+        subscribeAll();
+        loadCategoryLabels(); // fire-and-forget — rows render with raw categoryCode until this resolves, then re-render
     })();
+
+    async function loadCategoryLabels() {
+        try {
+            const snap = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("brackets").get();
+            snap.forEach((doc) => {
+                const data = doc.data();
+                if (data.categoryCode) categoryLabelByCode[data.categoryCode] = data.categoryLabel || data.categoryCode;
+            });
+            renderCourts(); // re-render once real labels are in, if matches already loaded first
+        } catch (err) {
+            console.error("Failed to load category labels", err);
+        }
+    }
+
+    function resolveCategoryLabel(code) {
+        return categoryLabelByCode[code] || code || "";
+    }
+
+    // A participant with no entryId yet is either a genuine bye (rare —
+    // see bracket_builder.html's pushToFirebase, which resolves byes
+    // before ever writing a match doc) or fed by an earlier match that
+    // hasn't finished — shown as "101 Winner" using that feeder match's
+    // own displayNumber, resolved directly from the already-loaded
+    // matchesById Map (source.matchId is the feeder's real Firestore doc
+    // id, so no extra query is needed).
+    function participantLabel(corner) {
+        if (!corner) return "BYE";
+        if (corner.name) return corner.name;
+        if (corner.source && corner.source.matchId) {
+            const feeder = matchesById.get(corner.source.matchId);
+            return feeder ? `${feeder.displayNumber ?? "?"} Winner` : "Winner TBD";
+        }
+        return "BYE";
+    }
 
     async function initFirebase() {
         try {
@@ -883,53 +740,36 @@ JAVASCRIPT
         document.getElementById("conn-text").textContent = text;
     }
 
-    // ── Courts ───────────────────────────────────────────────────────────────
-    async function loadCourts() {
-        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/courts`);
-        const data = await res.json();
-        courtsSummary = data.courts || [];
-        renderCourtTabs();
-        if (courtsSummary.length && !activeCourtId) {
-            selectCourt(courtsSummary[0].courtId);
-        } else if (!courtsSummary.length) {
-            document.getElementById("court-tabs").innerHTML = '<div class="lq-court-tab-empty">No matches scheduled yet — push brackets first.</div>';
-        }
-    }
-
-    function renderCourtTabs() {
-        const wrap = document.getElementById("court-tabs");
-        wrap.innerHTML = "";
-        courtsSummary.forEach(c => {
-            const tab = document.createElement("div");
-            tab.className = "lq-court-tab" + (c.courtId === activeCourtId ? " active" : "");
-            tab.dataset.courtId = c.courtId;
-            tab.onclick = () => selectCourt(c.courtId);
-            tab.ondragover = (e) => { e.preventDefault(); tab.classList.add("drag-over"); };
-            tab.ondragleave = () => tab.classList.remove("drag-over");
-            tab.ondrop = (e) => { e.preventDefault(); tab.classList.remove("drag-over"); onDropOnCourtTab(c.courtId); };
-
-            const nextLabel = c.nextMatch ? `Next: #${c.nextMatch.displayNumber ?? ""} ${c.nextMatch.categoryCode ?? ""}` : "Nothing ready";
-            tab.innerHTML = `
-            <span class="lq-court-tab-name">${escapeHtml(c.courtId)}</span>
-            <span class="lq-court-tab-meta">${c.pending} pending · ${c.ready} ready · ${c.done} done</span>
-            <span class="lq-court-tab-next">${escapeHtml(nextLabel)}</span>
-        `;
-            wrap.appendChild(tab);
-        });
-    }
-
-    function selectCourt(courtId) {
-        activeCourtId = courtId;
-        pageLimit = PAGE_SIZE_STEP;
-        renderCourtTabs();
-        subscribeToCourt();
-    }
-
-    // ── Realtime subscription (this is what makes "done" show up live) ────────
-    function subscribeToCourt() {
-        if (!fsDb || !activeCourtId) return;
+    // ── The ONE Firestore query on this entire page ─────────────────────────
+    // A single listener across every match in the tournament (no courtId
+    // filter, no orderBy, no pagination), attached once at page load and
+    // never torn down during normal use.
+    //
+    // Why: Firestore bills a full read of every matched document each time
+    // a listener is newly ATTACHED — not each time data changes. The old
+    // version attached a fresh listener per court, with a page-size limit
+    // that grew on scroll, AND re-attached (via loadCourts()) after every
+    // single drag-drop or status edit. Each of those was a brand-new
+    // listener, so a 50-fight court being reordered a dozen times over a
+    // day could rack up 600+ billed reads from ONE court alone — the
+    // "10000 reads just from the admin panel" problem. With one long-lived
+    // listener, the FIRST snapshot is billed for the whole match set once
+    // (the "big initial read," which is fine and unavoidable — you have to
+    // see the data at least once), and EVERY snapshot after that only
+    // bills for documents that actually changed, via docChanges() below —
+    // reordering one match costs one document read, regardless of how many
+    // total fights exist or how many times it happens.
+    //
+    // Filtering on tournamentId alone also needs no composite index —
+    // Firestore auto-indexes every field for simple equality lookups, so
+    // there's nothing to pre-create in the console before this works
+    // (unlike the old tournamentId+courtId+orderBy query, which did).
+    // Courts, their side-by-side columns, per-court counts, and "next up"
+    // are all derived client-side from whatever's already loaded — no
+    // separate REST summary call needed either.
+    function subscribeAll() {
+        if (!fsDb) return;
         if (unsubscribe) unsubscribe();
-
         setConnState("", "Connecting…");
 
         const query = fsDb
@@ -937,34 +777,39 @@ JAVASCRIPT
             .collection("disciplines").doc(DISCIPLINE)
             .collection("matches")
             .where("tournamentId", "==", TOURNAMENT_ID)
-            .where("courtId", "==", activeCourtId)
-            .orderBy("queuePosition", "asc")
-            .limit(pageLimit);
+            .limit(2000); // generous sanity ceiling, not a pagination control
 
         unsubscribe = query.onSnapshot(
             (snapshot) => {
                 setConnState("live", "Live");
-                currentMatches = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                document.getElementById("sentinel-text").classList.add("hidden");
-                renderQueue();
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === "removed") {
+                        matchesById.delete(change.doc.id);
+                    } else {
+                        matchesById.set(change.doc.id, { id: change.doc.id, ...change.doc.data() });
+                    }
+                });
+                renderCourts();
             },
             (err) => {
                 console.error(err);
-                setConnState("error", "Connection error — check Firestore index/rules");
+                setConnState("error", "Connection error — check Firestore rules");
             }
         );
     }
 
-    function maybeLoadMore() {
-        if (!activeCourtId) return;
-        if (currentMatches.length < pageLimit) return; // fewer docs than the limit = nothing more to load
-        document.getElementById("sentinel-text").classList.remove("hidden");
-        pageLimit += PAGE_SIZE_STEP;
-        subscribeToCourt();
-    }
-
-    // ── Rendering ───────────────────────────────────────────────────────────
+    // ── Grouping / rendering ─────────────────────────────────────────────────
     function isDone(m) { return m.status === "done" || m.status === "walkover" || !!m.winnerEntryId; }
+
+    function groupByCourtSorted() {
+        const byCourt = {};
+        matchesById.forEach((m) => {
+            const cid = m.courtId || "unassigned";
+            (byCourt[cid] = byCourt[cid] || []).push(m);
+        });
+        Object.values(byCourt).forEach((list) => list.sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0)));
+        return byCourt;
+    }
 
     function findNextUpId(matches) {
         for (const m of matches) {
@@ -973,56 +818,52 @@ JAVASCRIPT
         return null;
     }
 
-    function matchMatchesSearch(m, term) {
-        if (!term) return true;
-        const haystack = [
-            m.blue?.name, m.red?.name, m.categoryCode, m.categoryLabel, String(m.displayNumber ?? "")
-        ].join(" ").toLowerCase();
-        return haystack.includes(term);
-    }
+    function renderCourts() {
+        const wrap = document.getElementById("courts-row");
+        const byCourt = groupByCourtSorted();
+        // Numeric-aware sort so court ids like "1","2","10" order
+        // correctly instead of lexicographically ("1","10","2").
+        const courtIds = Object.keys(byCourt).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-    function renderQueue() {
-        const listEl = document.getElementById("queue-list");
-        const emptyEl = document.getElementById("queue-empty");
-        const term = document.getElementById("search-box").value.trim().toLowerCase();
-
-        const filtered = currentMatches.filter(m => matchMatchesSearch(m, term));
-        listEl.innerHTML = "";
-
-        if (!currentMatches.length) {
-            emptyEl.classList.remove("hidden");
+        if (courtIds.length === 0) {
+            wrap.innerHTML = '<div class="lq-loading">No matches scheduled yet — push brackets first.</div>';
             return;
         }
-        emptyEl.classList.add("hidden");
 
-        const nextUpId = findNextUpId(currentMatches);
+        wrap.innerHTML = "";
+        courtIds.forEach((courtId) => {
+            const matches = byCourt[courtId];
+            const pending = matches.filter(m => !isDone(m) && m.status !== "ready").length;
+            const ready = matches.filter(m => !isDone(m) && m.status === "ready").length;
+            const done = matches.filter(isDone).length;
+            const nextUpId = findNextUpId(matches);
 
-        // Leading gap (insert at the very top)
-        listEl.appendChild(buildGap(null, currentMatches[0] || null));
+            const column = document.createElement("div");
+            column.className = "lq-court-column";
+            column.dataset.courtId = courtId;
+            column.ondragover = (e) => { e.preventDefault(); onColumnDragOver(e, column); };
+            column.ondragleave = (e) => onColumnDragLeave(e, column);
+            column.ondrop = (e) => { e.preventDefault(); onColumnDrop(e, column, courtId, matches); };
 
-        filtered.forEach((m, idx) => {
-            listEl.appendChild(buildRow(m, m.id === nextUpId));
-            const realIdx = currentMatches.findIndex(x => x.id === m.id);
-            const after = currentMatches[realIdx + 1] || null;
-            listEl.appendChild(buildGap(m, after));
+            const header = document.createElement("div");
+            header.className = "lq-court-column-header";
+            header.innerHTML = `
+                <span class="lq-court-column-name">${escapeHtml(courtId)}</span>
+                <span class="lq-court-column-meta">${matches.length} total · ${pending} pending · ${ready} ready · ${done} done</span>
+            `;
+            column.appendChild(header);
+
+            const body = document.createElement("div");
+            body.className = "lq-court-column-body";
+            if (matches.length === 0) {
+                body.innerHTML = `<div class="lq-court-column-empty">No matches on this court.</div>`;
+            } else {
+                matches.forEach((m) => body.appendChild(buildRow(m, m.id === nextUpId)));
+            }
+            column.appendChild(body);
+
+            wrap.appendChild(column);
         });
-    }
-
-    function buildGap(prevMatch, nextMatch) {
-        const gap = document.createElement("div");
-        gap.className = "lq-gap";
-        gap.ondragover = (e) => { e.preventDefault(); gap.classList.add("dragging-over"); };
-        gap.ondragleave = () => gap.classList.remove("dragging-over");
-        gap.ondrop = (e) => { e.preventDefault(); gap.classList.remove("dragging-over"); onDropInGap(prevMatch, nextMatch); };
-
-        const btn = document.createElement("button");
-        btn.className = "lq-gap-btn";
-        btn.type = "button";
-        btn.textContent = "+";
-        btn.title = "Insert a match here";
-        btn.onclick = () => openInsertModal(prevMatch, nextMatch);
-        gap.appendChild(btn);
-        return gap;
     }
 
     function buildRow(m, isNext) {
@@ -1032,12 +873,16 @@ JAVASCRIPT
         row.dataset.matchId = m.id;
 
         row.ondragstart = (e) => {
-            dragState = { matchId: m.id, fromCourtId: activeCourtId };
+            dragState = { matchId: m.id, fromCourtId: m.courtId };
             row.classList.add("dragging");
             e.dataTransfer.effectAllowed = "move";
         };
-        row.ondragend = () => row.classList.remove("dragging");
-        row.onclick = (e) => { if (!row.classList.contains("dragging")) openDetailModal(m); };
+        row.ondragend = () => { row.classList.remove("dragging"); removeDropIndicator(); };
+        // Row click opens the fight detail/edit modal. TA sheet
+        // generation stays reachable two ways: the print icon below
+        // (instant print) and a "Preview TA Sheet" button inside the
+        // detail modal itself (openTaSheet, unchanged).
+        row.onclick = () => { if (!row.classList.contains("dragging")) openDetailModal(m.id); };
 
         const statusClass = isDone(m)
             ? (m.status === "walkover" ? "lq-status-walkover" : "lq-status-done")
@@ -1045,19 +890,19 @@ JAVASCRIPT
         const statusLabel = isDone(m) ? (m.status === "walkover" ? "Walkover" : "Done") : (m.status === "ready" ? "Ready" : "Pending");
 
         row.innerHTML = `
-        <span class="lq-drag-handle" title="Drag to reorder">⠿</span>
+        <span class="lq-drag-handle" title="Drag to reorder, or drop on another court's column">⠿</span>
         <span class="lq-row-number">#${escapeHtml(String(m.displayNumber ?? "—"))}</span>
         <div class="lq-row-main">
             <div class="lq-row-corners">
-                <span class="lq-corner-name blue">${escapeHtml(m.blue?.name || "TBD")}</span>
+                <span class="lq-corner-name blue">${escapeHtml(participantLabel(m.blue))}</span>
                 <span class="lq-vs">vs</span>
-                <span class="lq-corner-name red">${escapeHtml(m.red?.name || "TBD")}</span>
+                <span class="lq-corner-name red">${escapeHtml(participantLabel(m.red))}</span>
             </div>
-            <div class="lq-row-meta">${escapeHtml(m.categoryLabel || m.categoryCode || "")}${m.roundPhase ? " · " + escapeHtml(m.roundPhase) : ""}${m.isRanked === false ? ' · <span class="lq-unranked-flag">Unranked</span>' : ""}</div>
+            <div class="lq-row-meta">${escapeHtml(resolveCategoryLabel(m.categoryCode))}${m.roundPhase ? " · " + escapeHtml(m.roundPhase) : ""}${m.isRanked === false ? ' · <span class="lq-unranked-flag">Unranked</span>' : ""}</div>
         </div>
-        ${isNext ? '<span class="lq-next-badge">NEXT UP</span>' : ""}
+        ${isNext ? '<span class="lq-next-badge">NEXT</span>' : ""}
         <span class="lq-status-pill ${statusClass}">${statusLabel}</span>
-        <button type="button" class="lq-print-btn" title="Print TA Sheet" data-match-id="${m.id}">🖨</button>
+        <button type="button" class="lq-print-btn" title="Instant print TA sheet" data-match-id="${m.id}">🖨</button>
     `;
 
         // Wired here (not inline onclick) so we get the actual button
@@ -1071,83 +916,157 @@ JAVASCRIPT
         return row;
     }
 
-    // ── Drag and drop reposition ────────────────────────────────────────────
-    async function onDropInGap(prevMatch, nextMatch) {
+    // ── Drag and drop: reorder within a court, or drop onto a different
+    // court's column entirely to re-court. Mirrors bracket_builder.html's
+    // column drag-and-drop pattern (drop-indicator line tracking the
+    // cursor, computeDropIndex by row midpoints) rather than the old
+    // hover-a-gap-and-click-plus approach, since courts are now always
+    // visible side by side instead of one at a time behind tabs. ─────────
+    let dropIndicatorEl = null;
+    function ensureDropIndicator() {
+        if (!dropIndicatorEl) {
+            dropIndicatorEl = document.createElement("div");
+            dropIndicatorEl.className = "lq-drop-indicator";
+        }
+        return dropIndicatorEl;
+    }
+    function removeDropIndicator() {
+        if (dropIndicatorEl && dropIndicatorEl.parentNode) dropIndicatorEl.parentNode.removeChild(dropIndicatorEl);
+    }
+
+    function computeDropIndex(bodyEl, clientY) {
+        const rows = [...bodyEl.querySelectorAll(".lq-row")];
+        let dropIndex = rows.length;
+        for (let i = 0; i < rows.length; i++) {
+            const rect = rows[i].getBoundingClientRect();
+            if (clientY < rect.top + rect.height / 2) { dropIndex = i; break; }
+        }
+        return { dropIndex, rows };
+    }
+
+    function onColumnDragOver(event, column) {
         if (!dragState) return;
-        if (prevMatch && prevMatch.id === dragState.matchId) { dragState = null; return; }
-        if (nextMatch && nextMatch.id === dragState.matchId) { dragState = null; return; }
+        const body = column.querySelector(".lq-court-column-body");
+        const { dropIndex, rows } = computeDropIndex(body, event.clientY);
 
-        await fetch(`/api/matches/${SPORT}/${DISCIPLINE}/${dragState.matchId}/position`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                courtId: activeCourtId,
-                prevQueuePosition: prevMatch ? prevMatch.queuePosition : null,
-                nextQueuePosition: nextMatch ? nextMatch.queuePosition : null,
-            }),
+        const indicator = ensureDropIndicator();
+        if (dropIndex >= rows.length) body.appendChild(indicator);
+        else body.insertBefore(indicator, rows[dropIndex]);
+
+        document.querySelectorAll(".lq-court-column.drag-over").forEach((c) => {
+            if (c !== column) c.classList.remove("drag-over");
         });
-        dragState = null;
-        loadCourts();
+        column.classList.add("drag-over");
     }
 
-    async function onDropOnCourtTab(targetCourtId) {
-        if (!dragState || targetCourtId === activeCourtId) { dragState = null; return; }
-        // Drops at the end of the target court's current queue.
-        const summary = courtsSummary.find(c => c.courtId === targetCourtId);
-        await fetch(`/api/matches/${SPORT}/${DISCIPLINE}/${dragState.matchId}/position`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                courtId: targetCourtId,
-                prevQueuePosition: summary?.nextMatch?.queuePosition ?? null,
-                nextQueuePosition: null,
-            }),
+    function onColumnDragLeave(event, column) {
+        if (!column.contains(event.relatedTarget)) {
+            column.classList.remove("drag-over");
+        }
+    }
+
+    // ── Generic modal open/close — shared by the drag-drop confirmation
+    // and the fight detail/edit view below. ──────────────────────────────
+    function openModal(innerHtml) {
+        document.getElementById("modal-panel").innerHTML = innerHtml;
+        document.getElementById("modal-overlay").classList.remove("hidden");
+    }
+    function closeModal() {
+        document.getElementById("modal-overlay").classList.add("hidden");
+        document.getElementById("modal-panel").innerHTML = "";
+    }
+
+    // Shows exactly where a dragged match is about to land — which
+    // court, and its immediate neighbours (or "start"/"end" of that
+    // court) — and waits for an explicit confirm before anything is
+    // written. Returns a Promise<boolean>.
+    function confirmDragDrop(bodyHtml) {
+        return new Promise((resolve) => {
+            openModal(`
+                <div class="lq-modal-header">
+                    <h3>Confirm move</h3>
+                    <button class="lq-modal-close" id="drag-confirm-x">&times;</button>
+                </div>
+                <div class="lq-modal-body">
+                    <div class="lq-drag-confirm-text">${bodyHtml}</div>
+                    <div class="lq-modal-actions">
+                        <button class="btn btn-primary" id="drag-confirm-yes">Move it</button>
+                        <button class="btn btn-ghost" id="drag-confirm-no">Cancel</button>
+                    </div>
+                </div>
+            `);
+            const finish = (result) => { closeModal(); resolve(result); };
+            document.getElementById("drag-confirm-yes").onclick = () => finish(true);
+            document.getElementById("drag-confirm-no").onclick = () => finish(false);
+            document.getElementById("drag-confirm-x").onclick = () => finish(false);
         });
+    }
+
+    async function onColumnDrop(event, column, courtId, courtMatches) {
+        column.classList.remove("drag-over");
+        removeDropIndicator();
+        if (!dragState) return;
+
+        const body = column.querySelector(".lq-court-column-body");
+        const { dropIndex } = computeDropIndex(body, event.clientY);
+
+        // Exclude the dragged match from ITS OWN column's list before
+        // computing neighbours — otherwise dropping it back near its
+        // original spot would use itself as a neighbour and confuse the
+        // fractional-midpoint math on the backend.
+        const targetList = courtMatches.filter((m) => m.id !== dragState.matchId);
+        const prevMatch = targetList[dropIndex - 1] || null;
+        const nextMatch = targetList[dropIndex] || null;
+
+        const draggedId = dragState.matchId;
+        const dragged = matchesById.get(draggedId);
         dragState = null;
-        loadCourts();
+        if (!dragged) return;
+
+        const fightNum = (x) => (x && x.displayNumber != null ? `#${x.displayNumber}` : "?");
+        const positionDesc = !prevMatch && !nextMatch
+            ? `as the only fight on <strong>${escapeHtml(courtId)}</strong>`
+            : !prevMatch
+                ? `at the very START of <strong>${escapeHtml(courtId)}</strong>, right before ${escapeHtml(fightNum(nextMatch))}`
+                : !nextMatch
+                    ? `at the very END of <strong>${escapeHtml(courtId)}</strong>, right after ${escapeHtml(fightNum(prevMatch))}`
+                    : `on <strong>${escapeHtml(courtId)}</strong>, between ${escapeHtml(fightNum(prevMatch))} and ${escapeHtml(fightNum(nextMatch))}`;
+
+        const confirmed = await confirmDragDrop(`
+            Move <strong>#${escapeHtml(String(dragged.displayNumber ?? "?"))} · ${escapeHtml(resolveCategoryLabel(dragged.categoryCode))}</strong><br>
+            <span style="color:var(--lq-blue)">${escapeHtml(participantLabel(dragged.blue))}</span>
+            <span style="color:var(--lq-muted)">vs</span>
+            <span style="color:var(--lq-red)">${escapeHtml(participantLabel(dragged.red))}</span>
+            <br><br>
+            ${positionDesc}?
+        `);
+        if (!confirmed) return;
+
+        try {
+            const res = await fetch(`/api/matches/${SPORT}/${DISCIPLINE}/${draggedId}/position`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    courtId,
+                    prevQueuePosition: prevMatch ? prevMatch.queuePosition : null,
+                    nextQueuePosition: nextMatch ? nextMatch.queuePosition : null,
+                }),
+            });
+            if (!res.ok) throw new Error(`Reposition failed (${res.status})`);
+            // No manual re-render here — the realtime listener delivers
+            // this one document's change as a single docChange, and
+            // renderCourts() runs again from that automatically.
+        } catch (err) {
+            console.error("Reposition failed", err);
+            alert("Failed to move that match — try again.");
+        }
     }
-
-    // ── Detail modal ─────────────────────────────────────────────────────────
-    function openDetailModal(m) {
-        document.getElementById("detail-title").textContent = `#${m.displayNumber ?? "—"} · ${m.categoryLabel || m.categoryCode || ""}`;
-        const body = document.getElementById("detail-body");
-
-        const cornerHtml = (corner, side) => `
-        <div class="lq-detail-corner ${side}">
-            <strong>${escapeHtml(corner?.name || "TBD")}</strong>
-            <div class="lq-row-meta">${escapeHtml(corner?.country || "")}${corner?.clubId ? " · " + escapeHtml(corner.clubId) : ""}</div>
-            ${m.winnerEntryId && corner?.entryId === m.winnerEntryId ? '<div class="lq-unranked-flag" style="color:var(--lq-green)">WINNER</div>' : ""}
-        </div>
-    `;
-
-        body.innerHTML = `
-        ${cornerHtml(m.blue, "blue")}
-        ${cornerHtml(m.red, "red")}
-        <dl class="lq-detail-grid">
-            <div class="lq-detail-cell"><dt>Status</dt><dd>${escapeHtml(m.status || "—")}</dd></div>
-            <div class="lq-detail-cell"><dt>Ranked</dt><dd>${m.isRanked === false ? "No (exhibition)" : "Yes"}</dd></div>
-            <div class="lq-detail-cell"><dt>Court</dt><dd>${escapeHtml(m.courtId || "—")}</dd></div>
-            <div class="lq-detail-cell"><dt>Round</dt><dd>${escapeHtml(m.roundPhase || "—")}</dd></div>
-            <div class="lq-detail-cell"><dt>Round Time</dt><dd>${escapeHtml(m.roundTime || "—")}</dd></div>
-            <div class="lq-detail-cell"><dt>Break Time</dt><dd>${escapeHtml(m.breakTime || "—")}</dd></div>
-            <div class="lq-detail-cell"><dt>PSS Size / Hit Level</dt><dd>${escapeHtml(String(m.pssSize ?? "—"))} / ${escapeHtml(String(m.hitLevel ?? "—"))}</dd></div>
-            <div class="lq-detail-cell"><dt>Queue Position</dt><dd class="mono">${escapeHtml(String(m.queuePosition ?? "—"))}</dd></div>
-        </dl>
-        <div class="lq-action-row">
-            <button class="btn btn-ghost btn-sm" onclick="setMatchStatus('${m.id}','pending')">Mark Pending</button>
-            <button class="btn btn-ghost btn-sm" onclick="setMatchStatus('${m.id}','ready')">Mark Ready</button>
-            <button class="btn btn-primary btn-sm" onclick="promptWinnerAndSetStatus('${m.id}','done','${escapeAttr(m.blue?.name)}','${escapeAttr(m.blue?.entryId)}','${escapeAttr(m.red?.name)}','${escapeAttr(m.red?.entryId)}')">Mark Done…</button>
-            <button class="btn btn-danger btn-sm" onclick="promptWinnerAndSetStatus('${m.id}','walkover','${escapeAttr(m.blue?.name)}','${escapeAttr(m.blue?.entryId)}','${escapeAttr(m.red?.name)}','${escapeAttr(m.red?.entryId)}')">Walkover…</button>
-            <button class="btn btn-ghost btn-sm" onclick="openTaSheet('${m.id}')">🖨 Print TA Sheet (preview)</button>
-        </div>
-    `;
-        document.getElementById("detail-modal").classList.remove("hidden");
-    }
-
-    function closeDetailModal() { document.getElementById("detail-modal").classList.add("hidden"); }
 
     // ── TA Sheet (client-side only — canvas fills the template image
-    // directly in the browser, nothing is sent to the server) ────────────────
+    // directly in the browser, nothing is sent to the server) — UNCHANGED
+    // from the previous version, aside from matchesById.get(matchId)
+    // replacing the old currentMatches.find(...) lookup, since matches
+    // now live in a Map instead of a per-court array. ────────────────────
     const TA_SHEET_TEMPLATE_URL = "/static/assets/sheets/ta-sheet-template.jpg";
     // Every coordinate below was measured directly against the 768x1024
     // template's own table-border pixels (see the design conversation this
@@ -1276,7 +1195,7 @@ JAVASCRIPT
     // kiosk-printing / "print automatically" launch flag to drop that
     // last click too. ────────────────────────────────────────────────────
     async function quickPrintTaSheet(matchId, btnEl) {
-        const m = currentMatches.find(x => x.id === matchId);
+        const m = matchesById.get(matchId);
         if (!m) return;
 
         const originalText = btnEl.textContent;
@@ -1347,8 +1266,225 @@ JAVASCRIPT
         });
     }
 
+    // ── Fight detail / edit modal ────────────────────────────────────────
+    // Shows every field on the match document and lets staff edit and
+    // push any of it in one save. Writes go DIRECTLY to Firestore via the
+    // client SDK (the same connection already used for reads) rather than
+    // through a dedicated backend endpoint — there isn't one for
+    // arbitrary field edits, and this page already has a trusted Firestore
+    // connection for reads. Same caveat as reads: Firestore security
+    // rules, not this file, are what actually gate who can write here —
+    // lock those down before exposing this page (see this codebase's
+    // existing TODOs on staff auth elsewhere).
+    //
+    // Scope deliberately drawn short of full "edit anything": entryId /
+    // athleteIds stay read-only (other systems — results reporting,
+    // standings — key off those, and hand-editing them could silently
+    // break that linkage), and a corner that's still "pending" (fed by an
+    // earlier match, no real entry yet) shows its resolved "#101 Winner"
+    // label as read-only rather than an editable name field — actually
+    // resolving a pending corner is a bracket-progression action, not a
+    // data fix, and belongs in a dedicated "declare winner" flow rather
+    // than a generic edit form.
+    function openDetailModal(matchId) {
+        const m = matchesById.get(matchId);
+        if (!m) return;
+
+        const cornerEditable = (corner) => !!(corner && corner.entryId);
+
+        const cornerFieldsHtml = (corner, side) => {
+            const editable = cornerEditable(corner);
+            const label = side === "blue" ? "Blue Corner" : "Red Corner";
+            if (!editable) {
+                return `
+                    <div class="lq-detail-corner ${side}">
+                        <label>${label}</label>
+                        <input type="text" value="${escapeAttr(participantLabel(corner))}" disabled title="Resolves automatically once the feeder match finishes — not directly editable here">
+                    </div>
+                `;
+            }
+            return `
+                <div class="lq-detail-corner ${side}">
+                    <label>${label}</label>
+                    <input type="text" id="edit-${side}-name" value="${escapeAttr(corner.name || "")}" placeholder="Name">
+                    <input type="text" id="edit-${side}-country" value="${escapeAttr(corner.country || "")}" placeholder="Country (SVK)">
+                    <input type="text" id="edit-${side}-clubId" value="${escapeAttr(corner.clubId || "")}" placeholder="Club ID">
+                </div>
+            `;
+        };
+
+        const blueEntryId = m.blue?.entryId || "";
+        const redEntryId = m.red?.entryId || "";
+        const winnerOptionsHtml = `
+            <option value="" ${!m.winnerEntryId ? "selected" : ""}>— none —</option>
+            ${blueEntryId ? `<option value="${escapeAttr(blueEntryId)}" ${m.winnerEntryId === blueEntryId ? "selected" : ""}>${escapeHtml(participantLabel(m.blue))} (Blue)</option>` : ""}
+            ${redEntryId ? `<option value="${escapeAttr(redEntryId)}" ${m.winnerEntryId === redEntryId ? "selected" : ""}>${escapeHtml(participantLabel(m.red))} (Red)</option>` : ""}
+        `;
+
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>#${escapeHtml(String(m.displayNumber ?? "—"))} · ${escapeHtml(resolveCategoryLabel(m.categoryCode))}</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <div class="lq-detail-corners">
+                    ${cornerFieldsHtml(m.blue, "blue")}
+                    ${cornerFieldsHtml(m.red, "red")}
+                </div>
+
+                <div class="lq-detail-grid">
+                    <label class="lq-span-2">Category Code
+                        <input type="text" id="edit-categoryCode" value="${escapeAttr(m.categoryCode || "")}">
+                    </label>
+                    <label>Court
+                        <input type="text" id="edit-courtId" value="${escapeAttr(m.courtId || "")}">
+                    </label>
+                    <label>Status
+                        <select id="edit-status">
+                            <option value="pending" ${m.status === "pending" ? "selected" : ""}>Pending</option>
+                            <option value="ready" ${m.status === "ready" ? "selected" : ""}>Ready</option>
+                            <option value="done" ${m.status === "done" ? "selected" : ""}>Done</option>
+                            <option value="walkover" ${m.status === "walkover" ? "selected" : ""}>Walkover</option>
+                        </select>
+                    </label>
+                    <label>Queue Position
+                        <input type="number" step="any" id="edit-queuePosition" value="${m.queuePosition ?? ""}">
+                    </label>
+                    <label>Display Number
+                        <input type="number" step="any" id="edit-displayNumber" value="${m.displayNumber ?? ""}">
+                    </label>
+                    <div class="lq-field-hint lq-span-2">
+                        Court/position here is a raw override — it won't recompute neighbours the way drag-and-drop
+                        does. Prefer dragging the fight when just reordering.
+                    </div>
+                    <label>Round Phase
+                        <input type="text" id="edit-roundPhase" value="${escapeAttr(m.roundPhase || "")}">
+                    </label>
+                    <label>Winner
+                        <select id="edit-winnerEntryId">${winnerOptionsHtml}</select>
+                    </label>
+                    <label>Round Time
+                        <input type="text" id="edit-roundTime" value="${escapeAttr(m.roundTime || "")}">
+                    </label>
+                    <label>Break Time
+                        <input type="text" id="edit-breakTime" value="${escapeAttr(m.breakTime || "")}">
+                    </label>
+                    <label>PSS Size
+                        <input type="number" id="edit-pssSize" value="${m.pssSize ?? ""}">
+                    </label>
+                    <label>Hit Level
+                        <input type="number" id="edit-hitLevel" value="${m.hitLevel ?? ""}">
+                    </label>
+                    <label class="lq-checkbox-label lq-span-2">
+                        <input type="checkbox" id="edit-isRanked" ${m.isRanked !== false ? "checked" : ""}>
+                        Ranked / official bout (counts toward standings)
+                    </label>
+                </div>
+
+                <div class="lq-detail-readonly">
+                    Round ${escapeHtml(String(m.bracketRound ?? "—"))} · Match ${escapeHtml(String(m.bracketMatchNumber ?? "—"))}
+                    ${m.tournamentName ? " · " + escapeHtml(m.tournamentName) : ""}
+                </div>
+
+                <div id="detail-error" class="lq-alert-error hidden"></div>
+
+                <div class="lq-modal-actions">
+                    <button class="btn btn-primary" id="detail-save-btn">Save Changes</button>
+                    <button class="btn btn-ghost" onclick="openTaSheet('${matchId}')">🖨 Preview TA Sheet</button>
+                    <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        `);
+
+        document.getElementById("detail-save-btn").onclick = () => saveMatchEdits(matchId);
+    }
+
+    async function saveMatchEdits(matchId) {
+        const m = matchesById.get(matchId);
+        if (!m) return;
+        const errEl = document.getElementById("detail-error");
+        errEl.classList.add("hidden");
+
+        const status = document.getElementById("edit-status").value;
+        let winnerEntryId = document.getElementById("edit-winnerEntryId").value || null;
+
+        if ((status === "done" || status === "walkover") && !winnerEntryId) {
+            errEl.textContent = "Done / Walkover matches need a winner selected.";
+            errEl.classList.remove("hidden");
+            return;
+        }
+        if (status === "pending" || status === "ready") {
+            // Mirrors the old status-update endpoint's own rule: resetting
+            // back to pending/ready clears a stale winner rather than
+            // leaving it dangling on a fight that's no longer "done".
+            winnerEntryId = null;
+        }
+
+        const textOrEmpty = (id) => document.getElementById(id).value.trim();
+        const numOrNull = (id) => {
+            const raw = document.getElementById(id).value;
+            if (raw === "") return null;
+            const n = Number(raw);
+            return Number.isNaN(n) ? null : n;
+        };
+
+        const updates = {
+            categoryCode: textOrEmpty("edit-categoryCode"),
+            courtId: textOrEmpty("edit-courtId"),
+            roundPhase: textOrEmpty("edit-roundPhase"),
+            roundTime: textOrEmpty("edit-roundTime"),
+            breakTime: textOrEmpty("edit-breakTime"),
+            status,
+            winnerEntryId,
+            isRanked: document.getElementById("edit-isRanked").checked,
+        };
+        const qp = numOrNull("edit-queuePosition"); if (qp !== null) updates.queuePosition = qp;
+        const dn = numOrNull("edit-displayNumber"); if (dn !== null) updates.displayNumber = dn;
+        const ps = numOrNull("edit-pssSize"); if (ps !== null) updates.pssSize = ps;
+        const hl = numOrNull("edit-hitLevel"); if (hl !== null) updates.hitLevel = hl;
+
+        // Only corners that were editable (real entryId) had inputs
+        // rendered at all — merge:true on a nested map field updates just
+        // these sub-fields, leaving entryId/athleteIds/source untouched.
+        if (m.blue && m.blue.entryId) {
+            updates.blue = {
+                name: textOrEmpty("edit-blue-name"),
+                country: textOrEmpty("edit-blue-country"),
+                clubId: textOrEmpty("edit-blue-clubId"),
+            };
+        }
+        if (m.red && m.red.entryId) {
+            updates.red = {
+                name: textOrEmpty("edit-red-name"),
+                country: textOrEmpty("edit-red-country"),
+                clubId: textOrEmpty("edit-red-clubId"),
+            };
+        }
+
+        const saveBtn = document.getElementById("detail-save-btn");
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving…";
+
+        try {
+            const matchRef = fsDb
+                .collection("sports").doc(SPORT)
+                .collection("disciplines").doc(DISCIPLINE)
+                .collection("matches").doc(matchId);
+            await matchRef.set(updates, { merge: true });
+            closeModal();
+            // No manual re-render — the realtime listener picks up this
+            // write as a docChange and renderCourts() runs again from it.
+        } catch (err) {
+            console.error("Save failed", err);
+            errEl.textContent = "Save failed: " + err.message;
+            errEl.classList.remove("hidden");
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Save Changes";
+        }
+    }
+
     async function openTaSheet(matchId) {
-        const m = currentMatches.find(x => x.id === matchId);
+        const m = matchesById.get(matchId);
         if (!m) return;
         const previewWindow = window.open("", "_blank");
         previewWindow.document.write(`<!DOCTYPE html><html><head><title>TA Sheet</title></head>
@@ -1387,196 +1523,6 @@ JAVASCRIPT
             previewWindow.document.close();
         } catch (e) {
             previewWindow.document.body.innerHTML = `<p style="color:#fff;">Failed to generate TA sheet: ${e.message}</p>`;
-        }
-    }
-
-    async function setMatchStatus(matchId, newStatus, winnerEntryId) {
-        const body = { status: newStatus };
-        if (winnerEntryId) body.winnerEntryId = winnerEntryId;
-        await fetch(`/api/matches/${SPORT}/${DISCIPLINE}/${matchId}/status`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
-        closeDetailModal();
-        loadCourts();
-    }
-
-    function promptWinnerAndSetStatus(matchId, newStatus, blueName, blueId, redName, redId) {
-        const choice = prompt(`Winner for this ${newStatus}?\nType "blue" for ${blueName || "Blue"} or "red" for ${redName || "Red"}`);
-        if (!choice) return;
-        const normalized = choice.trim().toLowerCase();
-        const winnerEntryId = normalized === "blue" ? blueId : normalized === "red" ? redId : null;
-        if (!winnerEntryId) { alert('Please type "blue" or "red".'); return; }
-        setMatchStatus(matchId, newStatus, winnerEntryId);
-    }
-
-    // ── Insert-between modal ─────────────────────────────────────────────────
-    function openInsertModal(prevMatch, nextMatch) {
-        insertContext = {
-            prevQueuePosition: prevMatch ? prevMatch.queuePosition : null,
-            nextQueuePosition: nextMatch ? nextMatch.queuePosition : null,
-            prevDisplayNumber: prevMatch ? prevMatch.displayNumber : null,
-            nextDisplayNumber: nextMatch ? nextMatch.displayNumber : null,
-        };
-        pickedBlue = [];
-        pickedRed = [];
-        document.getElementById("results-blue").innerHTML = "";
-        document.getElementById("results-red").innerHTML = "";
-        document.getElementById("search-blue").value = "";
-        document.getElementById("search-red").value = "";
-        renderPicked("blue");
-        renderPicked("red");
-        document.getElementById("insert-error").classList.add("hidden");
-
-        const prevLabel = prevMatch ? `#${prevMatch.displayNumber}` : "the start";
-        const nextLabel = nextMatch ? `#${nextMatch.displayNumber}` : "the end";
-        document.getElementById("insert-position-hint").textContent =
-            `Inserting between ${prevLabel} and ${nextLabel} on ${activeCourtId}. It'll get its own decimal number so nothing else gets renumbered.`;
-
-        populateCategoryOptions();
-        document.getElementById("insert-modal").classList.remove("hidden");
-    }
-
-    function closeInsertModal() { document.getElementById("insert-modal").classList.add("hidden"); }
-
-    function populateCategoryOptions() {
-        const select = document.getElementById("insert-category");
-        const seen = new Map();
-        currentMatches.forEach(m => {
-            if (m.categoryCode) seen.set(m.categoryCode, m.categoryLabel || m.categoryCode);
-        });
-        select.innerHTML = "";
-        seen.forEach((label, code) => {
-            const opt = document.createElement("option");
-            opt.value = code;
-            opt.textContent = label;
-            select.appendChild(opt);
-        });
-        const customOpt = document.createElement("option");
-        customOpt.value = "__custom__";
-        customOpt.textContent = "Other / exhibition category…";
-        select.appendChild(customOpt);
-
-        select.onchange = () => {
-            document.getElementById("insert-category-custom").classList.toggle("hidden", select.value !== "__custom__");
-        };
-        select.onchange();
-    }
-
-    let athleteSearchTimers = {};
-    function wireAthleteSearch(side) {
-        const input = document.getElementById(`search-${side}`);
-        input.oninput = () => {
-            clearTimeout(athleteSearchTimers[side]);
-            const q = input.value.trim();
-            if (q.length < 2) { document.getElementById(`results-${side}`).innerHTML = ""; return; }
-            athleteSearchTimers[side] = setTimeout(async () => {
-                const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&limit=8`);
-                const data = await res.json();
-                renderAthleteResults(side, data.athletes || []);
-            }, 250);
-        };
-    }
-    wireAthleteSearch("blue");
-    wireAthleteSearch("red");
-
-    function renderAthleteResults(side, athletes) {
-        const el = document.getElementById(`results-${side}`);
-        el.innerHTML = "";
-        athletes.forEach(a => {
-            const item = document.createElement("div");
-            item.className = "lq-athlete-result-item";
-            item.textContent = `${a.displayName} — ${a.club || "no club"} (${a.birthYear || "?"})`;
-            item.onclick = () => {
-                const list = side === "blue" ? pickedBlue : pickedRed;
-                if (!list.find(x => x.id === a.id)) list.push(a);
-                renderPicked(side);
-                el.innerHTML = "";
-                document.getElementById(`search-${side}`).value = "";
-            };
-            el.appendChild(item);
-        });
-    }
-
-    function renderPicked(side) {
-        const list = side === "blue" ? pickedBlue : pickedRed;
-        const el = document.getElementById(`picked-${side}`);
-        el.innerHTML = "";
-        list.forEach(a => {
-            const chip = document.createElement("div");
-            chip.className = "lq-picked-chip";
-            chip.innerHTML = `<span>${escapeHtml(a.displayName)}</span>`;
-            const removeBtn = document.createElement("button");
-            removeBtn.textContent = "×";
-            removeBtn.onclick = () => {
-                const idx = list.findIndex(x => x.id === a.id);
-                if (idx > -1) list.splice(idx, 1);
-                renderPicked(side);
-            };
-            chip.appendChild(removeBtn);
-            el.appendChild(chip);
-        });
-    }
-
-    async function submitInsertMatch() {
-        const errEl = document.getElementById("insert-error");
-        errEl.classList.add("hidden");
-
-        if (!pickedBlue.length || !pickedRed.length) {
-            errEl.textContent = "Pick at least one athlete for each corner.";
-            errEl.classList.remove("hidden");
-            return;
-        }
-
-        const select = document.getElementById("insert-category");
-        let categoryCode, categoryLabel;
-        if (select.value === "__custom__") {
-            categoryCode = document.getElementById("insert-category-code").value.trim();
-            categoryLabel = document.getElementById("insert-category-label").value.trim();
-            if (!categoryCode || !categoryLabel) {
-                errEl.textContent = "Enter both a category code and label.";
-                errEl.classList.remove("hidden");
-                return;
-            }
-        } else {
-            categoryCode = select.value;
-            categoryLabel = select.options[select.selectedIndex].textContent;
-        }
-
-        const btn = document.getElementById("insert-submit-btn");
-        btn.disabled = true;
-        btn.textContent = "Creating…";
-
-        try {
-            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/matches/insert`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    courtId: activeCourtId,
-                    prevQueuePosition: insertContext.prevQueuePosition,
-                    nextQueuePosition: insertContext.nextQueuePosition,
-                    prevDisplayNumber: insertContext.prevDisplayNumber,
-                    nextDisplayNumber: insertContext.nextDisplayNumber,
-                    categoryCode,
-                    categoryLabel,
-                    isRanked: document.getElementById("insert-ranked").checked,
-                    blue: { athleteIds: pickedBlue.map(a => a.id) },
-                    red: { athleteIds: pickedRed.map(a => a.id) },
-                }),
-            });
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.detail || "Failed to create match.");
-            }
-            closeInsertModal();
-            loadCourts();
-        } catch (e) {
-            errEl.textContent = e.message;
-            errEl.classList.remove("hidden");
-        } finally {
-            btn.disabled = false;
-            btn.textContent = "Create Match";
         }
     }
 

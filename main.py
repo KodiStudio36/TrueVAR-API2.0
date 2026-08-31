@@ -1,6 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from infrastructure.routers.api_router import router as tournament_router
 from infrastructure.routers.youtube_router import router as youtube_router
@@ -37,6 +39,11 @@ app.include_router(auth_router)
 app.include_router(club_router)
 
 
-@app.get("/")
-def health_check():
-    return {"status": "healthy", "service": "tournament-management"}
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == status.HTTP_404_NOT_FOUND:
+        # Redirect the user to the dashboard
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    
+    # Return default behavior for other HTTP errors (403, 500, etc.)
+    return RedirectResponse(url="/")

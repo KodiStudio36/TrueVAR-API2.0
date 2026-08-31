@@ -87,8 +87,8 @@
                   "match_value": null,
                   "min": 1990,
                   "max": 2009,
-                  "roundTime": "02:00",
-                  "breakTime": "01:00"
+                  "roundTime": "01:30",
+                  "breakTime": "00:30"
                 },
                 {
                   "code": "veterans",

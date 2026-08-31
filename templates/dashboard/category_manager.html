@@ -24,7 +24,10 @@
         engine), so the output is byte-identical regardless of which
         browser/OS/printer generates it. Pulls from
         /api/tournaments/{id}/weighin-data; nothing is persisted
-        server-side by these. ─────────────────────────────────────── #}
+        server-side by these. Nothing is saved to disk client-side
+        either — both buttons open the generated PDF in a new tab and
+        immediately trigger that tab's print dialog via jsPDF's
+        autoPrint(). ─────────────────────────────────────────────── #}
         <button type="button" class="btn btn-ghost btn-sm" onclick="generateRegistrationSheet(this)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -54,6 +57,19 @@
             </svg>
             Create Brackets
         </a>
+
+        {# Hidden by default — revealed only via the secret Ctrl+Alt+J
+        shortcut (see the keydown listener near the bottom of the
+        script). Not linked from anywhere else on purpose: this
+        registers mock athletes for testing and has no place in a real
+        tournament's normal staff workflow. #}
+        <button type="button" id="loadTestDataBtn" class="btn btn-ghost btn-sm hidden" onclick="loadMockTestData(this)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z" />
+                <path d="M12 8v4l3 2" />
+            </svg>
+            Load Test Data
+        </button>
     </div>
 
     <p class="text-muted cm-hint">
@@ -329,7 +345,7 @@ each browser's own print-to-PDF engine. #}
 
         try {
             const res = await fetch(
-                `/api/tournaments/${TOURNAMENT_ID}/registrations/${categoryCode}/${entryId}?age_code=${encodeURIComponent(ageCode)}`,
+                `/api/tournaments/${TOURNAMENT_ID}/registrations/admin-remove/${categoryCode}/${entryId}?age_code=${encodeURIComponent(ageCode)}`,
                 { method: "DELETE" }
             );
             if (!res.ok) {
@@ -554,15 +570,23 @@ each browser's own print-to-PDF engine. #}
     // registrations already grouped by club and sorted A→Z. Clubs with
     // no clubId on file (e.g. entries added via the admin-add path with
     // no requesting club) come back separately under "unassigned" and
-    // are rendered as their own trailing, unnumbered page(s) — never
-    // merged into a real club's roster.
+    // are rendered as their own trailing page(s) — never merged into a
+    // real club's roster. Club pages are no longer numbered — the
+    // section header is just the club name (or "No Club").
     //
     // Why jsPDF instead of window.print(): print-to-PDF goes through
     // each browser's own print engine, and margins/scaling/page breaks
     // drift across browsers, OSes, and printer drivers — exactly the
     // "stretched" inconsistency this replaces. jsPDF draws the document
-    // as vectors directly, so the .pdf file downloaded is byte-for-byte
-    // the same no matter whose machine generated it.
+    // as vectors directly, so the generated PDF is byte-for-byte the
+    // same no matter whose machine generated it.
+    //
+    // Nothing is downloaded to disk: openForPrint() below calls
+    // jsPDF's autoPrint() (which embeds a /Print OpenAction in the PDF
+    // itself) and opens the result as a blob: URL in a new tab. Any
+    // browser's built-in PDF viewer honors that action and raises its
+    // print dialog as soon as the document loads — no save step, no
+    // file left behind.
     // ═══════════════════════════════════════════════════════════════
 
     const PDF_MARGIN = 14; // mm, both sides — matches A4 page width math below
@@ -586,17 +610,34 @@ each browser's own print-to-PDF engine. #}
         return `${safeTitle || "tournament"}_${kind}.pdf`;
     }
 
+    // Opens the generated PDF in a new tab and immediately triggers that
+    // tab's print dialog — nothing is saved to disk. autoPrint() embeds a
+    // /Print OpenAction in the PDF itself, which the browser's built-in
+    // PDF viewer (Chrome, Edge, Firefox) honors as soon as the document
+    // loads, so this works even though we never get a reliable load-event
+    // handle on the popup window (blob: PDF tabs don't consistently fire
+    // one). The document title is set so the print dialog / tab shows a
+    // sensible name even though it's never written to a file.
+    function openForPrint(doc, filename) {
+        doc.autoPrint();
+        doc.setProperties({ title: filename });
+        const blobUrl = doc.output("bloburl");
+        const win = window.open(blobUrl, "_blank");
+        if (!win) {
+            throw new Error("Pop-up blocked — allow pop-ups for this site to print directly.");
+        }
+    }
+
     // Draws the shared page header (tournament title + club line) at the
     // top of whatever page is currently active in `doc`.
-    function drawPageHeader(doc, index, clubName, sectionLabel) {
+    function drawPageHeader(doc, clubName, sectionLabel) {
         doc.setFont("helvetica", "bold");
         doc.setFontSize(14);
         doc.setTextColor(17, 17, 17);
         doc.text(TOURNAMENT_TITLE, PDF_MARGIN, 18);
 
         doc.setFontSize(13);
-        const clubLine = (index != null ? `${index}   ` : "") + (clubName || "No Club");
-        doc.text(clubLine, PDF_MARGIN, 26);
+        doc.text(clubName || "No Club", PDF_MARGIN, 26);
 
         if (sectionLabel) {
             doc.setFontSize(11);
@@ -606,66 +647,80 @@ each browser's own print-to-PDF engine. #}
         }
     }
 
+    // Buckets an entry into Male / Female / Other for the weigh-in sheet's
+    // per-gender section pages. The raw `gender` field coming back from
+    // the API isn't consistently "male"/"female" — some sports send "W"
+    // for Women rather than "F", which is why Women entries were landing
+    // under "Other" before. Checking for a leading "w" fixes that, and
+    // the category-label text is used as a second fallback since it's
+    // always accurate (it comes straight from the category schema).
+    function genderBucket(entry) {
+        const g = (entry.gender || "").toLowerCase();
+        const label = (entry.categoryLabel || "").toLowerCase();
+        if (g.startsWith("f") || g.startsWith("w") || /\bwomen\b/.test(label)) return "Female";
+        if (g.startsWith("m") || /\bmen\b/.test(label)) return "Male";
+        return "Other";
+    }
+
     // ── Weigh-in sheet: per club, one page per gender that has entries ──
+    // Kept compact for clubs with 50+ entries: small font, tight padding,
+    // no forced row height. No., 1st weighin, Final weighin, and
+    // Signature are all narrow fixed-width columns; Participant and
+    // Category split the rest of the page.
     function buildWeighInDoc(data) {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({ unit: "mm", format: "a4" });
         let isFirstPage = true;
 
-        const columns = [
-            { header: "ID no.", dataKey: "id", width: 10 },
-            { header: "Surname", dataKey: "name", width: 34 },
-            { header: "Category", dataKey: "category", width: 34 },
-            { header: "Length", dataKey: "length", width: 14 },
-            { header: "Change", dataKey: "change", width: 14 },
-            { header: "1st weighin", dataKey: "w1", width: 16 },
-            { header: "Final weighin", dataKey: "w2", width: 16 },
-            { header: "Passport", dataKey: "passport", width: 12 },
-            { header: "Signature", dataKey: "sig", width: 32 },
-        ];
+        const columnWidths = { id: 8, participant: 57, category: 57, w1: 20, w2: 20, sig: 20 };
 
-        function addSectionPage(index, clubName, sectionLabel, rows) {
+        function addSectionPage(clubName, sectionLabel, rows) {
             if (!isFirstPage) doc.addPage();
             isFirstPage = false;
 
-            drawPageHeader(doc, index, clubName, sectionLabel);
+            drawPageHeader(doc, clubName, sectionLabel);
 
             const body = rows.map((e, i) => [
-                String(i + 1), `${e.lastName}, ${e.firstName}`, e.categoryLabel || "",
-                "", "", "", "", "", "",
+                String(i + 1), `${e.lastName}, ${e.firstName}`, e.categoryLabel || "", "", "", "",
             ]);
 
             doc.autoTable({
                 startY: 37,
-                head: [columns.map(c => c.header)],
+                head: [["No.", "Participant", "Category", "1st weighin", "Final weighin", "Signature"]],
                 body,
-                columnStyles: Object.fromEntries(columns.map((c, i) => [i, { cellWidth: c.width }])),
-                styles: { fontSize: 8, cellPadding: 1.8, lineColor: [17, 17, 17], lineWidth: 0.2, minCellHeight: 8 },
+                columnStyles: {
+                    0: { cellWidth: columnWidths.id },
+                    1: { cellWidth: columnWidths.participant },
+                    2: { cellWidth: columnWidths.category },
+                    3: { cellWidth: columnWidths.w1 },
+                    4: { cellWidth: columnWidths.w2 },
+                    5: { cellWidth: columnWidths.sig },
+                },
+                styles: { fontSize: 8, cellPadding: 1.3, lineColor: [17, 17, 17], lineWidth: 0.2 },
                 headStyles: { fillColor: [255, 255, 255], textColor: [17, 17, 17], fontStyle: "bold", lineWidth: 0.3 },
                 theme: "grid",
                 margin: { left: PDF_MARGIN, right: PDF_MARGIN },
             });
         }
 
-        function addClubPages(index, club) {
-            const male = club.entries.filter(e => (e.gender || "").toLowerCase().startsWith("m"));
-            const female = club.entries.filter(e => (e.gender || "").toLowerCase().startsWith("f"));
-            const other = club.entries.filter(e => !male.includes(e) && !female.includes(e));
+        function addClubPages(club) {
+            const buckets = { Male: [], Female: [], Other: [] };
+            club.entries.forEach(e => buckets[genderBucket(e)].push(e));
 
-            if (male.length) addSectionPage(index, club.clubName, "Male", male);
-            if (female.length) addSectionPage(index, club.clubName, "Female", female);
-            if (other.length) addSectionPage(index, club.clubName, "Other", other);
+            if (buckets.Male.length) addSectionPage(club.clubName, "Male", buckets.Male);
+            if (buckets.Female.length) addSectionPage(club.clubName, "Female", buckets.Female);
+            if (buckets.Other.length) addSectionPage(club.clubName, "Other", buckets.Other);
         }
 
-        data.clubs.forEach((club, i) => addClubPages(i + 1, club));
-        if (data.unassigned && data.unassigned.entries.length) addClubPages(null, data.unassigned);
+        data.clubs.forEach(club => addClubPages(club));
+        if (data.unassigned && data.unassigned.entries.length) addClubPages(data.unassigned);
 
         return doc;
     }
 
     async function generateWeighInSheet(btn) {
         if (btn) btn.disabled = true;
-        showFlash("Generating weigh-in sheet…");
+        showFlash("Preparing weigh-in sheet…");
         try {
             assertPdfLibsLoaded();
             const data = await fetchWeighInData();
@@ -674,8 +729,8 @@ each browser's own print-to-PDF engine. #}
                 showFlash("No active registrations to generate a sheet from.", true);
                 return;
             }
-            buildWeighInDoc(data).save(pdfFilename("weighin"));
-            showFlash("Weigh-in sheet downloaded.");
+            openForPrint(buildWeighInDoc(data), pdfFilename("weighin"));
+            showFlash("Weigh-in sheet opened for printing.");
         } catch (err) {
             console.error(err);
             showFlash(err.message || "Failed to generate sheet.", true);
@@ -685,19 +740,25 @@ each browser's own print-to-PDF engine. #}
     }
 
     // ── Backup registration sheet: per club, one page, no gender split ──
+    // Name and category stay in separate columns here (unlike the
+    // weigh-in sheet). Kept compact for clubs with 50+ entries: small
+    // font, tight padding, no forced row height — the old 12mm forced
+    // minimum on the Signature column was inflating every row on the
+    // page, not just that column. No. and Signature are narrow fixed
+    // widths since neither needs much room.
     function buildRegistrationDoc(data) {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({ unit: "mm", format: "a4" });
         let isFirstPage = true;
 
-        const columnWidths = { id: 12, name: 50, category: 60, sig: 60 };
+        const columnWidths = { id: 8, participant: 77, category: 77, sig: 20 };
 
-        function addClubPage(index, club) {
+        function addClubPage(club) {
             if (!club.entries.length) return;
             if (!isFirstPage) doc.addPage();
             isFirstPage = false;
 
-            drawPageHeader(doc, index, club.clubName, null);
+            drawPageHeader(doc, club.clubName, null);
 
             const body = club.entries.map((e, i) => [
                 String(i + 1), `${e.lastName}, ${e.firstName}`, e.categoryLabel || "", "",
@@ -705,30 +766,30 @@ each browser's own print-to-PDF engine. #}
 
             doc.autoTable({
                 startY: 32,
-                head: [["ID no.", "Surname", "Category", "Signature"]],
+                head: [["No.", "Participant", "Category", "Signature"]],
                 body,
                 columnStyles: {
                     0: { cellWidth: columnWidths.id },
-                    1: { cellWidth: columnWidths.name },
+                    1: { cellWidth: columnWidths.participant },
                     2: { cellWidth: columnWidths.category },
-                    3: { cellWidth: columnWidths.sig, minCellHeight: 12 },
+                    3: { cellWidth: columnWidths.sig },
                 },
-                styles: { fontSize: 9, cellPadding: 2.2, lineColor: [17, 17, 17], lineWidth: 0.2 },
+                styles: { fontSize: 8, cellPadding: 1.3, lineColor: [17, 17, 17], lineWidth: 0.2 },
                 headStyles: { fillColor: [255, 255, 255], textColor: [17, 17, 17], fontStyle: "bold", lineWidth: 0.3 },
                 theme: "grid",
                 margin: { left: PDF_MARGIN, right: PDF_MARGIN },
             });
         }
 
-        data.clubs.forEach((club, i) => addClubPage(i + 1, club));
-        if (data.unassigned && data.unassigned.entries.length) addClubPage(null, data.unassigned);
+        data.clubs.forEach(club => addClubPage(club));
+        if (data.unassigned && data.unassigned.entries.length) addClubPage(data.unassigned);
 
         return doc;
     }
 
     async function generateRegistrationSheet(btn) {
         if (btn) btn.disabled = true;
-        showFlash("Generating registration sheet…");
+        showFlash("Preparing registration sheet…");
         try {
             assertPdfLibsLoaded();
             const data = await fetchWeighInData();
@@ -737,8 +798,8 @@ each browser's own print-to-PDF engine. #}
                 showFlash("No active registrations to generate a sheet from.", true);
                 return;
             }
-            buildRegistrationDoc(data).save(pdfFilename("registration"));
-            showFlash("Registration sheet downloaded.");
+            openForPrint(buildRegistrationDoc(data), pdfFilename("registration"));
+            showFlash("Registration sheet opened for printing.");
         } catch (err) {
             console.error(err);
             showFlash(err.message || "Failed to generate sheet.", true);
@@ -746,6 +807,172 @@ each browser's own print-to-PDF engine. #}
             if (btn) btn.disabled = false;
         }
     }
+    // ═══════════════════════════════════════════════════════════════
+    // MOCK TEST DATA — secret Ctrl+Alt+J toggles a "Load Test Data"
+    // button that registers mock athletes (see upload_athletes.py
+    // --mock: mock_athlete_1..mock_athlete_45, 3 mock clubs x 15 each)
+    // into real registrations for THIS tournament, so bracket/court
+    // generation can be exercised without waiting on real sign-ups.
+    //
+    // A single elimination bracket needs >=2 entrants (generateEverything
+    // skips anything under that), so scattering registrations evenly
+    // across every leaf category mostly produces useless 0-1 entrant
+    // categories — that was the first version of this tool. This one
+    // additionally shapes the AGE DIVISION split to roughly match a real
+    // tournament's category breakdown (see REALISTIC_AGE_DISTRIBUTION),
+    // instead of picking categories completely at random regardless of
+    // age — so e.g. cadets ends up with noticeably more populated
+    // categories than veterans, the way a real event actually looks.
+    //
+    // Within each age division: repeatedly pick a random not-yet-used
+    // weight-bracket category and fill it with a random 2-5 DISTINCT
+    // mock athletes, subtracting from that division's remaining target,
+    // until the remainder drops below 2 (too small for another bracket)
+    // or the division runs out of categories. This is a greedy
+    // approximation, not an exact match to the reference numbers — the
+    // point is a realistic SHAPE, not identical totals.
+    //
+    // Athlete sampling is without replacement WITHIN a category (no
+    // point "registering" the same athlete twice there, it'd just 409)
+    // but WITH replacement ACROSS categories and even across age
+    // divisions — the same mock athlete can and will show up more than
+    // once, which is fine (registrations are keyed per categoryCode, so
+    // that's always independent bracket entries, never a collision —
+    // see the earlier explanation in chat).
+    // ═══════════════════════════════════════════════════════════════
+    const MOCK_ATHLETE_COUNT = 45;           // 3 mock clubs x 15 athletes each (see upload_athletes.py --mock)
+    const MOCK_MIN_ENTRIES_PER_CATEGORY = 2; // inclusive
+    const MOCK_MAX_ENTRIES_PER_CATEGORY = 5; // inclusive
+
+    // Real tournament's category breakdown by age division ("Počet
+    // zápasov podľa vekových kategórií" — Pupils1 7, Pupils2 19, YC 24,
+    // Kadeti 36, Juniori 11, Seniori 12, Veterani 2, 111 total). Used
+    // only to PROPORTION how many mock registrations land in each age
+    // division; which specific weight brackets get populated within a
+    // division is still randomized. Edit these if the reference
+    // tournament's shape changes.
+    const REALISTIC_AGE_DISTRIBUTION = {
+        pupils_1: 7,
+        pupils_2: 19,
+        younger_cadets: 24,
+        cadets: 36,
+        juniors: 11,
+        seniors: 12,
+        veterans: 2,
+    };
+
+    // Mirrors upload_athletes.py's build_mock_athlete_doc's deterministic
+    // IDs — so this tool only ever touches athletes that --mock itself
+    // created.
+    function mockAthleteId(globalNumber) { return `mock_athlete_${globalNumber}`; }
+
+    // Fisher-Yates shuffle — used both to pick which categories get
+    // populated and to draw distinct athletes within each one.
+    function shuffled(array) {
+        const copy = array.slice();
+        for (let i = copy.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+    }
+
+    async function loadMockTestData(btn) {
+        if (flatCategories.length === 0) {
+            showFlash("Category schema hasn't loaded yet — try again in a moment.", true);
+            return;
+        }
+        const totalTarget = Object.values(REALISTIC_AGE_DISTRIBUTION).reduce((a, b) => a + b, 0);
+        if (!confirm(`Populate mock registrations shaped like a real tournament's age-division spread (~${totalTarget} entries total, ${MOCK_MIN_ENTRIES_PER_CATEGORY}-${MOCK_MAX_ENTRIES_PER_CATEGORY} distinct athletes per populated category)? This writes real registrations for this tournament.`)) {
+            return;
+        }
+
+        if (btn) { btn.disabled = true; btn.textContent = "Loading test data…"; }
+
+        let registered = 0;
+        let categoriesPopulated = 0;
+        const skipped = [];
+
+        for (const [ageCode, targetCount] of Object.entries(REALISTIC_AGE_DISTRIBUTION)) {
+            const ageCategories = shuffled(flatCategories.filter(c => c.ageCode === ageCode));
+            if (ageCategories.length === 0) {
+                skipped.push(`${ageCode}: no categories in this tournament's schema`);
+                continue;
+            }
+
+            let remaining = targetCount;
+            let catIndex = 0;
+            while (remaining >= MOCK_MIN_ENTRIES_PER_CATEGORY && catIndex < ageCategories.length) {
+                const cat = ageCategories[catIndex++];
+                const maxForThis = Math.min(MOCK_MAX_ENTRIES_PER_CATEGORY, remaining);
+                const entryCount = MOCK_MIN_ENTRIES_PER_CATEGORY +
+                    Math.floor(Math.random() * (maxForThis - MOCK_MIN_ENTRIES_PER_CATEGORY + 1));
+                remaining -= entryCount;
+                categoriesPopulated++;
+
+                const athleteNumbers = shuffled(Array.from({ length: MOCK_ATHLETE_COUNT }, (_, i) => i + 1)).slice(0, entryCount);
+                for (const globalNumber of athleteNumbers) {
+                    const athleteId = mockAthleteId(globalNumber);
+                    try {
+                        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/registrations/admin-add`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                athleteIds: [athleteId],
+                                entryTypeCode: cat.entryTypeCode,
+                                ageCode: cat.ageCode,
+                                genderCode: cat.genderCode,
+                                categoryCode: cat.code,
+                                categoryLabel: `${cat.groupLabel} · ${cat.label}`,
+                            }),
+                        });
+                        if (!res.ok) {
+                            const body = await res.json().catch(() => ({}));
+                            throw new Error(body.detail || `HTTP ${res.status}`);
+                        }
+                        categoryCounts[cat.code] = (categoryCounts[cat.code] || 0) + 1;
+                        delete divisionRosterCache[cat.ageCode];
+                        registered++;
+                    } catch (err) {
+                        // Most common cause: this athlete is already
+                        // registered here from a previous test-data run —
+                        // harmless, just skip and move on.
+                        skipped.push(`${athleteId} -> ${cat.groupLabel} · ${cat.label}: ${err.message}`);
+                    }
+                }
+            }
+        }
+
+        renderCategoryList();
+        if (activeCategoryCode) {
+            const activeCat = flatCategories.find(c => c.code === activeCategoryCode);
+            if (activeCat) await selectCategory(activeCat.code);
+        }
+
+        if (skipped.length > 0) {
+            console.warn("Mock test data — skipped:", skipped);
+        }
+        showFlash(
+            `Loaded test data: ${registered} registrations across ${categoriesPopulated} categories` +
+            (skipped.length > 0 ? ` (${skipped.length} skipped, mostly dupes — see console).` : "."),
+            skipped.length > 0 && registered === 0
+        );
+
+        if (btn) { btn.disabled = false; btn.textContent = "Load Test Data"; }
+    }
+
+    // Secret shortcut — Ctrl+Alt+J toggles the "Load Test Data" button's
+    // visibility. Not discoverable from the UI on purpose (see the
+    // button's own comment above).
+    document.addEventListener("keydown", (event) => {
+        if (event.ctrlKey && event.altKey && (event.key === "j" || event.key === "J")) {
+            event.preventDefault();
+            const btn = document.getElementById("loadTestDataBtn");
+            if (!btn) return;
+            btn.classList.toggle("hidden");
+            showFlash(btn.classList.contains("hidden") ? "Test data tool hidden." : "Test data tool armed.");
+        }
+    });
 
     init();
 </script>
