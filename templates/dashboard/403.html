@@ -1,0 +1,8 @@
+{% extends "dashboard/base.html" %}
+{% block content %}
+<div class="error-page error-403">
+    <h1>Not authorized</h1>
+    <p>{{ detail or "You don't have permission to view this page." }}</p>
+    <a href="/dashboard">Back to dashboard</a>
+</div>
+{% endblock %}

@@ -14,6 +14,13 @@ from usecases.tournament_usecase import CreateTournamentUseCase, GetAllTournamen
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
 from infrastructure.firebase_client import init_firestore
 
+from infrastructure.auth_common import (
+    db, JWT_SECRET, JWT_ALGORITHM, SESSION_COOKIE_NAME, EXPIRES_IN,
+    create_session_jwt, decode_session_jwt, get_current_user,
+    get_admin_club_id, get_user_roles,
+)
+from infrastructure.routers.operator_auth import require_operator
+
 from adapters.database.firebase_scheduled_broadcast_repository import FirebaseScheduledBroadcastRepository
 from adapters.database.firebase_stream_key_repository import FirebaseStreamKeyRepository
 from usecases.tournament_usecase import SetTournamentStatusUseCase
@@ -104,7 +111,8 @@ class StatusUpdate(BaseModel):
     status: str
 
 
-@router.post("/tournaments", status_code=status.HTTP_201_CREATED)
+@router.post("/tournaments", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_operator("tournament:create"))])
 def create_tournament_endpoint(
     payload: CreateTournamentRequest,
     repo: FirebaseTournamentRepository = Depends(get_tournament_repo)
@@ -312,7 +320,8 @@ def search_athletes(
     ]}
 
 
-@router.get("/athletes/search-admin")
+@router.get("/athletes/search-admin",
+            dependencies=[Depends(require_operator("registrations:manage"))])
 def search_athletes_admin(
     q: str = Query(..., min_length=1),
     sport: str = Query(..., description="Which sport's club membership to surface"),
@@ -468,7 +477,8 @@ def register_entry_endpoint(
     return {"message": "Entry registered", "categoryCode": payload.categoryCode}
 
 
-@router.post("/tournaments/{tournament_id}/registrations/admin-add", status_code=status.HTTP_201_CREATED)
+@router.post("/tournaments/{tournament_id}/registrations/admin-add", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_operator("registrations:manage"))])
 def admin_register_entry_endpoint(tournament_id: str, payload: RegisterEntryRequest):
     _execute_registration_create(tournament_id, payload, requesting_club_id=None, enforce_club_match=False)
     return {"message": "Entry registered", "categoryCode": payload.categoryCode}
@@ -624,7 +634,8 @@ def move_registration_endpoint(
     return {"message": "Registration updated", "categoryCode": payload.newCategoryCode}
 
 
-@router.put("/tournaments/{tournament_id}/registrations/admin-move")
+@router.put("/tournaments/{tournament_id}/registrations/admin-move",
+            dependencies=[Depends(require_operator("registrations:manage"))])
 def admin_move_registration_endpoint(tournament_id: str, payload: MoveRegistrationRequest):
     _execute_registration_move(tournament_id, payload, requesting_club_id=None, enforce_ownership=False)
     return {"message": "Registration updated", "categoryCode": payload.newCategoryCode}
@@ -691,7 +702,8 @@ def remove_registration_endpoint(
     return {"message": "Registration removed"}
 
 
-@router.delete("/tournaments/{tournament_id}/registrations/admin-remove/{category_code}/{entry_id}")
+@router.delete("/tournaments/{tournament_id}/registrations/admin-remove/{category_code}/{entry_id}",
+               dependencies=[Depends(require_operator("registrations:manage"))])
 def admin_remove_registration_endpoint(
     tournament_id: str,
     category_code: str,
@@ -797,6 +809,15 @@ class BracketCommitMatch(BaseModel):
     roundTime: Optional[str] = None
     breakTime: Optional[str] = None
     isRanked: bool = True  # official/ranked bout vs. friendly/exhibition — see insert_match_endpoint for the ad hoc counterpart
+    # NEW — equipment facts the bracket_builder.html scheduler already
+    # resolved at generation time. Pushed so live_queue.html can re-run
+    # the SAME vest/plexi availability check against LIVE court/position
+    # state (which can keep changing after commit, via drag-and-drop in
+    # either admin panel) instead of only ever seeing what was true at
+    # generation time.
+    resolvedVestGen: Optional[str] = None          # "gen2" | "gen3" — which specific generation this match was assigned
+    requiresPlexiHelmet: bool = False               # competition-rule fact for this match's category
+    scheduledWithRelaxedConstraints: bool = False    # true if the generator's guard-limit overflow path had to place this without a full equipment/rest-gap check
 
 
 class BracketCommitRequest(BaseModel):
@@ -804,9 +825,18 @@ class BracketCommitRequest(BaseModel):
     discipline: str
     brackets: List[BracketCommitBracket]
     matches: List[BracketCommitMatch]
+    # NEW — session-local equipment configuration from bracket_builder.html
+    # (courts, vest inventory, plexi helmet count, transfer buffer, etc.),
+    # written to tournaments/{id}/meta/equipment in the SAME commit so
+    # live_queue.html can load it once and re-run the same vest/helmet
+    # conflict checks against live match data. Optional so older callers
+    # (or a commit that genuinely has nothing configured) don't fail
+    # validation.
+    equipment: Optional[Dict] = None
 
 
-@router.post("/tournaments/{tournament_id}/brackets/commit", status_code=status.HTTP_201_CREATED)
+@router.post("/tournaments/{tournament_id}/brackets/commit", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_operator("brackets:manage"))])
 def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
     batch = db.batch()
     tournament_ref = db.collection("tournaments").document(tournament_id)
@@ -864,10 +894,86 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
             "roundTime": m.roundTime,
             "breakTime": m.breakTime,
             "isRanked": m.isRanked,
+            "resolvedVestGen": m.resolvedVestGen,
+            "requiresPlexiHelmet": m.requiresPlexiHelmet,
+            "scheduledWithRelaxedConstraints": m.scheduledWithRelaxedConstraints,
         }, merge=True)
+
+    # Equipment meta — same batch as brackets/matches, so a commit is
+    # atomic-ish w.r.t. this file's own writes (all three either land
+    # together or the whole batch fails together). Overwrites whatever
+    # was there before wholesale (not merge=True) — a fresh Generate +
+    # Push should fully replace the prior configuration, not accumulate
+    # stale keys from an earlier session's shape.
+    if payload.equipment is not None:
+        equipment_ref = tournament_ref.collection("meta").document("equipment")
+        batch.set(equipment_ref, {
+            **payload.equipment,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
 
     batch.commit()
     return {"message": "Brackets committed", "bracketCount": len(payload.brackets), "matchCount": len(payload.matches)}
+
+
+@router.delete("/tournaments/{tournament_id}/brackets",
+               dependencies=[Depends(require_operator("brackets:manage"))])
+def clean_brackets_endpoint(
+    tournament_id: str,
+    sport: str = Query(..., description="Needed to locate this tournament's matches, which live under sports/{sport}/disciplines/{discipline}/matches, not under the tournament doc itself"),
+    discipline: str = Query(...),
+):
+    """
+    Wipes everything bracket_builder.html's "Push to Firebase" creates
+    for this tournament: every bracket doc, every match doc (scoped to
+    this tournament within the given sport/discipline), and the
+    equipment meta doc — so a fresh Generate + Push starts completely
+    clean instead of leaving stale matches/brackets behind from a
+    previous attempt.
+
+    Deliberately does NOT touch registrations, division_rosters,
+    categoryCounts, or registeredClubs — those represent real people who
+    signed up, not generated bracket output, and this endpoint has no
+    business deleting them just because the brackets built from them are
+    being cleared.
+
+    Firestore has no server-side "delete where" — every matching
+    document has to be listed and deleted individually, batched in
+    chunks of 400 (comfortably under the 500-write batch limit) since a
+    tournament can have hundreds of matches.
+    """
+    tournament_ref = db.collection("tournaments").document(tournament_id)
+
+    def _delete_in_batches(doc_refs: List) -> int:
+        deleted = 0
+        for i in range(0, len(doc_refs), 400):
+            chunk = doc_refs[i:i + 400]
+            batch = db.batch()
+            for ref in chunk:
+                batch.delete(ref)
+            batch.commit()
+            deleted += len(chunk)
+        return deleted
+
+    bracket_refs = [d.reference for d in tournament_ref.collection("brackets").stream()]
+    deleted_brackets = _delete_in_batches(bracket_refs)
+
+    matches_query = (
+        db.collection("sports").document(sport)
+        .collection("disciplines").document(discipline)
+        .collection("matches")
+        .where("tournamentId", "==", tournament_id)
+    )
+    match_refs = [d.reference for d in matches_query.stream()]
+    deleted_matches = _delete_in_batches(match_refs)
+
+    tournament_ref.collection("meta").document("equipment").delete()
+
+    return {
+        "message": "Brackets, matches, and equipment meta cleared.",
+        "deletedBrackets": deleted_brackets,
+        "deletedMatches": deleted_matches,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -999,7 +1105,8 @@ class PositionUpdateRequest(BaseModel):
     nextDisplayNumber: Optional[float] = None
 
 
-@router.patch("/matches/{sport}/{discipline}/{match_id}/position")
+@router.patch("/matches/{sport}/{discipline}/{match_id}/position",
+              dependencies=[Depends(require_operator("matches:manage"))])
 def reposition_match_endpoint(sport: str, discipline: str, match_id: str, payload: PositionUpdateRequest):
     """
     Drag-and-drop reorder / re-court. The client sends the queuePosition
@@ -1036,7 +1143,8 @@ class MatchStatusUpdateRequest(BaseModel):
     winnerEntryId: Optional[str] = None
 
 
-@router.patch("/matches/{sport}/{discipline}/{match_id}/status")
+@router.patch("/matches/{sport}/{discipline}/{match_id}/status",
+              dependencies=[Depends(require_operator("matches:manage"))])
 def update_match_status_endpoint(sport: str, discipline: str, match_id: str, payload: MatchStatusUpdateRequest):
     """
     Manual status override for the admin console. TkStrike's
@@ -1090,7 +1198,8 @@ class InsertMatchRequest(BaseModel):
     roundPhase: Optional[str] = "EXH"
 
 
-@router.post("/tournaments/{tournament_id}/matches/insert", status_code=status.HTTP_201_CREATED)
+@router.post("/tournaments/{tournament_id}/matches/insert", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_operator("matches:manage"))])
 def insert_match_endpoint(
     tournament_id: str,
     payload: InsertMatchRequest,
@@ -1177,7 +1286,8 @@ def insert_match_endpoint(
     }
 
 
-@router.get("/tournaments/{tournament_id}/weighin-data")
+@router.get("/tournaments/{tournament_id}/weighin-data",
+            dependencies=[Depends(require_operator("weighin:view"))])
 def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tournament_repo)):
     """
     Single source of truth for the two client-generated backup documents
@@ -1273,7 +1383,8 @@ def create_case_endpoint(payload: CreateCaseRequest, repo=Depends(get_case_repo)
     use_case.execute(name=payload.name)
     return {"message": "Case created successfully"}
 
-@router.put("/tournaments/{tournament_id}", status_code=200)
+@router.put("/tournaments/{tournament_id}", status_code=200,
+            dependencies=[Depends(require_operator("tournament:edit"))])
 def update_tournament_endpoint(
     tournament_id: str,
     payload: UpdateTournamentRequest,
@@ -1302,7 +1413,8 @@ def update_tournament_endpoint(
         raise HTTPException(status_code=404, detail=str(exc))
     return {"message": "Tournament updated."}
 
-@router.patch("/tournaments/{tournament_id}/status")
+@router.patch("/tournaments/{tournament_id}/status",
+              dependencies=[Depends(require_operator("tournament:archive"))])
 def update_tournament_status(
     tournament_id: str,
     payload: StatusUpdate,
@@ -1321,7 +1433,8 @@ def update_tournament_status(
 
     return {"id": tournament_id, "status": payload.status}
 
-@router.delete("/tournaments/{tournament_id}", status_code=200)
+@router.delete("/tournaments/{tournament_id}", status_code=200,
+               dependencies=[Depends(require_operator("tournament:delete"))])
 def delete_tournament_endpoint(
     tournament_id: str,
     repo: TournamentPort = Depends(get_tournament_repo),
@@ -1391,7 +1504,8 @@ class CreateTokenRequest(BaseModel):
 
 
 # ── ENDPOINTS ──────────────────────────────────────────────────────────
-@router.post("/tokens", status_code=status.HTTP_201_CREATED)
+@router.post("/tokens", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_operator("token:create"))])
 def create_token_endpoint(payload: CreateTokenRequest):
     token_id = (payload.token or "").strip() or secrets.token_urlsafe(12)
 
@@ -1411,7 +1525,8 @@ def create_token_endpoint(payload: CreateTokenRequest):
     return {"token": token_id, "message": "Token created successfully"}
 
 
-@router.get("/tokens/paginated")
+@router.get("/tokens/paginated",
+            dependencies=[Depends(require_operator("token:view"))])
 def list_tokens_paginated(
     limit: int = Query(5, ge=1, le=50),
     offset: int = Query(0, ge=0),

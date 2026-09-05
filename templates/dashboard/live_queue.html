@@ -19,9 +19,13 @@
 
     <p class="lq-hint">
         Every court's full running order, live, side by side. Drag the ⠿ handle to reorder within a court or drop
-        onto another court's column to re-court. Click a fight to preview its TA sheet, or use the print icon for
-        an instant print.
+        onto another court's column to re-court. Click a fight to open its details, or use the print icon for an
+        instant TA sheet print.
     </p>
+
+    <div class="lq-toolbar-row">
+        <button type="button" class="btn btn-ghost" onclick="openBulkEditModal()">⚙ Bulk Edit Category</button>
+    </div>
 
     {# ═══════════════════════════════════════════════════════════════════════
     COURTS — rendered side by side, all matches, all statuses (including
@@ -146,6 +150,12 @@ STYLES
         }
     }
 
+    .lq-toolbar-row {
+        display: flex;
+        gap: .5rem;
+        margin: -0.25rem 0 0;
+    }
+
     .lq-loading {
         font-size: .85rem;
         color: var(--lq-muted);
@@ -211,7 +221,7 @@ STYLES
         padding: .5rem;
         display: flex;
         flex-direction: column;
-        gap: .4rem;
+        gap: 0;
         min-height: 80px;
     }
 
@@ -219,6 +229,44 @@ STYLES
         font-size: .82rem;
         color: var(--lq-muted);
         padding: .75rem .25rem;
+    }
+
+    /* ── Gap / insert affordance — hover between two matches (or above
+       the first / below the last) to reveal a "+" that opens the
+       insert-match modal anchored to that exact gap. Spacing between
+       rows now comes ONLY from this element's own height (the column
+       body's flex gap above is 0) — before this was fixed, both were
+       stacking together and roughly quadrupled the visual gap between
+       fights. This height approximates the original pre-insert-feature
+       row spacing; the "+" button itself is still comfortably clickable
+       since it's absolutely positioned and visually overflows this
+       small box on hover. ─────────────────────────────────────────── */
+    .lq-gap {
+        position: relative;
+        height: 6px;
+    }
+
+    .lq-gap-btn {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(.6);
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--lq-accent);
+        color: #fff;
+        border: none;
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity .12s, transform .12s;
+    }
+
+    .lq-gap:hover .lq-gap-btn {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
     }
 
     /* ── Drop indicator (drag-and-drop reorder / re-court target line) ── */
@@ -339,6 +387,35 @@ STYLES
         text-transform: uppercase;
         letter-spacing: .04em;
         color: var(--lq-amber);
+    }
+
+    .lq-row-badges {
+        display: flex;
+        gap: .3rem;
+        flex-wrap: wrap;
+        margin-top: .1rem;
+    }
+
+    .lq-mini-badge {
+        display: inline-block;
+        font-size: .62rem;
+        font-weight: 600;
+        padding: .1rem .4rem;
+        border-radius: 99px;
+        background: #f1f5f9;
+        color: var(--lq-muted);
+        white-space: nowrap;
+    }
+
+    .lq-mini-badge--relaxed {
+        background: #fef3c7;
+        color: #b45309;
+    }
+
+    .lq-mini-badge--conflict {
+        background: #fee2e2;
+        color: #b91c1c;
+        font-weight: 700;
     }
 
     .lq-status-pill {
@@ -476,7 +553,7 @@ STYLES
 
     .lq-detail-corners {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: .75rem;
         margin-bottom: 1rem;
     }
@@ -559,6 +636,41 @@ STYLES
         background: #f8fafc;
         color: var(--lq-muted);
         cursor: not-allowed;
+    }
+
+    .lq-corner-current {
+        font-size: .85rem;
+        font-weight: 600;
+        color: var(--lq-text);
+        padding: .3rem 0;
+    }
+
+    .lq-athlete-results {
+        border: 1px solid var(--lq-border);
+        border-radius: 8px;
+        margin-top: .3rem;
+        max-height: 160px;
+        overflow-y: auto;
+    }
+
+    .lq-athlete-results:empty {
+        border: none;
+        margin-top: 0;
+    }
+
+    .lq-athlete-result-item {
+        padding: .45rem .6rem;
+        font-size: .8rem;
+        cursor: pointer;
+        border-bottom: 1px solid #f1f5f9;
+    }
+
+    .lq-athlete-result-item:last-child {
+        border-bottom: none;
+    }
+
+    .lq-athlete-result-item:hover {
+        background: #f8fafc;
     }
 
     .lq-field-hint {
@@ -678,12 +790,31 @@ JAVASCRIPT
     // only ever show as raw slugs like "kyorugi_younger_cadets_women_42".
     let categoryLabelByCode = {};
 
+    // Session-local equipment configuration pushed by bracket_builder.html
+    // (courts, vest inventory, plexi helmet count, transfer buffer,
+    // assumed rounds) — fetched ONCE (not a live listener; this config
+    // only changes when someone re-runs Generate + Push, not continuously)
+    // from tournaments/{id}/meta/equipment. null until loaded, or if
+    // nothing's ever been pushed with equipment data.
+    let equipmentMeta = null;
+
     // ── Bootstrapping ───────────────────────────────────────────────────────
     (async function init() {
         await initFirebase();
         subscribeAll();
         loadCategoryLabels(); // fire-and-forget — rows render with raw categoryCode until this resolves, then re-render
+        loadEquipmentMeta();  // fire-and-forget — badges/conflicts appear once this resolves, then re-render
     })();
+
+    async function loadEquipmentMeta() {
+        try {
+            const doc = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("meta").doc("equipment").get();
+            equipmentMeta = doc.exists ? doc.data() : null;
+            renderCourts(); // re-render once equipment config is in, if matches already loaded first
+        } catch (err) {
+            console.error("Failed to load equipment meta", err);
+        }
+    }
 
     async function loadCategoryLabels() {
         try {
@@ -700,6 +831,651 @@ JAVASCRIPT
 
     function resolveCategoryLabel(code) {
         return categoryLabelByCode[code] || code || "";
+    }
+
+    // Match documents only carry categoryCode (e.g.
+    // "individual_younger_cadets_women_42"), never a separate ageCode
+    // field — so grouping "all Juniors" for bulk edits has to recognize
+    // the age division embedded in that code. This is the SAME fixed
+    // age-code vocabulary used everywhere else in this project
+    // (bracket_builder.html, the PSS hit-level JSON, upload scripts) —
+    // if that vocabulary ever changes, this list needs updating too.
+    // Sorted longest-first so "younger_cadets" is checked before any
+    // shorter code that could otherwise match a substring of it.
+    const KNOWN_AGE_CODES = ["pupils_1", "pupils_2", "younger_cadets", "cadets", "juniors", "seniors", "veterans"]
+        .sort((a, b) => b.length - a.length);
+
+    function ageCodeForCategoryCode(categoryCode) {
+        if (!categoryCode) return null;
+        return KNOWN_AGE_CODES.find(code => categoryCode.includes(code)) || null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // EQUIPMENT CONFLICT DETECTION — a direct port of bracket_builder.
+    // html's own revalidateEquipmentAfterManualEdit(), re-run here
+    // against LIVE match/court state instead of local generation state.
+    // Recomputed fresh on every render (cheap at tournament scale, same
+    // as bracket_builder does after every drag) since court/position can
+    // keep changing here too — via drag-and-drop in THIS panel — and
+    // bracket_builder has no visibility into edits made after commit.
+    //
+    // Simulates every configured court running in parallel via a
+    // priority-queue-style loop (always advance whichever court's own
+    // clock is currently earliest), checking each match's ALREADY-
+    // RESOLVED vest generation and plexi requirement (pushed at commit
+    // time — see BracketCommitMatch.resolvedVestGen/requiresPlexiHelmet
+    // in the backend) against the real inventory + transfer buffer, not
+    // re-picking a generation the way the original scheduler did.
+    // ═══════════════════════════════════════════════════════════════════
+
+    function parseMinSec(str) {
+        const m = /^(\d+):(\d{2})$/.exec(str || "");
+        return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : 120;
+    }
+
+    function estimateMatchDurationSecondsFromMatch(m) {
+        const rounds = (equipmentMeta && equipmentMeta.assumedRoundsPerMatch) || 3;
+        const round = parseMinSec(m.roundTime);
+        const brk = parseMinSec(m.breakTime);
+        return round * rounds + brk * (rounds - 1) + 60;
+    }
+
+    function vestKey(pssSize, gen) { return `${pssSize}-${gen}`; }
+
+    function overlapCount(list, start, end, excludeCourtId) {
+        return list.filter(iv => start < iv.end && end > iv.start && iv.courtId !== excludeCourtId).length;
+    }
+
+    function checkVestAvailabilityLive(tracker, pssSize, gen, start, end, courtId) {
+        const inventory = (equipmentMeta && equipmentMeta.vestInventory) || {};
+        const key = vestKey(pssSize, gen);
+        const capacity = inventory[key] || 0;
+        if (capacity < 2) return { ok: false, reason: `no gen${String(gen).replace("gen", "")} size-${pssSize} VESTS configured` };
+        const used = overlapCount(tracker.intervals[key] || [], start, end, courtId);
+        if (capacity - used >= 2) return { ok: true };
+        return { ok: false, reason: `no gen${String(gen).replace("gen", "")} size-${pssSize} VESTS free` };
+    }
+
+    function checkPlexiAvailabilityLive(tracker, start, end, courtId) {
+        const capacity = (equipmentMeta && equipmentMeta.plexiHelmetCount) || 0;
+        const used = overlapCount(tracker.plexiIntervals, start, end, courtId);
+        return (capacity - used >= 2) ? { ok: true } : { ok: false, reason: "no plexi HELMETS free" };
+    }
+
+    function reserveVestLive(tracker, pssSize, gen, start, end, courtId) {
+        const key = vestKey(pssSize, gen);
+        (tracker.intervals[key] = tracker.intervals[key] || []).push({ start, end, courtId });
+    }
+    function reservePlexiLive(tracker, start, end, courtId) {
+        tracker.plexiIntervals.push({ start, end, courtId });
+    }
+
+    // Returns a Map<matchId, conflictReason>. byCourt is the SAME
+    // grouped/sorted structure renderCourts() already builds, keyed by
+    // courtId; equipmentMeta.courts supplies the full configured court
+    // list (including a court with zero CURRENT matches, which still
+    // needs to participate in the simulation's clock).
+    function computeEquipmentConflicts(byCourt) {
+        const conflicts = new Map();
+        if (!equipmentMeta || !Array.isArray(equipmentMeta.courts) || equipmentMeta.courts.length === 0) return conflicts;
+
+        const tracker = { intervals: {}, plexiIntervals: [] };
+        const courtClockSeconds = {};
+        const queues = {};
+        const pointer = {};
+        const courtConfigById = {};
+        equipmentMeta.courts.forEach(c => { courtConfigById[c.id] = c; });
+
+        equipmentMeta.courts.forEach(c => {
+            courtClockSeconds[c.id] = 0;
+            pointer[c.id] = 0;
+            queues[c.id] = (byCourt[c.id] || [])
+                .filter(m => m.status !== "walkover")
+                .slice()
+                .sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
+        });
+
+        let remaining = Object.values(queues).reduce((n, q) => n + q.length, 0);
+        while (remaining > 0) {
+            let bestCourtId = null;
+            equipmentMeta.courts.forEach(c => {
+                if (pointer[c.id] >= queues[c.id].length) return;
+                if (bestCourtId === null || courtClockSeconds[c.id] < courtClockSeconds[bestCourtId]) bestCourtId = c.id;
+            });
+            if (bestCourtId === null) break; // safety
+
+            const m = queues[bestCourtId][pointer[bestCourtId]];
+            pointer[bestCourtId]++;
+            remaining--;
+
+            const start = courtClockSeconds[bestCourtId];
+            const duration = estimateMatchDurationSecondsFromMatch(m);
+            const buffer = (equipmentMeta.transferBufferSeconds) || 0;
+            const end = start + duration + buffer;
+
+            let conflict = null;
+
+            if (m.requiresPlexiHelmet) {
+                const plexiCheck = checkPlexiAvailabilityLive(tracker, start, end, bestCourtId);
+                if (!plexiCheck.ok) conflict = plexiCheck.reason;
+                else reservePlexiLive(tracker, start, end, bestCourtId);
+            }
+
+            if (m.pssSize != null && m.resolvedVestGen) {
+                // Hard court-level gen lock check first — a court whose
+                // allowedVestGen doesn't match this match's already-
+                // resolved gen can never satisfy it, regardless of
+                // inventory (mirrors courtSupportsGenPolicy on the
+                // generation side).
+                const courtConfig = courtConfigById[bestCourtId];
+                const lockedGen = courtConfig && courtConfig.allowedVestGen;
+                if (lockedGen && lockedGen !== "any" && lockedGen !== m.resolvedVestGen) {
+                    const lockMsg = `court locked to ${lockedGen}, this match needs ${m.resolvedVestGen} VEST`;
+                    conflict = conflict ? `${conflict}; ${lockMsg}` : lockMsg;
+                } else {
+                    const vestCheck = checkVestAvailabilityLive(tracker, m.pssSize, m.resolvedVestGen, start, end, bestCourtId);
+                    if (!vestCheck.ok) {
+                        conflict = conflict ? `${conflict}; ${vestCheck.reason}` : vestCheck.reason;
+                    } else {
+                        reserveVestLive(tracker, m.pssSize, m.resolvedVestGen, start, end, bestCourtId);
+                    }
+                }
+            }
+
+            if (conflict) conflicts.set(m.id, conflict);
+            courtClockSeconds[bestCourtId] = end - buffer;
+        }
+
+        return conflicts;
+    }
+
+    // Small pill badges shown on each row: resolved vest gen, plexi
+    // requirement, "relaxed" (this match was scheduled at generation
+    // time via the guard-limit overflow path, which skips full
+    // equipment/rest-gap checks), and any LIVE conflict just computed
+    // above. Mirrors bracket_builder.html's renderCourtMatchCard badges
+    // so the same visual language carries over into this panel.
+    function equipmentBadgesHtml(m, conflictReason) {
+        const parts = [];
+        if (m.resolvedVestGen) parts.push(`<span class="lq-mini-badge">${escapeHtml(m.resolvedVestGen)}</span>`);
+        if (m.requiresPlexiHelmet) parts.push(`<span class="lq-mini-badge">plexi</span>`);
+        if (m.scheduledWithRelaxedConstraints) parts.push(`<span class="lq-mini-badge lq-mini-badge--relaxed">relaxed</span>`);
+        if (conflictReason) {
+            const upper = conflictReason.toUpperCase();
+            const label = upper.includes("VEST") && upper.includes("HELMET") ? "vest+helmet" : upper.includes("HELMET") ? "helmet" : "vest";
+            parts.push(`<span class="lq-mini-badge lq-mini-badge--conflict" title="${escapeAttr(conflictReason)}">⚠ ${label}</span>`);
+        }
+        return parts.join(" ");
+    }
+
+    // Convenience wrapper for one-off lookups (e.g. the detail modal,
+    // which doesn't already have a byCourt/conflicts pair on hand the
+    // way renderCourts() does). Re-runs the full simulation — fine for
+    // an occasional modal-open, not called on every render.
+    function equipmentConflictFor(matchId) {
+        const conflicts = computeEquipmentConflicts(groupByCourtSorted());
+        return conflicts.get(matchId);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // BULK EDIT — apply roundTime/breakTime/pssSize/hitLevel to every
+    // match in ONE category, or an entire AGE DIVISION at once (e.g.
+    // "all Juniors"), in a single batched write. For fixing a mistake
+    // that affects many fights during a running tournament — a wrong
+    // round time entered for a whole age group, for instance — without
+    // having to open and re-save dozens of fights individually.
+    // ═══════════════════════════════════════════════════════════════════
+
+    function matchesForBulkScope(scopeVal) {
+        if (!scopeVal) return [];
+        const sepIdx = scopeVal.indexOf(":");
+        const kind = scopeVal.slice(0, sepIdx);
+        const value = scopeVal.slice(sepIdx + 1);
+        const result = [];
+        matchesById.forEach((m) => {
+            if (kind === "cat" && m.categoryCode === value) result.push(m);
+            if (kind === "age" && ageCodeForCategoryCode(m.categoryCode) === value) result.push(m);
+        });
+        return result;
+    }
+
+    function openBulkEditModal() {
+        const categoriesPresent = new Map(); // categoryCode -> label
+        matchesById.forEach((m) => {
+            if (m.categoryCode) categoriesPresent.set(m.categoryCode, resolveCategoryLabel(m.categoryCode));
+        });
+
+        const ageDivisionsPresent = new Map(); // ageCode -> count of distinct categories
+        categoriesPresent.forEach((label, code) => {
+            const ageCode = ageCodeForCategoryCode(code);
+            if (!ageCode) return;
+            ageDivisionsPresent.set(ageCode, (ageDivisionsPresent.get(ageCode) || 0) + 1);
+        });
+
+        if (categoriesPresent.size === 0) {
+            openModal(`
+                <div class="lq-modal-header">
+                    <h3>Bulk Edit Category Settings</h3>
+                    <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="lq-modal-body">
+                    <p class="lq-field-hint">No matches loaded yet — push brackets first.</p>
+                    <div class="lq-modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Close</button></div>
+                </div>
+            `);
+            return;
+        }
+
+        const categoryOptionsHtml = [...categoriesPresent.entries()]
+            .sort((a, b) => a[1].localeCompare(b[1]))
+            .map(([code, label]) => `<option value="cat:${escapeAttr(code)}">${escapeHtml(label)}</option>`)
+            .join("");
+
+        const ageOptionsHtml = [...ageDivisionsPresent.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([ageCode, count]) => `<option value="age:${escapeAttr(ageCode)}">All ${escapeHtml(ageCode.replace(/_/g, " "))} (${count} categor${count === 1 ? "y" : "ies"})</option>`)
+            .join("");
+
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>Bulk Edit Category Settings</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <p class="lq-field-hint" style="margin-bottom:1rem;">
+                    Applies to every match currently in the chosen scope. Leave a field blank to leave it
+                    unchanged. Useful for fixing a mistake (wrong round time, wrong PSS size, etc.) across many
+                    fights at once, mid-tournament.
+                </p>
+                <div class="lq-form-field">
+                    <label style="display:block; font-size:.72rem; font-weight:700; color:var(--lq-muted); text-transform:uppercase; margin-bottom:.3rem;">Apply to</label>
+                    <select id="bulk-scope">
+                        <optgroup label="Single category">${categoryOptionsHtml}</optgroup>
+                        ${ageOptionsHtml ? `<optgroup label="Entire age division">${ageOptionsHtml}</optgroup>` : ""}
+                    </select>
+                </div>
+                <div class="lq-detail-grid" style="margin-top:1rem;">
+                    <label>Round Time <input type="text" id="bulk-roundTime" placeholder="unchanged, e.g. 02:00"></label>
+                    <label>Break Time <input type="text" id="bulk-breakTime" placeholder="unchanged, e.g. 01:00"></label>
+                    <label>PSS Size <input type="number" id="bulk-pssSize" placeholder="unchanged"></label>
+                    <label>Hit Level <input type="number" id="bulk-hitLevel" placeholder="unchanged"></label>
+                </div>
+                <p id="bulk-preview" class="lq-field-hint" style="margin-top:.75rem;"></p>
+                <div id="bulk-error" class="lq-alert-error hidden"></div>
+                <div class="lq-modal-actions">
+                    <button class="btn btn-primary" id="bulk-apply-btn" onclick="applyBulkEdit()">Apply</button>
+                    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+                </div>
+            </div>
+        `);
+
+        const updatePreview = () => {
+            const count = matchesForBulkScope(document.getElementById("bulk-scope").value).length;
+            document.getElementById("bulk-preview").textContent = `This will update ${count} match(es).`;
+        };
+        document.getElementById("bulk-scope").onchange = updatePreview;
+        updatePreview();
+    }
+
+    async function applyBulkEdit() {
+        const errEl = document.getElementById("bulk-error");
+        errEl.classList.add("hidden");
+
+        const scopeVal = document.getElementById("bulk-scope").value;
+        const roundTime = document.getElementById("bulk-roundTime").value.trim();
+        const breakTime = document.getElementById("bulk-breakTime").value.trim();
+        const pssSizeRaw = document.getElementById("bulk-pssSize").value.trim();
+        const hitLevelRaw = document.getElementById("bulk-hitLevel").value.trim();
+
+        const updates = {};
+        if (roundTime) updates.roundTime = roundTime;
+        if (breakTime) updates.breakTime = breakTime;
+        if (pssSizeRaw !== "") { const n = Number(pssSizeRaw); if (!Number.isNaN(n)) updates.pssSize = n; }
+        if (hitLevelRaw !== "") { const n = Number(hitLevelRaw); if (!Number.isNaN(n)) updates.hitLevel = n; }
+
+        if (Object.keys(updates).length === 0) {
+            errEl.textContent = "Enter at least one field to change.";
+            errEl.classList.remove("hidden");
+            return;
+        }
+
+        const matches = matchesForBulkScope(scopeVal);
+        if (matches.length === 0) {
+            errEl.textContent = "No matches in that scope.";
+            errEl.classList.remove("hidden");
+            return;
+        }
+
+        if (!confirm(`Apply these changes to ${matches.length} match(es)? This can't be undone from here.`)) return;
+
+        const btn = document.getElementById("bulk-apply-btn");
+        btn.disabled = true;
+        btn.textContent = "Applying…";
+
+        try {
+            // Firestore batched writes cap at 500 — chunk defensively,
+            // same margin bracket_builder.html's backend clean endpoint
+            // uses for its own bulk deletes.
+            const CHUNK = 400;
+            for (let i = 0; i < matches.length; i += CHUNK) {
+                const batch = fsDb.batch();
+                matches.slice(i, i + CHUNK).forEach((m) => {
+                    const ref = fsDb
+                        .collection("sports").doc(SPORT)
+                        .collection("disciplines").doc(DISCIPLINE)
+                        .collection("matches").doc(m.id);
+                    batch.set(ref, updates, { merge: true });
+                });
+                await batch.commit();
+            }
+            closeModal();
+            // No manual re-render — the realtime listener delivers each
+            // changed document as its own docChange, and renderCourts()
+            // runs again from that automatically, same as any other edit.
+        } catch (err) {
+            console.error("Bulk edit failed", err);
+            errEl.textContent = "Bulk edit failed: " + err.message;
+            errEl.classList.remove("hidden");
+            btn.disabled = false;
+            btn.textContent = "Apply";
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // INSERT MATCH — the "+" that appears when hovering a gap between two
+    // rows (or above the first / below the last, or on an empty court).
+    // Creates a brand-new match doc slotted exactly there, without
+    // renumbering anything else — same principle the old dedicated
+    // backend endpoint used, but written directly via the Firestore
+    // client SDK (like saveMatchEdits/applyBulkEdit already do) so the
+    // DISPLAY NUMBER can follow the specific decimal-increment scheme
+    // requested here instead of the backend's own fractional-midpoint
+    // rule (which would produce e.g. 101.5 between #101/#102, not the
+    // 101.1/101.2/... sequence wanted): the new fight's display number
+    // is always <base>.<n>, where <base> is the integer part of the
+    // match immediately BEFORE the insertion point and <n> is one more
+    // than that match's own existing decimal digit (0 if it had none)
+    // — so inserting after #101 gives 101.1, inserting after THAT gives
+    // 101.2, inserting after #203.1 gives 203.2, and so on.
+    //
+    // KNOWN EDGE CASE: this only uniquifies against the immediate
+    // neighbour, not every existing match — two people inserting into
+    // the exact same gap at nearly the same moment could compute the
+    // same display number and the second write would silently overwrite
+    // the first (Firestore doc id is deterministic: TOURNAMENT_ID +
+    // displayNumber). Rare in practice for a single-admin console, but
+    // worth knowing about.
+    // ═══════════════════════════════════════════════════════════════════
+
+    let insertPendingCorners = { blue: null, red: null };
+    let insertSearchTimers = { blue: null, red: null };
+    let insertSearchResults = { blue: [], red: [] };
+
+    function computeInsertDisplayNumber(prevMatch, nextMatch) {
+        if (prevMatch && prevMatch.displayNumber != null) {
+            const prev = prevMatch.displayNumber;
+            const base = Math.floor(prev);
+            const decimalDigit = Math.round((prev - base) * 10); // 0 for a plain "101", 1 for "101.1", etc.
+            return Number((base + (decimalDigit + 1) / 10).toFixed(1));
+        }
+        if (nextMatch && nextMatch.displayNumber != null) {
+            // Inserting before the very first match on this court — no
+            // "previous fight" to anchor a decimal suffix to, so fall
+            // back to a small fraction below the next match's number.
+            return Number((nextMatch.displayNumber - 0.1).toFixed(1));
+        }
+        return null; // genuinely empty court, nothing to anchor to at all
+    }
+
+    function computeInsertQueuePosition(prevMatch, nextMatch) {
+        const prevQ = prevMatch ? prevMatch.queuePosition : null;
+        const nextQ = nextMatch ? nextMatch.queuePosition : null;
+        if (prevQ != null && nextQ != null) return (prevQ + nextQ) / 2;
+        if (prevQ != null) return prevQ + 1;
+        if (nextQ != null) return nextQ - 1;
+        return 0;
+    }
+
+    function openInsertModal(courtId, prevMatch, nextMatch) {
+        insertPendingCorners = { blue: null, red: null };
+        insertSearchResults = { blue: [], red: [] };
+
+        const categoriesPresent = new Map();
+        matchesById.forEach((m) => {
+            if (m.categoryCode) categoriesPresent.set(m.categoryCode, resolveCategoryLabel(m.categoryCode));
+        });
+        const categoryOptionsHtml = [...categoriesPresent.entries()]
+            .sort((a, b) => a[1].localeCompare(b[1]))
+            .map(([code, label]) => `<option value="${escapeAttr(code)}">${escapeHtml(label)}</option>`)
+            .join("");
+
+        const prevLabel = prevMatch ? `#${prevMatch.displayNumber}` : "the start of this court";
+        const nextLabel = nextMatch ? `#${nextMatch.displayNumber}` : "the end of this court";
+
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>Insert Match</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <p class="lq-field-hint" style="margin-bottom:1rem;">
+                    Inserting on <strong>${escapeHtml(courtId)}</strong>, between ${escapeHtml(prevLabel)} and ${escapeHtml(nextLabel)}.
+                    It gets its own fight number so nothing else gets renumbered.
+                </p>
+
+                <div class="lq-detail-corners">
+                    <div class="lq-detail-corner blue">
+                        <label>Blue Corner</label>
+                        <div class="lq-corner-current" id="insert-corner-current-blue">— none picked —</div>
+                        <input type="search" id="insert-corner-search-blue" class="lq-text-input" placeholder="Search athlete…" autocomplete="off">
+                        <div id="insert-corner-results-blue" class="lq-athlete-results"></div>
+                    </div>
+                    <div class="lq-detail-corner red">
+                        <label>Red Corner</label>
+                        <div class="lq-corner-current" id="insert-corner-current-red">— none picked —</div>
+                        <input type="search" id="insert-corner-search-red" class="lq-text-input" placeholder="Search athlete…" autocomplete="off">
+                        <div id="insert-corner-results-red" class="lq-athlete-results"></div>
+                    </div>
+                </div>
+
+                <div class="lq-form-field">
+                    <label style="display:block; font-size:.72rem; font-weight:700; color:var(--lq-muted); text-transform:uppercase; margin-bottom:.3rem;">Category</label>
+                    <select id="insert-category">
+                        ${categoryOptionsHtml}
+                        <option value="__custom__">Other / exhibition category…</option>
+                    </select>
+                    <div id="insert-category-custom" class="hidden" style="display:flex; gap:.5rem; margin-top:.5rem;">
+                        <input type="text" id="insert-category-code" placeholder="categoryCode e.g. exhibition_open" class="lq-text-input">
+                        <input type="text" id="insert-category-label" placeholder="Label e.g. Exhibition · Open" class="lq-text-input">
+                    </div>
+                </div>
+
+                <div class="lq-detail-grid" style="margin-top:1rem;">
+                    <label>Round Phase
+                        <select id="insert-roundPhase">
+                            <option value="EXH" selected>EXH (exhibition/friendly)</option>
+                            ${ROUND_PHASE_OPTIONS.map(p => `<option value="${p}">${p}</option>`).join("")}
+                        </select>
+                    </label>
+                    <label>&nbsp;</label>
+                    <label>Round Time <input type="text" id="insert-roundTime" placeholder="e.g. 02:00"></label>
+                    <label>Break Time <input type="text" id="insert-breakTime" placeholder="e.g. 01:00"></label>
+                    <label>PSS Size <input type="number" id="insert-pssSize" placeholder="optional"></label>
+                    <label>Hit Level <input type="number" id="insert-hitLevel" placeholder="optional"></label>
+                    <label class="lq-checkbox-label lq-span-2">
+                        <input type="checkbox" id="insert-isRanked">
+                        Ranked / official bout (counts toward standings) — off by default for inserted matches
+                    </label>
+                </div>
+
+                <div id="insert-error" class="lq-alert-error hidden"></div>
+
+                <div class="lq-modal-actions">
+                    <button class="btn btn-primary" id="insert-submit-btn">Create Match</button>
+                    <button class="btn btn-ghost" id="insert-submit-print-btn">🤝 Create &amp; Print Friendly Sheet</button>
+                    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+                </div>
+            </div>
+        `);
+
+        wireInsertCornerSearch("blue");
+        wireInsertCornerSearch("red");
+        document.getElementById("insert-category").onchange = () => {
+            document.getElementById("insert-category-custom").classList.toggle(
+                "hidden", document.getElementById("insert-category").value !== "__custom__"
+            );
+        };
+        document.getElementById("insert-submit-btn").onclick = () => submitInsertMatch(courtId, prevMatch, nextMatch, false);
+        document.getElementById("insert-submit-print-btn").onclick = () => submitInsertMatch(courtId, prevMatch, nextMatch, true);
+    }
+
+    function wireInsertCornerSearch(side) {
+        const input = document.getElementById(`insert-corner-search-${side}`);
+        input.oninput = () => {
+            clearTimeout(insertSearchTimers[side]);
+            const q = input.value.trim();
+            const resultsEl = document.getElementById(`insert-corner-results-${side}`);
+            if (q.length < 2) { resultsEl.innerHTML = ""; return; }
+            insertSearchTimers[side] = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&sport=${encodeURIComponent(SPORT)}&limit=8`);
+                    const data = await res.json();
+                    renderInsertCornerResults(side, data.athletes || []);
+                } catch (err) {
+                    resultsEl.innerHTML = `<div class="lq-athlete-result-item">Search failed — try again.</div>`;
+                }
+            }, 250);
+        };
+    }
+
+    function renderInsertCornerResults(side, athletes) {
+        const el = document.getElementById(`insert-corner-results-${side}`);
+        insertSearchResults[side] = athletes;
+        if (athletes.length === 0) {
+            el.innerHTML = `<div class="lq-athlete-result-item">No matching athletes.</div>`;
+            return;
+        }
+        el.innerHTML = athletes.map((a, i) => `
+            <div class="lq-athlete-result-item" data-idx="${i}">
+                <strong>${escapeHtml(a.displayName)}</strong><br>
+                <span style="color:var(--lq-muted); font-size:.75rem;">${escapeHtml(a.club || "No club")}${a.birthYear != null ? " · " + a.birthYear : ""}</span>
+            </div>
+        `).join("");
+        [...el.querySelectorAll(".lq-athlete-result-item[data-idx]")].forEach(item => {
+            item.onclick = () => pickInsertCorner(side, parseInt(item.dataset.idx, 10));
+        });
+    }
+
+    function pickInsertCorner(side, idx) {
+        const athlete = insertSearchResults[side][idx];
+        if (!athlete) return;
+        insertPendingCorners[side] = athlete;
+        document.getElementById(`insert-corner-current-${side}`).textContent = athlete.displayName;
+        document.getElementById(`insert-corner-search-${side}`).value = "";
+        document.getElementById(`insert-corner-results-${side}`).innerHTML = "";
+    }
+
+    async function submitInsertMatch(courtId, prevMatch, nextMatch, alsoPrintFriendly) {
+        const errEl = document.getElementById("insert-error");
+        errEl.classList.add("hidden");
+
+        if (!insertPendingCorners.blue || !insertPendingCorners.red) {
+            errEl.textContent = "Pick an athlete for both corners.";
+            errEl.classList.remove("hidden");
+            return;
+        }
+
+        const categorySelect = document.getElementById("insert-category");
+        let categoryCode, categoryLabel;
+        if (categorySelect.value === "__custom__") {
+            categoryCode = document.getElementById("insert-category-code").value.trim();
+            categoryLabel = document.getElementById("insert-category-label").value.trim();
+            if (!categoryCode || !categoryLabel) {
+                errEl.textContent = "Enter both a category code and label.";
+                errEl.classList.remove("hidden");
+                return;
+            }
+        } else {
+            categoryCode = categorySelect.value;
+            categoryLabel = categorySelect.options[categorySelect.selectedIndex].textContent;
+        }
+
+        const displayNumber = computeInsertDisplayNumber(prevMatch, nextMatch);
+        if (displayNumber == null) {
+            errEl.textContent = "Couldn't determine a fight number — this court has no other matches to anchor to yet.";
+            errEl.classList.remove("hidden");
+            return;
+        }
+        const queuePosition = computeInsertQueuePosition(prevMatch, nextMatch);
+
+        const cornerFromAthlete = (a) => ({
+            entryId: a.id,
+            athleteIds: [a.id],
+            name: a.displayName,
+            country: a.country || null,
+            clubId: a.clubId || null,
+        });
+
+        const roundTime = document.getElementById("insert-roundTime").value.trim();
+        const breakTime = document.getElementById("insert-breakTime").value.trim();
+        const pssSizeRaw = document.getElementById("insert-pssSize").value.trim();
+        const hitLevelRaw = document.getElementById("insert-hitLevel").value.trim();
+
+        const newMatch = {
+            tournamentId: TOURNAMENT_ID,
+            tournamentName: TOURNAMENT_TITLE,
+            categoryCode,
+            categoryLabel,
+            displayNumber,
+            roundPhase: document.getElementById("insert-roundPhase").value,
+            blue: cornerFromAthlete(insertPendingCorners.blue),
+            red: cornerFromAthlete(insertPendingCorners.red),
+            status: "pending",
+            winnerEntryId: null,
+            courtId,
+            queuePosition,
+            roundTime: roundTime || null,
+            breakTime: breakTime || null,
+            pssSize: pssSizeRaw !== "" ? Number(pssSizeRaw) : null,
+            hitLevel: hitLevelRaw !== "" ? Number(hitLevelRaw) : null,
+            isRanked: document.getElementById("insert-isRanked").checked, // defaults unchecked/false, per request
+            source: "tournament_system_manual_insert",
+            assignment: "manual",
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        };
+
+        const submitBtn = document.getElementById("insert-submit-btn");
+        const printBtn = document.getElementById("insert-submit-print-btn");
+        const activeBtn = alsoPrintFriendly ? printBtn : submitBtn;
+        const activeOriginalText = activeBtn.textContent;
+        submitBtn.disabled = true;
+        printBtn.disabled = true;
+        activeBtn.textContent = "Creating…";
+
+        try {
+            const docId = `${TOURNAMENT_ID}_${displayNumber}`;
+            await fsDb
+                .collection("sports").doc(SPORT)
+                .collection("disciplines").doc(DISCIPLINE)
+                .collection("matches").doc(docId)
+                .set(newMatch);
+            closeModal();
+            // No manual re-render — the realtime listener picks up the
+            // new document as a docChange and renderCourts() runs again.
+            if (alsoPrintFriendly) {
+                // Built straight from the in-memory newMatch object, not
+                // a matchesById lookup — the realtime listener may not
+                // have delivered this new document back yet.
+                openSheetPreviewForMatch(newMatch, "friendly");
+            }
+        } catch (err) {
+            console.error("Insert failed", err);
+            errEl.textContent = "Failed to create match: " + err.message;
+            errEl.classList.remove("hidden");
+            submitBtn.disabled = false;
+            printBtn.disabled = false;
+            activeBtn.textContent = activeOriginalText;
+        }
     }
 
     // A participant with no entryId yet is either a genuine bye (rare —
@@ -830,12 +1606,15 @@ JAVASCRIPT
             return;
         }
 
+        const conflicts = computeEquipmentConflicts(byCourt);
+
         wrap.innerHTML = "";
         courtIds.forEach((courtId) => {
             const matches = byCourt[courtId];
             const pending = matches.filter(m => !isDone(m) && m.status !== "ready").length;
             const ready = matches.filter(m => !isDone(m) && m.status === "ready").length;
             const done = matches.filter(isDone).length;
+            const conflictCount = matches.filter(m => conflicts.has(m.id)).length;
             const nextUpId = findNextUpId(matches);
 
             const column = document.createElement("div");
@@ -849,7 +1628,7 @@ JAVASCRIPT
             header.className = "lq-court-column-header";
             header.innerHTML = `
                 <span class="lq-court-column-name">${escapeHtml(courtId)}</span>
-                <span class="lq-court-column-meta">${matches.length} total · ${pending} pending · ${ready} ready · ${done} done</span>
+                <span class="lq-court-column-meta">${matches.length} total · ${pending} pending · ${ready} ready · ${done} done${conflictCount > 0 ? ` · <span style="color:#b91c1c; font-weight:700;">⚠ ${conflictCount} conflict${conflictCount === 1 ? "" : "s"}</span>` : ""}</span>
             `;
             column.appendChild(header);
 
@@ -857,8 +1636,13 @@ JAVASCRIPT
             body.className = "lq-court-column-body";
             if (matches.length === 0) {
                 body.innerHTML = `<div class="lq-court-column-empty">No matches on this court.</div>`;
+                body.appendChild(buildGap(courtId, null, null));
             } else {
-                matches.forEach((m) => body.appendChild(buildRow(m, m.id === nextUpId)));
+                body.appendChild(buildGap(courtId, null, matches[0]));
+                matches.forEach((m, i) => {
+                    body.appendChild(buildRow(m, m.id === nextUpId, conflicts.get(m.id)));
+                    body.appendChild(buildGap(courtId, m, matches[i + 1] || null));
+                });
             }
             column.appendChild(body);
 
@@ -866,7 +1650,23 @@ JAVASCRIPT
         });
     }
 
-    function buildRow(m, isNext) {
+    // Hoverable gap between two rows (or before the first / after the
+    // last, or alone on an empty court) — reveals a "+" that opens the
+    // insert-match modal anchored to exactly this position.
+    function buildGap(courtId, prevMatch, nextMatch) {
+        const gap = document.createElement("div");
+        gap.className = "lq-gap";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "lq-gap-btn";
+        btn.title = "Insert a match here";
+        btn.textContent = "+";
+        btn.onclick = (e) => { e.stopPropagation(); openInsertModal(courtId, prevMatch, nextMatch); };
+        gap.appendChild(btn);
+        return gap;
+    }
+
+    function buildRow(m, isNext, conflictReason) {
         const row = document.createElement("div");
         row.className = "lq-row" + (isNext ? " next-up" : "");
         row.draggable = true;
@@ -878,16 +1678,17 @@ JAVASCRIPT
             e.dataTransfer.effectAllowed = "move";
         };
         row.ondragend = () => { row.classList.remove("dragging"); removeDropIndicator(); };
-        // Row click opens the fight detail/edit modal. TA sheet
-        // generation stays reachable two ways: the print icon below
-        // (instant print) and a "Preview TA Sheet" button inside the
-        // detail modal itself (openTaSheet, unchanged).
+        // Row click opens the fight detail/edit modal. Two quick-print
+        // icons on the row cover TA + Friendly sheets instantly; the KO
+        // and Protest sheets, plus previews of all four, live inside the
+        // detail modal itself (see openSheetPreview).
         row.onclick = () => { if (!row.classList.contains("dragging")) openDetailModal(m.id); };
 
         const statusClass = isDone(m)
             ? (m.status === "walkover" ? "lq-status-walkover" : "lq-status-done")
             : (m.status === "ready" ? "lq-status-ready" : "lq-status-pending");
-        const statusLabel = isDone(m) ? (m.status === "walkover" ? "Walkover" : "Done") : (m.status === "ready" ? "Ready" : "Pending");
+        const statusLabel = isDone(m) ? (m.status === "walkover" ? "Walkover" : "Completed") : (m.status === "ready" ? "Ready" : "Pending");
+        const badges = equipmentBadgesHtml(m, conflictReason);
 
         row.innerHTML = `
         <span class="lq-drag-handle" title="Drag to reorder, or drop on another court's column">⠿</span>
@@ -899,18 +1700,21 @@ JAVASCRIPT
                 <span class="lq-corner-name red">${escapeHtml(participantLabel(m.red))}</span>
             </div>
             <div class="lq-row-meta">${escapeHtml(resolveCategoryLabel(m.categoryCode))}${m.roundPhase ? " · " + escapeHtml(m.roundPhase) : ""}${m.isRanked === false ? ' · <span class="lq-unranked-flag">Unranked</span>' : ""}</div>
+            ${badges ? `<div class="lq-row-badges">${badges}</div>` : ""}
         </div>
         ${isNext ? '<span class="lq-next-badge">NEXT</span>' : ""}
         <span class="lq-status-pill ${statusClass}">${statusLabel}</span>
-        <button type="button" class="lq-print-btn" title="Instant print TA sheet" data-match-id="${m.id}">🖨</button>
+        <button type="button" class="lq-print-btn" title="Instant print TA sheet" data-match-id="${m.id}" data-kind="ta">🖨</button>
     `;
 
         // Wired here (not inline onclick) so we get the actual button
         // element to disable/flash without any HTML-escaping headaches
         // around quotes in match ids.
-        row.querySelector(".lq-print-btn").addEventListener("click", (e) => {
-            e.stopPropagation();
-            quickPrintTaSheet(m.id, e.currentTarget);
+        row.querySelectorAll(".lq-print-btn").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                quickPrintSheet(m.id, btn.dataset.kind, btn);
+            });
         });
 
         return row;
@@ -1062,45 +1866,117 @@ JAVASCRIPT
         }
     }
 
-    // ── TA Sheet (client-side only — canvas fills the template image
-    // directly in the browser, nothing is sent to the server) — UNCHANGED
-    // from the previous version, aside from matchesById.get(matchId)
-    // replacing the old currentMatches.find(...) lookup, since matches
-    // now live in a Map instead of a per-court array. ────────────────────
-    const TA_SHEET_TEMPLATE_URL = "/static/assets/sheets/ta-sheet-template.jpg";
-    // Every coordinate below was measured directly against the 768x1024
-    // template's own table-border pixels (see the design conversation this
-    // shipped with) — if the template image is ever swapped for a different
-    // export, these must be re-measured against the new file.
-    const TA_SHEET_EVENT_NAME_BOX = { x0: 300, y0: 91, x1: 470, y1: 117 };
-    const TA_SHEET_FIELDS = {
-        // key: [x, y, startSize, align, maxWidth]  — align/y follow canvas's
-        // textAlign + textBaseline='top', so (x,y) is the label-line top,
-        // same as the printed label immediately to its left.
-        date: [275, 150, 14, "right", 120],
-        court_no: [692, 150, 14, "right", 120],
-        match_no: [275, 186, 14, "right", 120],
-        weight_category: [472, 186, 14, "right", 120],  // right-anchored against the "kg" that follows it
-        hit_level: [588, 186, 14, "right", 120],
-        pss_size: [692, 186, 14, "right", 120],
-        chung_name: [150, 262, 14, "left", 225],
-        chung_noc: [150, 289, 14, "left", 225],
-        hong_name: [472, 262, 14, "left", 225],
-        hong_noc: [472, 289, 14, "left", 225],
+    // ── Printable sheets (client-side only — canvas fills a template
+    // image directly in the browser, nothing is sent to the server) —
+    // generalized from a single TA-sheet builder into four sheet KINDS
+    // that all follow the exact same approach: a template image stored
+    // on the server at /static/assets/sheets/, filled in via the same
+    // canvas field-drawing logic. Only the TA config's coordinates were
+    // actually measured against a real template (see its own note
+    // below) — friendly/ko/protest currently REUSE those same
+    // coordinates purely as a starting point, since no real templates
+    // for them exist yet to measure against. These WILL need
+    // re-measuring against the real images once they're uploaded to the
+    // paths below, the same way ta's own coordinates were originally
+    // measured — until then, text on those three will very likely land
+    // in the wrong spots. ──────────────────────────────────────────────
+    const SHEET_CONFIGS = {
+        ta: {
+            title: "TA Sheet",
+            templateUrl: "/static/assets/sheets/ta-sheet-template.jpg",
+            // Every coordinate below was measured directly against the
+            // 768x1024 template's own table-border pixels (see the design
+            // conversation this shipped with) — if the template image is
+            // ever swapped for a different export, these must be
+            // re-measured against the new file.
+            eventNameBox: { x0: 300, y0: 91, x1: 470, y1: 117 },
+            fields: {
+                // key: [x, y, startSize, align, maxWidth] — align/y follow
+                // canvas's textAlign + textBaseline='top', so (x,y) is the
+                // label-line top, same as the printed label immediately to
+                // its left.
+                date: [275, 150, 14, "right", 120],
+                court_no: [692, 150, 14, "right", 120],
+                match_no: [275, 186, 14, "right", 120],
+                weight_category: [472, 186, 14, "right", 120],  // right-anchored against the "kg" that follows it
+                hit_level: [588, 186, 14, "right", 120],
+                pss_size: [692, 186, 14, "right", 120],
+                chung_name: [150, 262, 14, "left", 225],
+                chung_noc: [150, 289, 14, "left", 225],
+                hong_name: [472, 262, 14, "left", 225],
+                hong_noc: [472, 289, 14, "left", 225],
+            },
+        },
+        // PLACEHOLDER CONFIG — copy of TA's own layout, reused only
+        // because no real friendly-match-sheet template/measurements
+        // exist yet.
+        friendly: {
+            title: "Friendly Match Sheet",
+            templateUrl: "/static/assets/sheets/friendly-sheet-template.jpg",
+            eventNameBox: { x0: 300, y0: 91, x1: 470, y1: 117 },
+            fields: {
+                date: [275, 150, 14, "right", 120],
+                court_no: [692, 150, 14, "right", 120],
+                match_no: [275, 186, 14, "right", 120],
+                weight_category: [472, 186, 14, "right", 120],
+                hit_level: [588, 186, 14, "right", 120],
+                pss_size: [692, 186, 14, "right", 120],
+                chung_name: [150, 262, 14, "left", 225],
+                chung_noc: [150, 289, 14, "left", 225],
+                hong_name: [472, 262, 14, "left", 225],
+                hong_noc: [472, 289, 14, "left", 225],
+            },
+        },
+        // PLACEHOLDER CONFIG — see friendly's own note above; same caveat.
+        ko: {
+            title: "KO Sheet",
+            templateUrl: "/static/assets/sheets/ko-sheet-template.jpg",
+            eventNameBox: { x0: 300, y0: 91, x1: 470, y1: 117 },
+            fields: {
+                date: [275, 150, 14, "right", 120],
+                court_no: [692, 150, 14, "right", 120],
+                match_no: [275, 186, 14, "right", 120],
+                weight_category: [472, 186, 14, "right", 120],
+                hit_level: [588, 186, 14, "right", 120],
+                pss_size: [692, 186, 14, "right", 120],
+                chung_name: [150, 262, 14, "left", 225],
+                chung_noc: [150, 289, 14, "left", 225],
+                hong_name: [472, 262, 14, "left", 225],
+                hong_noc: [472, 289, 14, "left", 225],
+            },
+        },
+        // PLACEHOLDER CONFIG — see friendly's own note above; same caveat.
+        protest: {
+            title: "Protest Sheet",
+            templateUrl: "/static/assets/sheets/protest-sheet-template.jpg",
+            eventNameBox: { x0: 300, y0: 91, x1: 470, y1: 117 },
+            fields: {
+                date: [275, 150, 14, "right", 120],
+                court_no: [692, 150, 14, "right", 120],
+                match_no: [275, 186, 14, "right", 120],
+                weight_category: [472, 186, 14, "right", 120],
+                hit_level: [588, 186, 14, "right", 120],
+                pss_size: [692, 186, 14, "right", 120],
+                chung_name: [150, 262, 14, "left", 225],
+                chung_noc: [150, 289, 14, "left", 225],
+                hong_name: [472, 262, 14, "left", 225],
+                hong_noc: [472, 289, 14, "left", 225],
+            },
+        },
     };
 
-    let taSheetTemplateImagePromise = null;
-    function loadTaSheetTemplateImage() {
-        if (!taSheetTemplateImagePromise) {
-            taSheetTemplateImagePromise = new Promise((resolve, reject) => {
+    let sheetTemplateImagePromises = {}; // keyed by sheet kind — each template loaded/cached independently
+    function loadSheetTemplateImage(kind) {
+        if (!sheetTemplateImagePromises[kind]) {
+            sheetTemplateImagePromises[kind] = new Promise((resolve, reject) => {
                 const img = new Image();
                 img.crossOrigin = "anonymous"; // needs the template served same-origin, or with CORS headers
                 img.onload = () => resolve(img);
-                img.onerror = () => reject(new Error("Couldn't load the TA sheet template image."));
-                img.src = TA_SHEET_TEMPLATE_URL;
+                img.onerror = () => reject(new Error(`Couldn't load the ${SHEET_CONFIGS[kind].title} template image.`));
+                img.src = SHEET_CONFIGS[kind].templateUrl;
             });
         }
-        return taSheetTemplateImagePromise;
+        return sheetTemplateImagePromises[kind];
     }
 
     function taSheetFitFont(ctx, text, startSize, maxWidth, minSize = 6) {
@@ -1136,8 +2012,12 @@ JAVASCRIPT
         return categoryLabel || categoryCode || "";
     }
 
-    async function buildTaSheetDataUrl(m) {
-        const img = await loadTaSheetTemplateImage();
+    // Builds ANY of the four sheet kinds — same canvas-fill approach,
+    // just pointed at a different template + field layout via
+    // SHEET_CONFIGS[kind].
+    async function buildSheetDataUrl(m, kind) {
+        const config = SHEET_CONFIGS[kind];
+        const img = await loadSheetTemplateImage(kind);
         const canvas = document.createElement("canvas");
         canvas.width = img.naturalWidth;
         canvas.height = img.naturalHeight;
@@ -1147,7 +2027,7 @@ JAVASCRIPT
         ctx.textBaseline = "top";
 
         // Whiteout + rewrite the event name.
-        const box = TA_SHEET_EVENT_NAME_BOX;
+        const box = config.eventNameBox;
         ctx.fillStyle = "#fff";
         ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
         ctx.fillStyle = "#000";
@@ -1173,7 +2053,7 @@ JAVASCRIPT
             hong_noc: m.red?.country || "",
         };
 
-        for (const [key, [x, y, startSize, align, maxWidth]] of Object.entries(TA_SHEET_FIELDS)) {
+        for (const [key, [x, y, startSize, align, maxWidth]] of Object.entries(config.fields)) {
             const text = data[key];
             if (!text) continue;
             ctx.textAlign = align;
@@ -1183,6 +2063,9 @@ JAVASCRIPT
 
         return canvas.toDataURL("image/jpeg", 0.95);
     }
+
+    // Backward-compatible thin wrapper — TA sheet specifically.
+    function buildTaSheetDataUrl(m) { return buildSheetDataUrl(m, "ta"); }
 
     // ── Fast one-click print (row button) — generates the sheet and sends
     // it straight to the browser's print dialog via a hidden iframe, no
@@ -1194,7 +2077,7 @@ JAVASCRIPT
     // console runs on a dedicated print station, look at your browser's
     // kiosk-printing / "print automatically" launch flag to drop that
     // last click too. ────────────────────────────────────────────────────
-    async function quickPrintTaSheet(matchId, btnEl) {
+    async function quickPrintSheet(matchId, kind, btnEl) {
         const m = matchesById.get(matchId);
         if (!m) return;
 
@@ -1203,7 +2086,7 @@ JAVASCRIPT
         btnEl.textContent = "…";
 
         try {
-            const dataUrl = await buildTaSheetDataUrl(m);
+            const dataUrl = await buildSheetDataUrl(m, kind);
             await printImageDataUrl(dataUrl);
             btnEl.classList.add("done-flash");
             btnEl.textContent = "✓";
@@ -1215,11 +2098,15 @@ JAVASCRIPT
         } catch (e) {
             console.error(e);
             btnEl.textContent = "!";
-            alert("Couldn't print the TA sheet: " + e.message);
+            alert(`Couldn't print the ${SHEET_CONFIGS[kind].title}: ` + e.message);
             btnEl.textContent = originalText;
             btnEl.disabled = false;
         }
     }
+
+    // Backward-compatible thin wrapper — TA sheet specifically.
+    function quickPrintTaSheet(matchId, btnEl) { return quickPrintSheet(matchId, "ta", btnEl); }
+
 
     function printImageDataUrl(dataUrl) {
         return new Promise((resolve, reject) => {
@@ -1286,9 +2173,28 @@ JAVASCRIPT
     // resolving a pending corner is a bracket-progression action, not a
     // data fix, and belongs in a dedicated "declare winner" flow rather
     // than a generic edit form.
+    //
+    // Corner identity itself is no longer hand-edited (no more free-text
+    // name/country/club fields) — instead a corner with a real entryId
+    // can be REPLACED wholesale by searching for a different athlete,
+    // same search endpoint/pattern category_manager.html's "+ Add
+    // Athlete" popover already uses. This keeps entryId/athleteIds
+    // consistent with a real athlete record instead of drifting into
+    // hand-typed text that no longer matches any athlete doc.
+    let pendingCornerReplacement = { blue: null, red: null };
+    let cornerSearchTimers = { blue: null, red: null };
+    let cornerSearchResults = { blue: [], red: [] };
+    let currentDetailMatchId = null;
+
+    const ROUND_PHASE_OPTIONS = ["R32", "R16", "QF", "SF", "F"];
+
     function openDetailModal(matchId) {
         const m = matchesById.get(matchId);
         if (!m) return;
+
+        currentDetailMatchId = matchId;
+        pendingCornerReplacement = { blue: null, red: null };
+        cornerSearchResults = { blue: [], red: [] };
 
         const cornerEditable = (corner) => !!(corner && corner.entryId);
 
@@ -1306,9 +2212,9 @@ JAVASCRIPT
             return `
                 <div class="lq-detail-corner ${side}">
                     <label>${label}</label>
-                    <input type="text" id="edit-${side}-name" value="${escapeAttr(corner.name || "")}" placeholder="Name">
-                    <input type="text" id="edit-${side}-country" value="${escapeAttr(corner.country || "")}" placeholder="Country (SVK)">
-                    <input type="text" id="edit-${side}-clubId" value="${escapeAttr(corner.clubId || "")}" placeholder="Club ID">
+                    <div class="lq-corner-current" id="corner-current-${side}">${escapeHtml(participantLabel(corner))}</div>
+                    <input type="search" id="corner-search-${side}" class="lq-text-input" placeholder="Search to replace this athlete…" autocomplete="off">
+                    <div id="corner-results-${side}" class="lq-athlete-results"></div>
                 </div>
             `;
         };
@@ -1320,6 +2226,19 @@ JAVASCRIPT
             ${blueEntryId ? `<option value="${escapeAttr(blueEntryId)}" ${m.winnerEntryId === blueEntryId ? "selected" : ""}>${escapeHtml(participantLabel(m.blue))} (Blue)</option>` : ""}
             ${redEntryId ? `<option value="${escapeAttr(redEntryId)}" ${m.winnerEntryId === redEntryId ? "selected" : ""}>${escapeHtml(participantLabel(m.red))} (Red)</option>` : ""}
         `;
+
+        // Constrained to the five standard phases — but if this match's
+        // CURRENT value is something unusual (e.g. "EXH" for an ad hoc
+        // inserted exhibition bout), keep it selectable as an extra
+        // option rather than silently forcing it into one of the five
+        // the moment the modal opens.
+        const currentPhase = m.roundPhase || "";
+        const extraPhaseOption = currentPhase && !ROUND_PHASE_OPTIONS.includes(currentPhase)
+            ? `<option value="${escapeAttr(currentPhase)}" selected>${escapeHtml(currentPhase)} (current)</option>`
+            : "";
+        const roundPhaseOptionsHtml = extraPhaseOption + ROUND_PHASE_OPTIONS.map(p =>
+            `<option value="${p}" ${currentPhase === p ? "selected" : ""}>${p}</option>`
+        ).join("");
 
         openModal(`
             <div class="lq-modal-header">
@@ -1343,7 +2262,7 @@ JAVASCRIPT
                         <select id="edit-status">
                             <option value="pending" ${m.status === "pending" ? "selected" : ""}>Pending</option>
                             <option value="ready" ${m.status === "ready" ? "selected" : ""}>Ready</option>
-                            <option value="done" ${m.status === "done" ? "selected" : ""}>Done</option>
+                            <option value="done" ${m.status === "done" ? "selected" : ""}>Completed</option>
                             <option value="walkover" ${m.status === "walkover" ? "selected" : ""}>Walkover</option>
                         </select>
                     </label>
@@ -1358,7 +2277,7 @@ JAVASCRIPT
                         does. Prefer dragging the fight when just reordering.
                     </div>
                     <label>Round Phase
-                        <input type="text" id="edit-roundPhase" value="${escapeAttr(m.roundPhase || "")}">
+                        <select id="edit-roundPhase">${roundPhaseOptionsHtml}</select>
                     </label>
                     <label>Winner
                         <select id="edit-winnerEntryId">${winnerOptionsHtml}</select>
@@ -1384,24 +2303,94 @@ JAVASCRIPT
                 <div class="lq-detail-readonly">
                     Round ${escapeHtml(String(m.bracketRound ?? "—"))} · Match ${escapeHtml(String(m.bracketMatchNumber ?? "—"))}
                     ${m.tournamentName ? " · " + escapeHtml(m.tournamentName) : ""}
+                    ${equipmentBadgesHtml(m, equipmentConflictFor(matchId)) ? `<div class="lq-row-badges" style="margin-top:.4rem;">${equipmentBadgesHtml(m, equipmentConflictFor(matchId))}</div>` : ""}
                 </div>
 
                 <div id="detail-error" class="lq-alert-error hidden"></div>
 
                 <div class="lq-modal-actions">
                     <button class="btn btn-primary" id="detail-save-btn">Save Changes</button>
-                    <button class="btn btn-ghost" onclick="openTaSheet('${matchId}')">🖨 Preview TA Sheet</button>
+                    <button class="btn btn-ghost" onclick="openSheetPreview('${matchId}', 'ta')">🖨 TA Sheet</button>
+                    <button class="btn btn-ghost" onclick="openSheetPreview('${matchId}', 'ko')">🥊 KO Sheet</button>
+                    <button class="btn btn-ghost" onclick="openSheetPreview('${matchId}', 'protest')">⚠ Protest Sheet</button>
                     <button class="btn btn-ghost" onclick="closeModal()">Close</button>
                 </div>
             </div>
         `);
 
+        wireCornerSearch("blue", m.blue);
+        wireCornerSearch("red", m.red);
         document.getElementById("detail-save-btn").onclick = () => saveMatchEdits(matchId);
+    }
+
+    // Debounced athlete search for corner replacement — same endpoint
+    // and debounce timing category_manager.html's "+ Add Athlete"
+    // popover uses (/api/athletes/search-admin, 250ms). No-ops
+    // harmlessly if this corner wasn't rendered as editable (input
+    // won't exist).
+    function wireCornerSearch(side, originalCorner) {
+        const input = document.getElementById(`corner-search-${side}`);
+        if (!input) return;
+        input.oninput = () => {
+            clearTimeout(cornerSearchTimers[side]);
+            const q = input.value.trim();
+            const resultsEl = document.getElementById(`corner-results-${side}`);
+            if (q.length < 2) { resultsEl.innerHTML = ""; return; }
+            cornerSearchTimers[side] = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&sport=${encodeURIComponent(SPORT)}&limit=8`);
+                    const data = await res.json();
+                    renderCornerResults(side, data.athletes || [], originalCorner);
+                } catch (err) {
+                    resultsEl.innerHTML = `<div class="lq-athlete-result-item">Search failed — try again.</div>`;
+                }
+            }, 250);
+        };
+    }
+
+    function renderCornerResults(side, athletes, originalCorner) {
+        const el = document.getElementById(`corner-results-${side}`);
+        cornerSearchResults[side] = athletes;
+        if (athletes.length === 0) {
+            el.innerHTML = `<div class="lq-athlete-result-item">No matching athletes.</div>`;
+            return;
+        }
+        el.innerHTML = athletes.map((a, i) => `
+            <div class="lq-athlete-result-item" data-idx="${i}">
+                <strong>${escapeHtml(a.displayName)}</strong><br>
+                <span style="color:var(--lq-muted); font-size:.75rem;">${escapeHtml(a.club || "No club")}${a.birthYear != null ? " · " + a.birthYear : ""}</span>
+            </div>
+        `).join("");
+        [...el.querySelectorAll(".lq-athlete-result-item[data-idx]")].forEach(item => {
+            item.onclick = () => pickCornerReplacement(side, parseInt(item.dataset.idx, 10), originalCorner);
+        });
+    }
+
+    function pickCornerReplacement(side, idx, originalCorner) {
+        const athlete = cornerSearchResults[side][idx];
+        if (!athlete) return;
+        pendingCornerReplacement[side] = athlete;
+
+        document.getElementById(`corner-current-${side}`).innerHTML = `
+            <span style="text-decoration:line-through; color:var(--lq-muted);">${escapeHtml(participantLabel(originalCorner))}</span>
+            → <strong>${escapeHtml(athlete.displayName)}</strong>
+            <button type="button" onclick="undoCornerReplacement('${side}', this)" style="border:none; background:none; color:var(--lq-muted); cursor:pointer; font-size:.75rem; text-decoration:underline;">undo</button>
+        `;
+        document.getElementById(`corner-search-${side}`).value = "";
+        document.getElementById(`corner-results-${side}`).innerHTML = "";
+    }
+
+    function undoCornerReplacement(side, btnEl) {
+        pendingCornerReplacement[side] = null;
+        const m = matchesById.get(currentDetailMatchId);
+        const corner = side === "blue" ? m?.blue : m?.red;
+        document.getElementById(`corner-current-${side}`).textContent = participantLabel(corner);
     }
 
     async function saveMatchEdits(matchId) {
         const m = matchesById.get(matchId);
         if (!m) return;
+
         const errEl = document.getElementById("detail-error");
         errEl.classList.add("hidden");
 
@@ -1443,21 +2432,32 @@ JAVASCRIPT
         const ps = numOrNull("edit-pssSize"); if (ps !== null) updates.pssSize = ps;
         const hl = numOrNull("edit-hitLevel"); if (hl !== null) updates.hitLevel = hl;
 
-        // Only corners that were editable (real entryId) had inputs
-        // rendered at all — merge:true on a nested map field updates just
-        // these sub-fields, leaving entryId/athleteIds/source untouched.
-        if (m.blue && m.blue.entryId) {
+        // A corner is only touched at all if the admin actually picked a
+        // replacement athlete via search — otherwise blue/red are left
+        // completely out of `updates`, so entryId/athleteIds/name/
+        // country/clubId all stay exactly as they were. Replacing writes
+        // a fresh, internally-consistent corner object sourced straight
+        // from the athlete record (same fields insert_match_endpoint's
+        // own _resolve_corner produces), rather than hand-typed text
+        // that could drift out of sync with any real athlete doc.
+        if (pendingCornerReplacement.blue) {
+            const a = pendingCornerReplacement.blue;
             updates.blue = {
-                name: textOrEmpty("edit-blue-name"),
-                country: textOrEmpty("edit-blue-country"),
-                clubId: textOrEmpty("edit-blue-clubId"),
+                entryId: a.id,
+                athleteIds: [a.id],
+                name: a.displayName,
+                country: a.country || null,
+                clubId: a.clubId || null,
             };
         }
-        if (m.red && m.red.entryId) {
+        if (pendingCornerReplacement.red) {
+            const a = pendingCornerReplacement.red;
             updates.red = {
-                name: textOrEmpty("edit-red-name"),
-                country: textOrEmpty("edit-red-country"),
-                clubId: textOrEmpty("edit-red-clubId"),
+                entryId: a.id,
+                athleteIds: [a.id],
+                name: a.displayName,
+                country: a.country || null,
+                clubId: a.clubId || null,
             };
         }
 
@@ -1483,21 +2483,27 @@ JAVASCRIPT
         }
     }
 
-    async function openTaSheet(matchId) {
-        const m = matchesById.get(matchId);
+    // Takes a match OBJECT directly rather than looking one up by id —
+    // needed for "Create & Print Friendly Sheet" in the insert-match
+    // modal, where the just-created match may not have arrived back via
+    // the realtime listener into matchesById yet. openSheetPreview below
+    // (matchId-based, used for existing fights) is a thin wrapper around
+    // this.
+    async function openSheetPreviewForMatch(m, kind) {
         if (!m) return;
+        const title = SHEET_CONFIGS[kind].title;
         const previewWindow = window.open("", "_blank");
-        previewWindow.document.write(`<!DOCTYPE html><html><head><title>TA Sheet</title></head>
+        previewWindow.document.write(`<!DOCTYPE html><html><head><title>${title}</title></head>
         <body style="margin:0;background:#52525b;display:flex;align-items:center;justify-content:center;font-family:sans-serif;">
-        <p style="color:#fff;">Generating TA sheet…</p></body></html>`);
+        <p style="color:#fff;">Generating ${title}…</p></body></html>`);
         try {
-            const dataUrl = await buildTaSheetDataUrl(m);
+            const dataUrl = await buildSheetDataUrl(m, kind);
             previewWindow.document.open();
             previewWindow.document.write(`
             <!DOCTYPE html>
             <html>
             <head>
-                <title>TA Sheet</title>
+                <title>${title}</title>
                 <style>
                     body { margin: 0; background: #52525b; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }
                     .toolbar { position: sticky; top: 0; width: 100%; background: #27272a; padding: .75rem 1rem; display: flex; justify-content: center; gap: .75rem; z-index: 10; }
@@ -1516,15 +2522,25 @@ JAVASCRIPT
                     <button onclick="window.print()">Print</button>
                     <button class="secondary" onclick="window.close()">Close</button>
                 </div>
-                <img src="${dataUrl}" alt="TA Sheet">
+                <img src="${dataUrl}" alt="${title}">
             </body>
             </html>
         `);
             previewWindow.document.close();
         } catch (e) {
-            previewWindow.document.body.innerHTML = `<p style="color:#fff;">Failed to generate TA sheet: ${e.message}</p>`;
+            previewWindow.document.body.innerHTML = `<p style="color:#fff;">Failed to generate ${title}: ${e.message}</p>`;
         }
     }
+
+    async function openSheetPreview(matchId, kind) {
+        const m = matchesById.get(matchId);
+        if (!m) return;
+        return openSheetPreviewForMatch(m, kind);
+    }
+
+    // Backward-compatible thin wrapper — TA sheet specifically.
+    function openTaSheet(matchId) { return openSheetPreview(matchId, "ta"); }
+
 
     // ── Utils ────────────────────────────────────────────────────────────────
     function escapeHtml(str) {

@@ -20,6 +20,10 @@
         <button id="pushBtn" type="button" class="btn btn-primary" disabled onclick="pushToFirebase()">
             Push to Firebase
         </button>
+        <button id="cleanBtn" type="button" class="btn btn-danger" onclick="cleanPushedData()"
+            title="Permanently deletes every bracket, match, and equipment setting pushed for this tournament. Registrations are not affected.">
+            🗑 Clean Pushed Data
+        </button>
     </div>
 
     <p class="text-muted bb-hint">
@@ -2362,7 +2366,34 @@
                 courtId: m.courtId, queuePosition: m.queuePosition,
                 pssSize: m.pssSize, hitLevel: m.hitLevel, pssHitLevelSetId: m.pssHitLevelSetId,
                 roundTime: m.roundTime, breakTime: m.breakTime,
+                // NEW — equipment facts this match was actually resolved
+                // with, so live_queue.html can re-check vest/plexi
+                // availability against live court/position state instead
+                // of only ever knowing what was true at generation time.
+                resolvedVestGen: m.resolvedVestGen || null,
+                requiresPlexiHelmet: !!m.requiresPlexiHelmet,
+                scheduledWithRelaxedConstraints: !!m.scheduledWithRelaxedConstraints,
             })),
+            // NEW — the full session-local equipment configuration,
+            // written to tournaments/{id}/meta/equipment in the same
+            // commit. This is what lets live_queue.html re-run the SAME
+            // vest/helmet conflict algorithm this page uses, against
+            // live data, without staff having to re-enter court/vest
+            // setup a second time in a different tool.
+            equipment: {
+                courts: courts.map(c => ({
+                    id: c.id, label: c.label, vestNumbers: c.vestNumbers,
+                    minGapBetweenSameAthlete: c.minGapBetweenSameAthlete, ageOrder: c.ageOrder,
+                    plexiCapable: c.plexiCapable, allowedVestGen: c.allowedVestGen,
+                })),
+                vestInventory,
+                vestGenPolicy,
+                plexiHelmetCount,
+                transferBufferSeconds,
+                assumedRoundsPerMatch,
+                courtBalanceThreshold,
+                pssHitLevelSetId: selectedPssHitLevelSetId,
+            },
         };
 
         try {
@@ -2380,6 +2411,57 @@
             showFlash(err.message || "Push failed — try again.", true);
             btn.disabled = false;
             btn.textContent = "Push to Firebase";
+        }
+    }
+
+    // ── Clean / wipe everything this page has ever pushed for this
+    // tournament — brackets, matches, and the equipment meta doc.
+    // Registrations are never touched (see the backend endpoint's own
+    // docstring). Gated behind a TYPE-THE-TITLE confirmation rather than
+    // a plain confirm() dialog, specifically because this is a genuinely
+    // irreversible bulk delete and a single misclick on a plain "OK"
+    // button is exactly the accident this is meant to prevent.
+    async function cleanPushedData() {
+        const typed = prompt(
+            `This PERMANENTLY deletes every bracket, match, and equipment setting pushed to Firestore for ` +
+            `"${TOURNAMENT_TITLE}". Registrations are NOT affected — only generated bracket/court output.\n\n` +
+            `Type the tournament title exactly to confirm:`
+        );
+        if (typed === null) return; // cancelled
+        if (typed.trim() !== TOURNAMENT_TITLE.trim()) {
+            showFlash("Title didn't match — nothing was deleted.", true);
+            return;
+        }
+
+        const btn = document.getElementById("cleanBtn");
+        if (btn) { btn.disabled = true; btn.textContent = "Cleaning…"; }
+
+        try {
+            const res = await fetch(
+                `/api/tournaments/${TOURNAMENT_ID}/brackets?sport=${encodeURIComponent(TOURNAMENT_SPORT)}&discipline=${encodeURIComponent(TOURNAMENT_DISCIPLINE)}`,
+                { method: "DELETE" }
+            );
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `Clean failed (${res.status})`);
+            }
+            const data = await res.json();
+            showFlash(`Cleared ${data.deletedBrackets} bracket(s) and ${data.deletedMatches} match(es).`);
+
+            // Local generated state is now stale relative to Firestore —
+            // reset it so the UI doesn't imply the wiped data is still
+            // pushed (pushBtn re-enables again the next time Generate
+            // actually produces something new).
+            generatedBrackets = [];
+            generatedMatches = [];
+            document.getElementById("resultsSection").classList.add("hidden");
+            document.getElementById("pushBtn").disabled = true;
+            document.getElementById("pushBtn").textContent = "Push to Firebase";
+        } catch (err) {
+            console.error("Clean failed", err);
+            showFlash(err.message || "Clean failed — try again.", true);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "🗑 Clean Pushed Data"; }
         }
     }
 
@@ -2512,6 +2594,16 @@
     .btn-ghost:hover {
         background: #f8fafc;
         color: var(--text);
+    }
+
+    .btn-danger {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fca5a5;
+    }
+
+    .btn-danger:hover {
+        background: #fee2e2;
     }
 
     .btn-sm {

@@ -1,31 +1,39 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
-from fastapi.templating import Jinja2Templates
 
+from infrastructure.templates import templates
+from infrastructure.routers.operator_auth import require_operator
 from infrastructure.routers.api_router import get_case_repo
 from usecases.case_usecase import GetAllCasesUseCase
 from usecases.tournament_usecase import GetAllTournamentsUseCase, GetTournamentUseCase
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
 from infrastructure.firebase_client import init_firestore
 
-router = APIRouter(tags=["UI"])
-templates = Jinja2Templates(directory="templates")
+# Router-level dependency: EVERY /dashboard route requires at minimum an
+# active operator record (any role). This is what turns a non-operator's
+# request into a redirect home, while still letting per-route
+# dependencies below apply the stricter, role-specific permission that
+# turns an under-privileged operator's request into a 403 page instead.
+router = APIRouter(
+    tags=["UI"],
+    dependencies=[Depends(require_operator("dashboard:view"))],
+)
+
 
 def get_tournament_repo() -> FirebaseTournamentRepository:
     db = init_firestore()
     return FirebaseTournamentRepository(db)
 
+
 @router.get("/")
 async def dashboard_page(
     request: Request,
     tournament_repo=Depends(get_tournament_repo),
-    case_repo=Depends(get_case_repo)  # Inject the Case repo here
+    case_repo=Depends(get_case_repo),
 ):
-    """Renders the main dashboard with all tournaments and cases."""
-    # Fetch Tournaments
+    """All operator roles (TRO/TAO/TCO/TOS) can view the dashboard list."""
     tournament_use_case = GetAllTournamentsUseCase(tournament_repo)
     tournaments = tournament_repo.getTournamentsPaginated(status="active", limit=10, offset=0)
 
-    # Fetch Cases
     case_use_case = GetAllCasesUseCase(case_repo)
     cases = case_use_case.execute()
 
@@ -35,114 +43,74 @@ async def dashboard_page(
         "cases": cases,
     })
 
-@router.get("/tournaments/create")
+
+@router.get("/tournaments/create", dependencies=[Depends(require_operator("tournament:create"))])
 async def create_tournament_page(request: Request):
-    """Renders the form to create a new tournament."""
-    return templates.TemplateResponse(
-        request,
-        "dashboard/tournament_create.html",
-        {"request": request}
-    )
+    """TOS only — creation is explicitly out of scope for TCO."""
+    return templates.TemplateResponse(request, "dashboard/tournament_create.html", {"request": request})
+
 
 @router.get("/tournaments/{tournament_id}")
 async def tournament_detail_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
-    """Renders the details of a specific tournament."""
+    """All operator roles can open a tournament to view details."""
     use_case = GetTournamentUseCase(repo)
     tournament = use_case.execute(tournament_id)
-
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
 
-    return templates.TemplateResponse(
-        request,
-        "dashboard/tournament_detail.html",
-        {"request": request, "tournament": tournament}
-    )
+    return templates.TemplateResponse(request, "dashboard/tournament_detail.html", {
+        "request": request, "tournament": tournament,
+    })
 
-@router.get("/tournaments/{tournament_id}/categories")
+
+@router.get("/tournaments/{tournament_id}/categories",
+            dependencies=[Depends(require_operator("categories:manage"))])
 async def tournament_category_manager_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
-    """
-    Staff-only drag-and-drop category finalization screen — lists every
-    category for the tournament's discipline and lets staff move any
-    entry between categories with no eligibility validation, ahead of
-    bracket generation. See tournament_detail.html's "Manage Categories"
-    link (shown only when isRegistrationOpen is true) for where this is
-    linked from.
-
-    Also hosts the two client-side backup document generators — Generate
-    Registration Sheet / Generate Weigh-in Sheet buttons next to Create
-    Brackets — which pull straight from GET
-    /api/tournaments/{tournament_id}/weighin-data and build/print the
-    PDFs entirely in the browser. Nothing server-side to render for
-    those; see category_manager.html's script block.
-    """
+    """TCO and TOS only."""
     use_case = GetTournamentUseCase(repo)
     tournament = use_case.execute(tournament_id)
-
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
 
-    return templates.TemplateResponse(
-        request,
-        "dashboard/category_manager.html",
-        {"request": request, "tournament": tournament}
-    )
+    return templates.TemplateResponse(request, "dashboard/category_manager.html", {
+        "request": request, "tournament": tournament,
+    })
 
-@router.get("/tournaments/{tournament_id}/brackets")
+
+@router.get("/tournaments/{tournament_id}/brackets",
+            dependencies=[Depends(require_operator("brackets:manage"))])
 async def bracket_builder_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
-    """
-    Bracket generation + court ordering — everything computes client-side
-    in the browser (seeding, placement, byes, court assignment); nothing
-    touches Firestore until the "Push to Firebase" button. See
-    commit_brackets_endpoint in api_router.py for that one write.
-    """
+    """TCO and TOS only."""
     use_case = GetTournamentUseCase(repo)
     tournament = use_case.execute(tournament_id)
-
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
 
-    return templates.TemplateResponse(
-        request,
-        "dashboard/bracket_builder.html",
-        {"request": request, "tournament": tournament}
-    )
+    return templates.TemplateResponse(request, "dashboard/bracket_builder.html", {
+        "request": request, "tournament": tournament,
+    })
 
-@router.get("/tournaments/{tournament_id}/live")
+
+@router.get("/tournaments/{tournament_id}/live",
+            dependencies=[Depends(require_operator("matches:manage"))])
 async def live_queue_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
-    """
-    Realtime match-queue admin console for a running tournament: every
-    court's running order top-to-bottom, drag-and-drop reorder/re-court,
-    ad hoc match insertion between two existing matches, and live
-    pending/ready/done status via the Firestore client SDK — not
-    polling. See dashboard/live_queue.html and, in api_router.py, the
-    /tournaments/{id}/courts, /firebase-client-config,
-    /matches/.../position, /matches/.../status and
-    /tournaments/{id}/matches/insert endpoints this page talks to.
-
-    See tournament_detail.html's "Live Match Queue" card for where this
-    is linked from.
-    """
+    """TCO and TOS only — TRO/TAO cannot touch the live queue."""
     use_case = GetTournamentUseCase(repo)
     tournament = use_case.execute(tournament_id)
-
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
 
-    return templates.TemplateResponse(
-        request,
-        "dashboard/live_queue.html",
-        {"request": request, "tournament": tournament}
-    )
+    return templates.TemplateResponse(request, "dashboard/live_queue.html", {
+        "request": request, "tournament": tournament,
+    })
 
-@router.get("/stream-keys")
+
+@router.get("/stream-keys", dependencies=[Depends(require_operator("stream_keys:manage"))])
 async def stream_keys_page(request: Request):
-    """Admin page for managing YouTube RTMP stream keys."""
+    """TOS only."""
     db = init_firestore()
     docs = db.collection("stream_keys").stream()
     keys = [{"id": doc.id, **doc.to_dict()} for doc in docs]
-    return templates.TemplateResponse(
-        request,
-        "dashboard/stream_keys.html",
-        {"request": request, "keys": keys},
-    )
+    return templates.TemplateResponse(request, "dashboard/stream_keys.html", {
+        "request": request, "keys": keys,
+    })
