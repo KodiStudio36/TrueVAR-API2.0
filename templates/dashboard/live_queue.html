@@ -1884,21 +1884,13 @@ JAVASCRIPT
         ta: {
             title: "TA Sheet",
             templateUrl: "/static/assets/sheets/ta-sheet-template.jpg",
-            // Every coordinate below was measured directly against the
-            // 768x1024 template's own table-border pixels (see the design
-            // conversation this shipped with) — if the template image is
-            // ever swapped for a different export, these must be
-            // re-measured against the new file.
+            fillFields: true, // canvas-fills date/court/names etc. onto the jpg template
             eventNameBox: { x0: 300, y0: 91, x1: 470, y1: 117 },
             fields: {
-                // key: [x, y, startSize, align, maxWidth] — align/y follow
-                // canvas's textAlign + textBaseline='top', so (x,y) is the
-                // label-line top, same as the printed label immediately to
-                // its left.
                 date: [275, 150, 14, "right", 120],
                 court_no: [692, 150, 14, "right", 120],
                 match_no: [275, 186, 14, "right", 120],
-                weight_category: [472, 186, 14, "right", 120],  // right-anchored against the "kg" that follows it
+                weight_category: [472, 186, 14, "right", 120],
                 hit_level: [588, 186, 14, "right", 120],
                 pss_size: [692, 186, 14, "right", 120],
                 chung_name: [150, 262, 14, "left", 225],
@@ -1907,61 +1899,23 @@ JAVASCRIPT
                 hong_noc: [472, 289, 14, "left", 225],
             },
         },
-        // PLACEHOLDER CONFIG — copy of TA's own layout, reused only
-        // because no real friendly-match-sheet template/measurements
-        // exist yet.
+        // Real PDF templates — printed/previewed AS-IS, no field-filling.
+        // If a filled version is ever needed, add fillFields:true plus
+        // fields/eventNameBox here, same as "ta" above.
         friendly: {
             title: "Friendly Match Sheet",
-            templateUrl: "/static/assets/sheets/friendly-sheet-template.jpg",
-            eventNameBox: { x0: 300, y0: 91, x1: 470, y1: 117 },
-            fields: {
-                date: [275, 150, 14, "right", 120],
-                court_no: [692, 150, 14, "right", 120],
-                match_no: [275, 186, 14, "right", 120],
-                weight_category: [472, 186, 14, "right", 120],
-                hit_level: [588, 186, 14, "right", 120],
-                pss_size: [692, 186, 14, "right", 120],
-                chung_name: [150, 262, 14, "left", 225],
-                chung_noc: [150, 289, 14, "left", 225],
-                hong_name: [472, 262, 14, "left", 225],
-                hong_noc: [472, 289, 14, "left", 225],
-            },
+            templateUrl: "/static/assets/sheets/friendly-sheet-template.pdf",
+            fillFields: false,
         },
-        // PLACEHOLDER CONFIG — see friendly's own note above; same caveat.
         ko: {
             title: "KO Sheet",
-            templateUrl: "/static/assets/sheets/ko-sheet-template.jpg",
-            eventNameBox: { x0: 300, y0: 91, x1: 470, y1: 117 },
-            fields: {
-                date: [275, 150, 14, "right", 120],
-                court_no: [692, 150, 14, "right", 120],
-                match_no: [275, 186, 14, "right", 120],
-                weight_category: [472, 186, 14, "right", 120],
-                hit_level: [588, 186, 14, "right", 120],
-                pss_size: [692, 186, 14, "right", 120],
-                chung_name: [150, 262, 14, "left", 225],
-                chung_noc: [150, 289, 14, "left", 225],
-                hong_name: [472, 262, 14, "left", 225],
-                hong_noc: [472, 289, 14, "left", 225],
-            },
+            templateUrl: "/static/assets/sheets/ko-sheet-template.pdf",
+            fillFields: false,
         },
-        // PLACEHOLDER CONFIG — see friendly's own note above; same caveat.
         protest: {
             title: "Protest Sheet",
-            templateUrl: "/static/assets/sheets/protest-sheet-template.jpg",
-            eventNameBox: { x0: 300, y0: 91, x1: 470, y1: 117 },
-            fields: {
-                date: [275, 150, 14, "right", 120],
-                court_no: [692, 150, 14, "right", 120],
-                match_no: [275, 186, 14, "right", 120],
-                weight_category: [472, 186, 14, "right", 120],
-                hit_level: [588, 186, 14, "right", 120],
-                pss_size: [692, 186, 14, "right", 120],
-                chung_name: [150, 262, 14, "left", 225],
-                chung_noc: [150, 289, 14, "left", 225],
-                hong_name: [472, 262, 14, "left", 225],
-                hong_noc: [472, 289, 14, "left", 225],
-            },
+            templateUrl: "/static/assets/sheets/protest-sheet-template.pdf",
+            fillFields: false,
         },
     };
 
@@ -2067,6 +2021,43 @@ JAVASCRIPT
     // Backward-compatible thin wrapper — TA sheet specifically.
     function buildTaSheetDataUrl(m) { return buildSheetDataUrl(m, "ta"); }
 
+    // Prints a PDF template directly, unmodified — used for any sheet kind
+    // with fillFields:false. Loads it into a hidden iframe (same pattern as
+    // printImageDataUrl) and lets the browser's own PDF renderer handle it;
+    // there's nothing to draw, so no canvas is involved.
+    function printPdfUrl(url) {
+        return new Promise((resolve, reject) => {
+            const iframe = document.createElement("iframe");
+            iframe.style.position = "fixed";
+            iframe.style.right = "0";
+            iframe.style.bottom = "0";
+            iframe.style.width = "0";
+            iframe.style.height = "0";
+            iframe.style.border = "0";
+            document.body.appendChild(iframe);
+
+            const cleanup = () => {
+                setTimeout(() => {
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                }, 1000);
+            };
+
+            iframe.onload = () => {
+                try {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                } finally {
+                    cleanup();
+                }
+            };
+            iframe.onerror = () => { cleanup(); reject(new Error("PDF failed to load in print frame.")); };
+            iframe.src = url;
+        });
+    }
+
     // ── Fast one-click print (row button) — generates the sheet and sends
     // it straight to the browser's print dialog via a hidden iframe, no
     // preview tab, no extra clicks. This is the path operators use over
@@ -2081,13 +2072,18 @@ JAVASCRIPT
         const m = matchesById.get(matchId);
         if (!m) return;
 
+        const config = SHEET_CONFIGS[kind];
         const originalText = btnEl.textContent;
         btnEl.disabled = true;
         btnEl.textContent = "…";
 
         try {
-            const dataUrl = await buildSheetDataUrl(m, kind);
-            await printImageDataUrl(dataUrl);
+            if (config.fillFields) {
+                const dataUrl = await buildSheetDataUrl(m, kind);
+                await printImageDataUrl(dataUrl);
+            } else {
+                await printPdfUrl(config.templateUrl);
+            }
             btnEl.classList.add("done-flash");
             btnEl.textContent = "✓";
             setTimeout(() => {
@@ -2098,7 +2094,7 @@ JAVASCRIPT
         } catch (e) {
             console.error(e);
             btnEl.textContent = "!";
-            alert(`Couldn't print the ${SHEET_CONFIGS[kind].title}: ` + e.message);
+            alert(`Couldn't print the ${config.title}: ` + e.message);
             btnEl.textContent = originalText;
             btnEl.disabled = false;
         }
@@ -2491,41 +2487,79 @@ JAVASCRIPT
     // this.
     async function openSheetPreviewForMatch(m, kind) {
         if (!m) return;
-        const title = SHEET_CONFIGS[kind].title;
+        const config = SHEET_CONFIGS[kind];
+        const title = config.title;
+
+        if (!config.fillFields) {
+            // Nothing to fill in — show the PDF template as-is with a
+            // print/close toolbar wrapped around it.
+            const previewWindow = window.open("", "_blank");
+            previewWindow.document.open();
+            previewWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>${title}</title>
+            <style>
+                html, body { margin: 0; height: 100%; background: #52525b; font-family: sans-serif; }
+                .toolbar { position: sticky; top: 0; width: 100%; background: #27272a; padding: .75rem 1rem; display: flex; justify-content: center; gap: .75rem; z-index: 10; box-sizing: border-box; }
+                .toolbar button { padding: .5rem 1.25rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; background: #4f46e5; color: #fff; font-size: .9rem; }
+                .toolbar button.secondary { background: transparent; color: #fff; border: 1px solid #71717a; }
+                iframe { display: block; width: 100%; height: calc(100% - 56px); border: none; background: #fff; }
+                @media print {
+                    .toolbar { display: none; }
+                    iframe { height: 100%; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="toolbar">
+                <button onclick="document.getElementById('sheet-frame').contentWindow.print()">Print</button>
+                <button class="secondary" onclick="window.close()">Close</button>
+            </div>
+            <iframe id="sheet-frame" src="${config.templateUrl}"></iframe>
+        </body>
+        </html>
+    `);
+            previewWindow.document.close();
+            return;
+        }
+
+        // fillFields:true path (jpg + canvas) — unchanged from before.
         const previewWindow = window.open("", "_blank");
         previewWindow.document.write(`<!DOCTYPE html><html><head><title>${title}</title></head>
-        <body style="margin:0;background:#52525b;display:flex;align-items:center;justify-content:center;font-family:sans-serif;">
-        <p style="color:#fff;">Generating ${title}…</p></body></html>`);
+    <body style="margin:0;background:#52525b;display:flex;align-items:center;justify-content:center;font-family:sans-serif;">
+    <p style="color:#fff;">Generating ${title}…</p></body></html>`);
         try {
             const dataUrl = await buildSheetDataUrl(m, kind);
             previewWindow.document.open();
             previewWindow.document.write(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>${title}</title>
-                <style>
-                    body { margin: 0; background: #52525b; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }
-                    .toolbar { position: sticky; top: 0; width: 100%; background: #27272a; padding: .75rem 1rem; display: flex; justify-content: center; gap: .75rem; z-index: 10; }
-                    .toolbar button { padding: .5rem 1.25rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; background: #4f46e5; color: #fff; font-size: .9rem; }
-                    .toolbar button.secondary { background: transparent; color: #fff; border: 1px solid #71717a; }
-                    img { max-width: 900px; width: 100%; margin: 1.5rem 0; box-shadow: 0 10px 40px rgba(0,0,0,.4); background: #fff; }
-                    @media print {
-                        .toolbar { display: none; }
-                        body { background: #fff; }
-                        img { box-shadow: none; margin: 0; max-width: 100%; }
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="toolbar">
-                    <button onclick="window.print()">Print</button>
-                    <button class="secondary" onclick="window.close()">Close</button>
-                </div>
-                <img src="${dataUrl}" alt="${title}">
-            </body>
-            </html>
-        `);
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>${title}</title>
+            <style>
+                body { margin: 0; background: #52525b; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }
+                .toolbar { position: sticky; top: 0; width: 100%; background: #27272a; padding: .75rem 1rem; display: flex; justify-content: center; gap: .75rem; z-index: 10; }
+                .toolbar button { padding: .5rem 1.25rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; background: #4f46e5; color: #fff; font-size: .9rem; }
+                .toolbar button.secondary { background: transparent; color: #fff; border: 1px solid #71717a; }
+                img { max-width: 900px; width: 100%; margin: 1.5rem 0; box-shadow: 0 10px 40px rgba(0,0,0,.4); background: #fff; }
+                @media print {
+                    .toolbar { display: none; }
+                    body { background: #fff; }
+                    img { box-shadow: none; margin: 0; max-width: 100%; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="toolbar">
+                <button onclick="window.print()">Print</button>
+                <button class="secondary" onclick="window.close()">Close</button>
+            </div>
+            <img src="${dataUrl}" alt="${title}">
+        </body>
+        </html>
+    `);
             previewWindow.document.close();
         } catch (e) {
             previewWindow.document.body.innerHTML = `<p style="color:#fff;">Failed to generate ${title}: ${e.message}</p>`;
