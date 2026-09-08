@@ -25,6 +25,8 @@
 
     <div class="lq-toolbar-row">
         <button type="button" class="btn btn-ghost" onclick="openBulkEditModal()">⚙ Bulk Edit Category</button>
+        <button type="button" class="btn btn-ghost" onclick="openComputeResultsModal()">🏅 Compute Results</button>
+        <button type="button" class="btn btn-ghost" onclick="openBracketPdfModal()">📄 Bracket PDFs</button>
     </div>
 
     {# ═══════════════════════════════════════════════════════════════════════
@@ -739,6 +741,11 @@ STYLES
         background: #f8fafc;
     }
 
+    .btn-sm {
+        font-size: .78rem;
+        padding: .32rem .75rem;
+    }
+
     @media (max-width: 480px) {
 
         .lq-detail-corners,
@@ -762,8 +769,18 @@ JAVASCRIPT
 ═══════════════════════════════════════════════════════════════════════ #}
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
     "use strict";
+
+    // pdf.js needs its worker script pointed at explicitly when loaded
+    // from a CDN like this — used only to RASTERIZE the KO/Protest/
+    // Friendly PDF templates into images before printing (see
+    // renderPdfUrlToPngDataUrls below); nothing here ever generates a
+    // PDF itself anymore.
+    if (window.pdfjsLib) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
 
     const TOURNAMENT_ID = "{{ tournament.id }}";
     const SPORT = "{{ tournament.sport }}";
@@ -1182,6 +1199,1265 @@ JAVASCRIPT
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // COMPUTE RESULTS — the "🏅 Compute Results" button in the toolbar.
+    // Delegates to the backend's compute_tournament_results_endpoint
+    // (see tournament_router.py), which derives 1st/2nd/joint-3rd/... for
+    // every category whose final has been decided, purely from
+    // bracketRound + winnerEntryId, and writes each placement onto the
+    // matching entry inside tournaments/{id}/division_rosters/{ageCode}
+    // — the same collection tournament.html's public roster view reads.
+    // Safe to run repeatedly during a running tournament: only categories
+    // whose final just got decided actually change anything each time.
+    // ═══════════════════════════════════════════════════════════════════
+
+    function openComputeResultsModal() {
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>Compute Final Placements</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <p class="lq-field-hint" style="margin-bottom:1rem;">
+                    Scans every category's bracket and derives 1st/2nd/joint-3rd/joint-5th/etc. from match
+                    results, then writes them onto each athlete's roster entry so they show up on the public
+                    tournament page. Categories whose final hasn't been decided yet are skipped — safe to run
+                    again later as more finals finish.
+                </p>
+                <div id="results-compute-output"></div>
+                <div class="lq-modal-actions">
+                    <button class="btn btn-primary" id="results-compute-btn" onclick="runComputeResults()">Compute Now</button>
+                    <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        `);
+    }
+
+    async function runComputeResults() {
+        const btn = document.getElementById("results-compute-btn");
+        const out = document.getElementById("results-compute-output");
+        btn.disabled = true;
+        btn.textContent = "Computing…";
+        out.innerHTML = "";
+
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/results/compute`, { method: "POST" });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `Failed (${res.status})`);
+            }
+            const data = await res.json();
+
+            const rows = data.results.map((r) => {
+                const color = r.status === "complete" ? "var(--lq-green)" : r.status === "partial" ? "var(--lq-amber)" : "var(--lq-muted)";
+                return `
+                    <div style="display:flex; justify-content:space-between; gap:.5rem; padding:.3rem 0; border-bottom:1px solid var(--lq-border); font-size:.82rem;">
+                        <span>${escapeHtml(r.categoryCode)}</span>
+                        <span style="color:${color}; font-weight:700; text-transform:uppercase; text-align:right;">${escapeHtml(r.status)}${r.detail ? " — " + escapeHtml(r.detail) : ""}</span>
+                    </div>`;
+            }).join("");
+
+            out.innerHTML = `
+                <p style="font-size:.85rem; margin-bottom:.5rem;">
+                    <strong>${data.categoriesProcessed}</strong> categor${data.categoriesProcessed === 1 ? "y" : "ies"} processed,
+                    <strong>${data.categoriesSkipped}</strong> skipped.
+                </p>
+                <div style="max-height:260px; overflow-y:auto;">${rows || '<p class="lq-field-hint">No categories found for this tournament yet.</p>'}</div>
+                ${data.categoriesProcessed > 0 ? `
+                    <div class="lq-modal-actions" style="margin-top:.75rem;">
+                        <button type="button" class="btn btn-ghost btn-sm" id="results-print-brackets-btn" onclick="printResultsBracketsPdf()">🖨 Print Bracket PDFs (with Results)</button>
+                    </div>
+                    <div class="lq-modal-actions" style="margin-top:.5rem;">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="openClubStandingsModal()">🏆 Club Standings</button>
+                    </div>
+                ` : ""}
+            `;
+        } catch (err) {
+            console.error("Compute results failed", err);
+            out.innerHTML = `<div class="lq-alert-error">Failed: ${escapeHtml(err.message)}</div>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Compute Now";
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // BRACKET PDF EXPORT — the "📄 Bracket PDFs" button. This is the same
+    // SVG draw-sheet renderer bracket_builder.html uses for its own
+    // "Download All (PDF)" button, isolated and ported here so it can be
+    // regenerated from THIS page at any time, straight off Firestore —
+    // not off bracket_builder.html's own browser session.
+    //
+    // WHY THIS WORKS WITHOUT bracket_builder.html'S LOCAL STATE:
+    // bracket_builder.html only ever keeps its full generated bracket
+    // tree (every round, every bye, exact slot placement) in browser
+    // memory — nothing that detailed is written to Firestore. What DOES
+    // get written, on commit, is:
+    //   - tournaments/{id}/brackets/{doc}: categoryCode, categoryLabel,
+    //     placementStrategy, and — critically — `entries`, each already
+    //     carrying its own final `seed` number (see commit_brackets_endpoint
+    //     in tournament_router.py and generateEverything in
+    //     bracket_builder.html, which stamps `seed` onto every entry
+    //     before placement).
+    //   - sports/.../matches: every REAL (non-bye) match, at every round,
+    //     scheduled up front — see generateCourtOrdering's own comment on
+    //     why round 2+ already exist as "pending" docs immediately after
+    //     commit, not just round 1.
+    // Single-elimination placement (placeStandard / placeClubCountrySpread)
+    // is a PURE function of (seeded entries, bracket size) — feed it the
+    // exact same seed order and placement strategy and it reproduces the
+    // identical tree, byes included, every time. So: sort the bracket
+    // doc's own entries by their saved `seed`, re-run the same placement
+    // + single-elimination builder client-side (ported verbatim below),
+    // then overlay each generated match with whatever's ACTUALLY in the
+    // matches collection right now for that (round, matchNumber) pair —
+    // status, corners (including any manual replacement made via this
+    // page's own detail modal), court, queue position, equipment
+    // resolution. The result is the same sheet bracket_builder.html would
+    // produce, but sourced entirely from what's saved — so it still works
+    // even if that page's own generation session is long gone, or if
+    // someone ran "🗑 Clean Pushed Data" and only the registrations (and
+    // thus a fresh bracket doc) remain.
+    // ═══════════════════════════════════════════════════════════════════
+
+    let bracketDocsByCategoryCode = {};
+    let reconstructedBrackets = [];   // built fresh every time the modal opens — see prepareBracketPdfData()
+    let bracketMatchById = {};        // matchId -> reconstructed match, for resolving "101 Winner" placeholders
+    let __measureCanvasCtx = null;    // lazily-created scratch canvas 2D context, reused only to measure real text widths in buildBracketSVG
+    let leftLogoDataUrl = "/static/assets/logos/world_taekwondo.png";
+    let rightLogoDataUrl = "/static/assets/logos/truevar.png";
+    let logosLoadedAsDataUrls = false;
+    const BRACKET_PDF_DATE = ""; // this template gets no tournament.dateTime in its Jinja context — wrapSVG only prints this line when non-empty
+
+    const PAGE_W = 1123, PAGE_H = 794; // A4 landscape @ 96dpi
+    const BOX_HALF_W = 15; // half-width of the match-number badge rect — connector lines stop here, not at its center
+
+    function nextPowerOfTwo(n) {
+        let p = 1;
+        while (p < n) p *= 2;
+        return p;
+    }
+
+    // Textbook seeding table via recursive halving — identical to
+    // bracket_builder.html's own copy, since this has to reproduce the
+    // exact same tree given the exact same seed order.
+    function standardSeedSlotOrder(bracketSize) {
+        let order = [1];
+        while (order.length < bracketSize) {
+            const n = order.length * 2;
+            const next = [];
+            order.forEach(s => { next.push(s); next.push(n + 1 - s); });
+            order = next;
+        }
+        return order;
+    }
+
+    function placeStandard(seededEntries, bracketSize) {
+        const slotOrder = standardSeedSlotOrder(bracketSize);
+        const slots = new Array(bracketSize).fill(null);
+        slotOrder.forEach((seed, i) => { slots[i] = seededEntries[seed - 1] || null; });
+        return slots;
+    }
+
+    function placeClubCountrySpread(seededEntries, bracketSize) {
+        let slots = placeStandard(seededEntries, bracketSize);
+
+        function pairClash(a, b) {
+            if (!a || !b) return false;
+            return (a.clubId && a.clubId === b.clubId) || (a.country && a.country === b.country);
+        }
+
+        let improved = true, iterations = 0;
+        while (improved && iterations < 200) {
+            improved = false;
+            iterations++;
+            for (let i = 0; i < slots.length; i += 2) {
+                const a = slots[i], b = slots[i + 1];
+                if (!pairClash(a, b)) continue;
+                for (let j = 0; j < slots.length; j += 2) {
+                    if (j === i) continue;
+                    const c = slots[j], d = slots[j + 1];
+                    if (!c) continue;
+                    if (!pairClash(a, c) && !pairClash(b, d)) {
+                        slots[i + 1] = c; slots[j] = b;
+                        improved = true;
+                        break;
+                    }
+                }
+                if (improved) break;
+            }
+        }
+        return slots;
+    }
+
+    const PLACEMENT_STRATEGIES = {
+        standard: placeStandard,
+        club_country_spread: placeClubCountrySpread,
+    };
+
+    function roundPhaseCode(playersEntering) {
+        if (playersEntering === 2) return "F";
+        if (playersEntering === 4) return "SF";
+        if (playersEntering === 8) return "QF";
+        return `R${playersEntering}`;
+    }
+
+    function roundLabelText(playersEntering) {
+        if (playersEntering === 2) return "Final";
+        if (playersEntering === 4) return "Semifinals";
+        if (playersEntering === 8) return "Quarterfinals";
+        return `Round of ${playersEntering}`;
+    }
+
+    // Rebuilds the FULL single-elimination tree (every round, every bye)
+    // from scratch — a pure function of (seeded entries, placement fn),
+    // ported verbatim from bracket_builder.html. Match ids follow the
+    // exact same "{categoryCode}_r{round}_m{matchNumber}" scheme that
+    // page uses, which is what lets a still-unresolved corner's `source`
+    // pointer (already saved on the live match doc, from before that
+    // feeder match was decided) resolve correctly against the freshly
+    // rebuilt tree below — the id scheme depends only on categoryCode +
+    // round + matchNumber, never on WHO ends up in which slot.
+    function generateSingleElimination(categoryCode, entries, placementFn) {
+        const bracketSize = nextPowerOfTwo(entries.length);
+        const slots = placementFn(entries, bracketSize);
+
+        const rounds = [];
+        let prevRoundMatches = null;
+        let roundParticipantCount = bracketSize;
+        let roundNum = 1;
+
+        while (roundParticipantCount >= 1) {
+            if (roundNum > 1 && roundParticipantCount === prevRoundMatches.length) break;
+            const numMatches = roundNum === 1 ? bracketSize / 2 : prevRoundMatches.length / 2;
+            if (numMatches < 1) break;
+
+            const roundMatches = [];
+            for (let i = 0; i < numMatches; i++) {
+                const matchId = `${categoryCode}_r${roundNum}_m${i + 1}`;
+                let blue, red, status;
+                let winnerCorner = null;
+
+                function cornerFrom(slotEntry) {
+                    return slotEntry
+                        ? { entryId: slotEntry.entryId, athleteIds: slotEntry.athleteIds, name: slotEntry.name, country: slotEntry.country, clubId: slotEntry.clubId }
+                        : { entryId: null, source: null };
+                }
+
+                if (roundNum === 1) {
+                    const p1 = slots[i * 2], p2 = slots[i * 2 + 1];
+                    blue = cornerFrom(p1);
+                    red = cornerFrom(p2);
+                    if (p1 && !p2) {
+                        status = "walkover";
+                        winnerCorner = { entryId: p1.entryId, athleteIds: p1.athleteIds, name: p1.name, country: p1.country, clubId: p1.clubId };
+                    } else if (p2 && !p1) {
+                        status = "walkover";
+                        winnerCorner = { entryId: p2.entryId, athleteIds: p2.athleteIds, name: p2.name, country: p2.country, clubId: p2.clubId };
+                    } else if (p1 && p2) {
+                        status = "ready";
+                    } else {
+                        status = "walkover";
+                    }
+                } else {
+                    const m1 = prevRoundMatches[i * 2], m2 = prevRoundMatches[i * 2 + 1];
+                    blue = m1.status === "walkover"
+                        ? m1.winnerCorner
+                        : { entryId: null, source: { matchId: m1.matchId, slot: "winner" } };
+                    red = m2.status === "walkover"
+                        ? m2.winnerCorner
+                        : { entryId: null, source: { matchId: m2.matchId, slot: "winner" } };
+                    status = (blue.entryId && red.entryId) ? "ready" : "pending";
+                }
+
+                const playersEnteringRound = bracketSize / Math.pow(2, roundNum - 1);
+                roundMatches.push({
+                    matchId, categoryCode, round: roundNum, matchNumber: i + 1,
+                    roundPhase: roundPhaseCode(playersEnteringRound),
+                    blue, red, status, winnerEntryId: null, winnerCorner,
+                    courtId: null, queuePosition: null,
+                });
+            }
+
+            rounds.push(roundMatches);
+            if (roundMatches.length === 1) break;
+            prevRoundMatches = roundMatches;
+            roundNum++;
+        }
+
+        return { rounds, bracketSize };
+    }
+
+    // Fetches every bracket doc for this tournament — small, cheap
+    // documents (categoryCode/categoryLabel/entries/placementStrategy),
+    // fetched fresh each time the modal opens rather than cached, since
+    // this is meant to reflect whatever's currently saved.
+    async function loadBracketDocsForPdf() {
+        bracketDocsByCategoryCode = {};
+        try {
+            const snap = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("brackets").get();
+            snap.forEach(doc => {
+                const data = doc.data();
+                if (data.categoryCode) bracketDocsByCategoryCode[data.categoryCode] = data;
+            });
+        } catch (err) {
+            console.error("Failed to load bracket docs for PDF rebuild", err);
+        }
+    }
+
+    // ageCode -> { categoryCode -> { entryId -> { placement, members } } },
+    // straight off tournaments/{id}/division_rosters — the same
+    // collection compute_tournament_results_endpoint writes "placement"
+    // onto (see the 🏅 Compute Results feature above). Fetched fresh
+    // every time a bracket PDF is built so it always reflects whatever
+    // was most recently computed.
+    async function loadDivisionRostersForPdf() {
+        const rostersByAgeCode = {};
+        try {
+            const snap = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("division_rosters").get();
+            snap.forEach(doc => { rostersByAgeCode[doc.id] = (doc.data() || {}).athletes || {}; });
+        } catch (err) {
+            console.error("Failed to load division rosters for PDF rebuild", err);
+        }
+        return rostersByAgeCode;
+    }
+
+    // Both default logo paths are same-origin static assets, but once
+    // rasterized onto a <canvas> for the PDF export a canvas that has
+    // ever drawn an <image> loaded from anything but a data: URL gets
+    // treated as tainted the moment the SVG itself is loaded via a
+    // blob: URL — canvas.toDataURL() then silently fails. Converting
+    // both logos to self-contained base64 data URLs up front avoids
+    // that entirely; done lazily (only once, only when a bracket PDF is
+    // actually requested) rather than on every page load.
+    async function loadLogoAsDataUrl(url) {
+        if (!url || url.startsWith("data:")) return url || null;
+        try {
+            const res = await fetch(url);
+            if (!res.ok) return null;
+            const blob = await res.blob();
+            return await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        } catch (err) {
+            console.error("Failed to load logo as data URL:", url, err);
+            return null;
+        }
+    }
+
+    async function ensureLogosLoaded() {
+        if (logosLoadedAsDataUrls) return;
+        const [leftLogo, rightLogo] = await Promise.all([
+            loadLogoAsDataUrl(leftLogoDataUrl),
+            loadLogoAsDataUrl(rightLogoDataUrl),
+        ]);
+        if (leftLogo) leftLogoDataUrl = leftLogo;
+        if (rightLogo) rightLogoDataUrl = rightLogo;
+        logosLoadedAsDataUrls = true;
+    }
+
+    // "(R 0-2 PTF)" / "(B 2-0 PTF)" — shown under a match's number badge
+    // once that match has an actual result. The corner letter comes
+    // from the match doc's own `win` field ("blue"/"red" -> B/R);
+    // win_score and win_type are printed exactly as TkStrike's own sync
+    // wrote them (e.g. "2-0", "ptf") — only the type gets uppercased,
+    // matching the RSC/WDR/DQB/PTF/DSQ legend already on the sheet.
+    // Returns null for anything not yet decided (no `win` field yet) or
+    // for byes (never carry these fields at all).
+    function matchResultLabel(match) {
+        if (!match || !match.win || !match.win_score) return null;
+        const cornerLetter = match.win === "blue" ? "B" : match.win === "red" ? "R" : null;
+        if (!cornerLetter) return null;
+        const type = (match.win_type || "").toString().toUpperCase();
+        return `${cornerLetter} ${match.win_score}${type ? " " + type : ""}`;
+    }
+
+    // Rebuilds one category's full bracket tree from its saved doc, then
+    // overlays every non-bye match with whatever's currently true in
+    // matchesById (already kept live by this page's own realtime
+    // listener — see subscribeAll() — so no extra fetch is needed here).
+    // Byes never get overlaid: generateSingleElimination's own walkover
+    // detection already fully determines them, and bracket_builder.html
+    // never pushes walkover matches to Firestore in the first place (see
+    // pushToFirebase there), so there is nothing to overlay them WITH.
+    //
+    // rostersByAgeCode supplies the Classification table's names — see
+    // loadDivisionRostersForPdf above. ageCode itself isn't stored on
+    // the bracket doc, so it's derived from categoryCode the same way
+    // Bulk Edit's "entire age division" scoping already does (see
+    // ageCodeForCategoryCode near the top of this script).
+    function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
+        const entries = (bracketDoc.entries || []).slice().sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
+        if (entries.length < 2) return null; // no bracket doc should exist for these anyway, but guard regardless
+
+        const placementFn = PLACEMENT_STRATEGIES[bracketDoc.placementStrategy] || placeStandard;
+        const built = generateSingleElimination(bracketDoc.categoryCode, entries, placementFn);
+
+        const liveMatchByKey = {};
+        matchesById.forEach(m => {
+            if (m.categoryCode !== bracketDoc.categoryCode) return;
+            if (m.bracketRound == null || m.bracketMatchNumber == null) return;
+            liveMatchByKey[`${m.bracketRound}_${m.bracketMatchNumber}`] = m;
+        });
+
+        built.rounds.forEach(round => round.forEach(m => {
+            if (m.status === "walkover") return;
+            const live = liveMatchByKey[`${m.round}_${m.matchNumber}`];
+            if (!live) { m.notInDatabase = true; return; } // structurally real, but no match doc currently exists for it
+            m.status = live.status;
+            m.winnerEntryId = live.winnerEntryId || null;
+            m.blue = live.blue || m.blue;
+            m.red = live.red || m.red;
+            m.courtId = live.courtId;
+            m.queuePosition = live.queuePosition;
+            m.displayNumber = live.displayNumber;
+            m.roundPhase = live.roundPhase || m.roundPhase;
+            // Result facts — TkStrike's own FirebaseSyncPlugin writes
+            // these directly onto the match doc once a fight actually
+            // finishes; not present at all until then, which is exactly
+            // what makes matchResultLabel() return null for anything
+            // still pending/ready.
+            m.win = live.win || null;
+            m.win_score = live.win_score || null;
+            m.win_type = live.win_type || null;
+        }));
+
+        const ageCode = ageCodeForCategoryCode(bracketDoc.categoryCode);
+        const rosterEntries = (ageCode && rostersByAgeCode[ageCode] && rostersByAgeCode[ageCode][bracketDoc.categoryCode]) || {};
+        const placements = {}; // entryId -> placement (1/2/3/5/...), only for entries Compute Results has actually placed
+        Object.entries(rosterEntries).forEach(([entryId, entry]) => {
+            if (entry && entry.placement != null) placements[entryId] = entry.placement;
+        });
+
+        return {
+            categoryCode: bracketDoc.categoryCode,
+            categoryLabel: bracketDoc.categoryLabel || bracketDoc.categoryCode,
+            entries,
+            rounds: built.rounds,
+            bracketSize: built.bracketSize,
+            placements,
+        };
+    }
+
+    async function prepareBracketPdfData() {
+        const [, , rostersByAgeCode] = await Promise.all([
+            loadBracketDocsForPdf(),
+            ensureLogosLoaded(),
+            loadDivisionRostersForPdf(),
+        ]);
+        reconstructedBrackets = Object.values(bracketDocsByCategoryCode)
+            .map(bracketDoc => reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode))
+            .filter(Boolean)
+            .sort((a, b) => a.categoryLabel.localeCompare(b.categoryLabel));
+        bracketMatchById = {};
+        reconstructedBrackets.forEach(b => b.rounds.forEach(round => round.forEach(m => { bracketMatchById[m.matchId] = m; })));
+    }
+
+    // A participant slot with no entryId yet is either a genuine
+    // permanent bye (no source — plain "BYE") or fed by an earlier match
+    // that hasn't resolved yet (shown as "101 Winner" using that
+    // feeder's own displayNumber, resolved from bracketMatchById).
+    function bracketParticipantLabel(entries, participant) {
+        if (participant.entryId) {
+            const e = entries.find(x => x.entryId === participant.entryId);
+            const name = e ? e.name : participant.entryId;
+            const country = e && e.country ? ` (${e.country})` : "";
+            return `${name}${country}`;
+        }
+        if (participant.source) {
+            const feeder = bracketMatchById[participant.source.matchId];
+            const num = feeder && feeder.displayNumber != null ? feeder.displayNumber : "?";
+            return `${num} Winner`;
+        }
+        return "BYE";
+    }
+
+    function bracketParticipantDisplay(bracket, participant) {
+        return bracketParticipantLabel(bracket.entries, participant);
+    }
+
+    function bracketParticipantClubName(bracket, participant) {
+        if (!participant || !participant.entryId) return "";
+        const e = bracket.entries.find(x => x.entryId === participant.entryId);
+        return e && e.clubName ? e.clubName : "";
+    }
+
+    // ── The SVG draw-sheet builder itself — ported verbatim from
+    // bracket_builder.html's buildBracketSVG/wrapSVG, with only the
+    // participant-lookup calls renamed (bracketParticipant*) to avoid
+    // colliding with this page's own participantLabel(corner), which has
+    // a different signature and reads from a different data source. ──
+    function buildBracketSVG(bracket) {
+        const HEADER_H = 92, FOOTER_H = 150, MARGIN_X = 16, NAME_W = 190, FINAL_GAP = 70;
+        const bracketSize = bracket.bracketSize;
+        const numRounds = bracket.rounds.length;
+        const totalWidth = PAGE_W, totalHeight = PAGE_H;
+        const svgParts = [];
+
+        function line(x1, y1, x2, y2) {
+            svgParts.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#1e293b" stroke-width="1"/>`);
+        }
+        function text(x, y, anchor, str, opts) {
+            opts = opts || {};
+            svgParts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-size="${opts.size || 10}" font-weight="${opts.bold ? 700 : 400}" font-family="Arial, sans-serif" fill="${opts.color || "#0f172a"}">${escapeHtml(str)}</text>`);
+        }
+        function badge(x, y, str, resultLabel) {
+            svgParts.push(`<rect x="${(x - BOX_HALF_W).toFixed(1)}" y="${(y - 8).toFixed(1)}" width="${BOX_HALF_W * 2}" height="16" fill="#fff" stroke="#1e293b" stroke-width="1"/>`);
+            text(x, y + 3.5, "middle", str, { size: 8.5 });
+            // "(R 0-2 PTF)" style result, printed just under the badge
+            // once matchResultLabel() has something to show — see that
+            // function's own comment for exactly where these fields
+            // come from.
+            if (resultLabel) text(x, y + 25, "middle", resultLabel, { size: 9, color: "#64748b" });
+        }
+        function estimateTextWidth(str, fontSize) {
+            if (!__measureCanvasCtx) {
+                try { __measureCanvasCtx = document.createElement("canvas").getContext("2d"); } catch (err) { __measureCanvasCtx = null; }
+            }
+            if (!__measureCanvasCtx) return String(str ?? "").length * fontSize * 0.55;
+            __measureCanvasCtx.font = `${fontSize}px Arial, sans-serif`;
+            return __measureCanvasCtx.measureText(String(str ?? "")).width;
+        }
+        function drawMerge(xFeed1, y1, xFeed2, y2, xOutCenter) {
+            line(xFeed1, y1, xOutCenter, y1);
+            line(xFeed2, y2, xOutCenter, y2);
+            line(xOutCenter, y1, xOutCenter, y2);
+        }
+        function drawElbowInto(xFeedEdge, yFeed, xOutCenter, yOut) {
+            line(xFeedEdge, yFeed, xOutCenter, yFeed);
+            if (yFeed !== yOut) line(xOutCenter, yFeed, xOutCenter, yOut);
+        }
+
+        // Trivial case: a 2-entry bracket is just the Final — laid out
+        // the same way as a real round-1 pair (see the general path
+        // below): one fighter on the left margin, one on the right,
+        // each with its own line running in toward the center match
+        // badge, mirroring bracket_builder.html's own fix for this case.
+        if (bracketSize <= 2) {
+            const finalMatch = bracket.rounds[0][0];
+            const cx = totalWidth / 2, cy = HEADER_H + (totalHeight - HEADER_H - FOOTER_H) / 2;
+
+            const headerY = 70, headerH = 18;
+            svgParts.push(`<rect x="10" y="${headerY}" width="${totalWidth - 20}" height="${headerH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
+            text(cx, 82, "middle", "Final", { bold: true, size: 9 });
+
+            const blueName = bracketParticipantDisplay(bracket, finalMatch.blue);
+            const blueClub = bracketParticipantClubName(bracket, finalMatch.blue);
+            const redName = bracketParticipantDisplay(bracket, finalMatch.red);
+            const redClub = bracketParticipantClubName(bracket, finalMatch.red);
+            const nameFontSize = 11, clubFontSize = 10;
+
+            text(MARGIN_X, cy - 1.5, "start", blueName, { size: nameFontSize });
+            const blueW = estimateTextWidth(blueName, nameFontSize);
+            if (blueClub) text(MARGIN_X, cy + clubFontSize + 0.5, "start", blueClub, { size: clubFontSize, color: "#64748b" });
+            const blueFeedX = MARGIN_X + blueW + 4;
+
+            text(totalWidth - MARGIN_X, cy - 1.5, "end", redName, { size: nameFontSize });
+            const redW = estimateTextWidth(redName, nameFontSize);
+            if (redClub) text(totalWidth - MARGIN_X - redW, cy + clubFontSize + 0.5, "start", redClub, { size: clubFontSize, color: "#64748b" });
+            const redFeedX = totalWidth - MARGIN_X - redW - 4;
+
+            line(blueFeedX, cy, cx, cy);
+            line(redFeedX, cy, cx, cy);
+            badge(cx, cy, finalMatch.displayNumber ?? "", matchResultLabel(finalMatch));
+
+            return { svg: wrapBracketSVG(totalWidth, totalHeight, svgParts, bracket, cx), width: totalWidth, height: totalHeight };
+        }
+
+        const halfCount = bracket.rounds[0].length / 2;
+        const centerX = totalWidth / 2;
+
+        const bodyHeight = totalHeight - HEADER_H - FOOTER_H;
+        const MATCH_H = bodyHeight / halfCount;
+        const ROW_H = Math.min(26, MATCH_H * 0.5);
+        const nameFontSize = Math.max(6, Math.min(9, MATCH_H * 0.2));
+        const clubFontSize = Math.max(6.5, nameFontSize * 0.9);
+
+        const bodyWidthPerSide = centerX - MARGIN_X - NAME_W - FINAL_GAP;
+        const ROUND_W = numRounds > 1 ? bodyWidthPerSide / (numRounds - 1) : 0;
+
+        function xRoundLeft(r) { return MARGIN_X + NAME_W + r * ROUND_W; }
+        function xRoundRight(r) { return totalWidth - MARGIN_X - NAME_W - r * ROUND_W; }
+
+        const leftRounds = [], rightRounds = [];
+        const round0 = bracket.rounds[0];
+        leftRounds[0] = round0.slice(0, halfCount).map((m, i) => ({ match: m, y: HEADER_H + i * MATCH_H + MATCH_H / 2 }));
+        rightRounds[0] = round0.slice(halfCount).map((m, i) => ({ match: m, y: HEADER_H + i * MATCH_H + MATCH_H / 2 }));
+
+        for (let r = 1; r <= numRounds - 2; r++) {
+            const roundMatches = bracket.rounds[r];
+            const half = roundMatches.length / 2;
+            leftRounds[r] = roundMatches.slice(0, half).map((m, i) => ({
+                match: m, y: (leftRounds[r - 1][2 * i].y + leftRounds[r - 1][2 * i + 1].y) / 2,
+            }));
+            rightRounds[r] = roundMatches.slice(half).map((m, i) => ({
+                match: m, y: (rightRounds[r - 1][2 * i].y + rightRounds[r - 1][2 * i + 1].y) / 2,
+            }));
+        }
+
+        [
+            { side: leftRounds[0], nameX: MARGIN_X, anchor: "start", boxX: xRoundLeft(0), dir: 1 },
+            { side: rightRounds[0], nameX: totalWidth - MARGIN_X, anchor: "end", boxX: xRoundRight(0), dir: -1 },
+        ].forEach(({ side, nameX, anchor, boxX, dir }) => {
+            side.forEach((entry) => {
+                const { match, y } = entry;
+                if (match.status === "walkover") {
+                    const winnerStr = bracketParticipantDisplay(bracket, match.winnerCorner);
+                    const winnerClub = bracketParticipantClubName(bracket, match.winnerCorner);
+                    text(nameX, y - 1.5, anchor, winnerStr, { size: nameFontSize });
+                    const nameW = estimateTextWidth(winnerStr, nameFontSize);
+                    const nameStartX = dir === 1 ? nameX : nameX - nameW;
+                    if (winnerClub) text(nameStartX, y + clubFontSize + 0.5, "start", winnerClub, { size: clubFontSize, color: "#64748b" });
+                    const winnerFeedX = dir === 1 ? nameX + nameW + 4 : nameX - nameW - 4;
+                    line(winnerFeedX, y, boxX, y);
+                    entry.exitX = boxX;
+                    return;
+                }
+
+                const topY = y - ROW_H / 2, botY = y + ROW_H / 2;
+                const topStr = bracketParticipantDisplay(bracket, match.blue);
+                const topClub = bracketParticipantClubName(bracket, match.blue);
+                const botStr = bracketParticipantDisplay(bracket, match.red);
+                const botClub = bracketParticipantClubName(bracket, match.red);
+
+                text(nameX, topY - 1.5, anchor, topStr, { size: nameFontSize });
+                text(nameX, botY - 1.5, anchor, botStr, { size: nameFontSize });
+
+                const topW = estimateTextWidth(topStr, nameFontSize);
+                const botW = estimateTextWidth(botStr, nameFontSize);
+                const topStartX = dir === 1 ? nameX : nameX - topW;
+                const botStartX = dir === 1 ? nameX : nameX - botW;
+                if (topClub) text(topStartX, topY + clubFontSize + 0.5, "start", topClub, { size: clubFontSize, color: "#64748b" });
+                if (botClub) text(botStartX, botY + clubFontSize + 0.5, "start", botClub, { size: clubFontSize, color: "#64748b" });
+
+                const topFeedX = dir === 1 ? nameX + topW + 4 : nameX - topW - 4;
+                const botFeedX = dir === 1 ? nameX + botW + 4 : nameX - botW - 4;
+
+                drawMerge(topFeedX, topY, botFeedX, botY, boxX);
+                badge(boxX, y, match.displayNumber ?? "", matchResultLabel(match));
+                entry.exitX = boxX + dir * BOX_HALF_W;
+            });
+        });
+
+        for (let r = 1; r < leftRounds.length; r++) {
+            leftRounds[r].forEach((entry, i) => {
+                const feed1 = leftRounds[r - 1][2 * i].exitX;
+                const feed2 = leftRounds[r - 1][2 * i + 1].exitX;
+                drawMerge(feed1, leftRounds[r - 1][2 * i].y, feed2, leftRounds[r - 1][2 * i + 1].y, xRoundLeft(r));
+                badge(xRoundLeft(r), entry.y, entry.match.displayNumber ?? "", matchResultLabel(entry.match));
+                entry.exitX = xRoundLeft(r) + BOX_HALF_W;
+            });
+            rightRounds[r].forEach((entry, i) => {
+                const feed1 = rightRounds[r - 1][2 * i].exitX;
+                const feed2 = rightRounds[r - 1][2 * i + 1].exitX;
+                drawMerge(feed1, rightRounds[r - 1][2 * i].y, feed2, rightRounds[r - 1][2 * i + 1].y, xRoundRight(r));
+                badge(xRoundRight(r), entry.y, entry.match.displayNumber ?? "", matchResultLabel(entry.match));
+                entry.exitX = xRoundRight(r) - BOX_HALF_W;
+            });
+        }
+
+        const lastLeft = leftRounds[leftRounds.length - 1][0];
+        const lastRight = rightRounds[rightRounds.length - 1][0];
+        const yFinal = (lastLeft.y + lastRight.y) / 2;
+        const finalMatch = bracket.rounds[numRounds - 1][0];
+
+        drawElbowInto(lastLeft.exitX, lastLeft.y, centerX, yFinal);
+        drawElbowInto(lastRight.exitX, lastRight.y, centerX, yFinal);
+        badge(centerX, yFinal, finalMatch.displayNumber ?? "", matchResultLabel(finalMatch));
+
+        const roundLabels = [];
+        for (let r = 0; r < numRounds; r++) roundLabels.push(roundLabelText(bracketSize / Math.pow(2, r)));
+
+        const headerY = 70, headerH = 18;
+        svgParts.push(`<rect x="${10}" y="${headerY}" width="${totalWidth - 2 * 10}" height="${headerH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
+
+        for (let r = 0; r < numRounds - 1; r++) {
+            text(xRoundLeft(r), 82, "middle", roundLabels[r], { bold: true, size: 9 });
+            text(xRoundRight(r), 82, "middle", roundLabels[r], { bold: true, size: 9 });
+        }
+        text(centerX, 82, "middle", roundLabels[numRounds - 1], { bold: true, size: 9 });
+
+        return { svg: wrapBracketSVG(totalWidth, totalHeight, svgParts, bracket, centerX, totalHeight - FOOTER_H), width: totalWidth, height: totalHeight };
+    }
+
+    // Builds the 4 physical Classification rows (1st, 2nd, two 3rd-place
+    // slots) from whatever the 🏅 Compute Results feature has placed so
+    // far (bracket.placements — entryId -> 1/2/3/5/...). A rank with no
+    // placed entry yet (results not computed, or that far into the
+    // bracket not decided) falls back to just the bare rank number, same
+    // as the sheet always showed before this existed. 3rd place gets up
+    // to two names since this bracket format has no separate bronze
+    // match (see compute_tournament_results_endpoint's own placement
+    // math) — both semifinal losers can legitimately share it.
+    function buildClassificationRows(bracket) {
+        const placements = bracket.placements || {};
+        const byRank = {};
+        bracket.entries.forEach(e => {
+            const rank = placements[e.entryId];
+            if (rank == null) return;
+            (byRank[rank] = byRank[rank] || []).push(e);
+        });
+
+        const formatEntry = (rank, entry) => {
+            const noc = entry.country ? ` (${entry.country})` : "";
+            return `${rank}. ${entry.name}${noc}`;
+        };
+
+        const rows = [];
+        rows.push(byRank[1] && byRank[1][0] ? formatEntry(1, byRank[1][0]) : "1");
+        rows.push(byRank[2] && byRank[2][0] ? formatEntry(2, byRank[2][0]) : "2");
+        const bronze = byRank[3] || [];
+        rows.push(bronze[0] ? formatEntry(3, bronze[0]) : "3");
+        rows.push(bronze[1] ? formatEntry(3, bronze[1]) : "3");
+        return rows;
+    }
+
+    // Shrinks the row's font size just enough to fit the box width —
+    // "Samuel Chudý (SVK)" and similar are usually fine at 9px, but a
+    // long name + long club/country combo can overflow the fixed
+    // 180px-wide Classification box otherwise.
+    function fitClassificationFontSize(str, maxWidth) {
+        if (!__measureCanvasCtx) {
+            try { __measureCanvasCtx = document.createElement("canvas").getContext("2d"); } catch (err) { __measureCanvasCtx = null; }
+        }
+        if (!__measureCanvasCtx) return 9;
+        let size = 9;
+        while (size > 6.5) {
+            __measureCanvasCtx.font = `${size}px Arial, sans-serif`;
+            if (__measureCanvasCtx.measureText(str).width <= maxWidth) return size;
+            size -= 0.5;
+        }
+        return 6.5;
+    }
+
+    function wrapBracketSVG(totalWidth, totalHeight, bodyParts, bracket, centerX, footerTop) {
+        footerTop = footerTop || (totalHeight - 150);
+        const parts = [];
+        parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${totalHeight}" width="${totalWidth}" height="${totalHeight}" font-family="Arial, sans-serif">`);
+        parts.push(`<rect x="0" y="0" width="${totalWidth}" height="${totalHeight}" fill="#ffffff"/>`);
+
+        let logoSize = 72;
+        if (leftLogoDataUrl) {
+            parts.push(`<image href="${leftLogoDataUrl}" x="10" y="0" width="${logoSize}" height="${64}" preserveAspectRatio="xMidYMid meet"/>`);
+        }
+        logoSize = 80;
+        if (rightLogoDataUrl) {
+            parts.push(`<image href="${rightLogoDataUrl}" x="${totalWidth - logoSize - 10}" y="0" width="${logoSize}" height="${64}" preserveAspectRatio="xMidYMid meet"/>`);
+        }
+
+        parts.push(`<text x="${centerX}" y="24" text-anchor="middle" font-size="16" font-weight="700" fill="#0f172a">${escapeHtml(TOURNAMENT_TITLE)}</text>`);
+        if (BRACKET_PDF_DATE) parts.push(`<text x="${centerX}" y="42" text-anchor="middle" font-size="12" fill="#0f172a">${escapeHtml(BRACKET_PDF_DATE)}</text>`);
+        parts.push(`<text x="${centerX}" y="60" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">${escapeHtml(bracket.categoryLabel)} Contestants : ${bracket.entries.length}</text>`);
+        parts.push(...bodyParts);
+
+        const clsX = centerX - 90, clsY = footerTop, clsW = 180, clsH = 92;
+        parts.push(`<rect x="${clsX}" y="${clsY}" width="${clsW}" height="20" fill="none" stroke="#1e293b"/>`);
+        parts.push(`<text x="${centerX}" y="${clsY + 14}" text-anchor="middle" font-size="10" font-weight="700">Classification</text>`);
+        buildClassificationRows(bracket).forEach((label, i) => {
+            const rowY = clsY + 20 + i * 18;
+            parts.push(`<rect x="${clsX}" y="${rowY}" width="${clsW}" height="18" fill="#fff" stroke="#1e293b"/>`);
+            const fitSize = fitClassificationFontSize(label, clsW - 16);
+            parts.push(`<text x="${clsX + 8}" y="${rowY + 13}" font-size="${fitSize}">${escapeHtml(label)}</text>`);
+        });
+
+        const legendY = footerTop + 110;
+        const legendMargin = 16;
+        const legendW = totalWidth - 2 * legendMargin;
+        const legendRowH = 20;
+        const legendFontSize = 8.5;
+        const legendGap = 30;
+        const legendItems = [
+            "RSC: Win by Referee Stops Contest",
+            "WDR: Win by Withdrawal",
+            "DQB: Disqualification (unsportsmanlike)",
+            "PTF: Win by final score",
+            "DSQ: Disqualification",
+        ];
+        parts.push(`<rect x="${legendMargin}" y="${legendY}" width="${legendW}" height="${legendRowH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
+        let legendX = legendMargin + 10;
+        legendItems.forEach(itemText => {
+            parts.push(`<text x="${legendX}" y="${legendY + legendRowH / 2 + 3}" font-size="${legendFontSize}" font-family="Arial, sans-serif" fill="#0f172a">${escapeHtml(itemText)}</text>`);
+            legendX += itemText.length * legendFontSize * 0.55 + legendGap;
+        });
+
+        parts.push(`</svg>`);
+        return parts.join("\n");
+    }
+
+    function svgStringToPngDataUrl(svgString, width, height, scale) {
+        return new Promise((resolve, reject) => {
+            const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+            const url = URL.createObjectURL(svgBlob);
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement("canvas");
+                canvas.width = width * scale;
+                canvas.height = height * scale;
+                const ctx = canvas.getContext("2d");
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                URL.revokeObjectURL(url);
+                resolve(canvas.toDataURL("image/png"));
+            };
+            img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
+            img.src = url;
+        });
+    }
+
+    // Shared by every "generate something then send it straight to
+    // print" function on this page. Positioned far off-screen with REAL
+    // dimensions (not 0x0) so the rendering engine has something to
+    // actually paint — see printHtmlInFrame's own comment for the full
+    // story on why this exists.
+    function createHiddenPrintIframe() {
+        const iframe = document.createElement("iframe");
+        iframe.style.position = "fixed";
+        iframe.style.top = "-10000px";
+        iframe.style.left = "-10000px";
+        iframe.style.width = "1200px";
+        iframe.style.height = "1600px";
+        iframe.style.border = "0";
+        document.body.appendChild(iframe);
+        return iframe;
+    }
+    // Exact physical size of the sheets svgStringToPngDataUrl produces
+    // (PAGE_W x PAGE_H px @ 96dpi is, not coincidentally, A4). Declaring
+    // @page AND the <img> itself in these exact mm values — instead of
+    // "size: landscape" + "width: 100%" (or vh) — means the browser never
+    // has to reconcile our image's aspect ratio against whatever its own
+    // default paper size happens to be. Any mismatch there (Letter vs A4,
+    // or a few mm eaten by a non-zeroable minimum margin) is what made the
+    // image a hair taller than one printable page, which Chrome resolved
+    // by overflowing the remainder onto a second page — blank when the
+    // overflow was tiny (original bug), or containing sliced content when
+    // forcing height:100vh made the overflow worse (my last fix).
+    const MM_PER_PX = 25.4 / 96;
+    const BRACKET_PAGE_MM = { width: PAGE_W * MM_PER_PX, height: PAGE_H * MM_PER_PX };
+
+    function printHtmlInFrame(bodyHtml, opts) {
+        opts = opts || {};
+        const imgSizeCss = opts.pageSizeMm
+            ? `width: ${opts.pageSizeMm.width}mm; height: ${opts.pageSizeMm.height}mm;`
+            : `width: 100%;`;
+        const pageSizeCss = opts.pageSizeMm
+            ? `size: ${opts.pageSizeMm.width}mm ${opts.pageSizeMm.height}mm;`
+            : (opts.landscape ? "size: landscape;" : "");
+
+        return new Promise((resolve, reject) => {
+            const iframe = createHiddenPrintIframe();
+            const cleanup = () => {
+                setTimeout(() => {
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                }, 1000);
+            };
+
+            const doc = iframe.contentWindow.document;
+            doc.open();
+            doc.write(`<!DOCTYPE html><html><head><style>
+                    html, body { margin: 0; padding: 0; }
+                    img { ${imgSizeCss} display: block; page-break-after: always; page-break-inside: avoid; }
+                    img:last-child { page-break-after: auto; }
+                    @page { margin: 0;${pageSizeCss ? " " + pageSizeCss : ""} }
+                </style></head><body>${bodyHtml}</body></html>`);
+            doc.close();
+
+            // A table-only page (Club Standings) has no <img> tags at
+            // all, so this resolves immediately; a bracket sheet has
+            // one or more that must actually finish decoding first —
+            // printing before that happens is exactly what produced
+            // blank pages when this used a PDF-based approach.
+            const images = [...doc.images];
+            const whenReady = images.length === 0
+                ? Promise.resolve()
+                : Promise.all(images.map(img => img.complete
+                    ? Promise.resolve()
+                    : new Promise(res => { img.onload = res; img.onerror = res; })));
+
+            whenReady
+                // Even with zero images (a plain table), calling print()
+                // the instant doc.close() returns can catch the page
+                // mid-layout — borders in particular tend to paint in a
+                // later pass than text, which is why a table-only print
+                // could come out with text but no visible grid. This
+                // short settle delay is what actually fixed that.
+                .then(() => new Promise(res => setTimeout(res, 100)))
+                .then(() => {
+                    try {
+                        iframe.contentWindow.focus();
+                        iframe.contentWindow.print();
+                        resolve();
+                    } catch (e) {
+                        reject(e);
+                    } finally {
+                        cleanup();
+                    }
+                });
+        });
+    }
+
+    // landscape=true for content whose own pixel dimensions are wider
+    // than tall (bracket sheets, drawn at PAGE_W x PAGE_H — see
+    // buildBracketSVG) — without this, the browser defaults to
+    // portrait and squeezes a landscape image into a portrait page,
+    // leaving it tiny with huge blank margins top and bottom.
+    function printImagesSequence(dataUrls, landscape) {
+        return printHtmlInFrame(
+            dataUrls.map(u => `<img src="${u}">`).join(""),
+            landscape ? { landscape: true, pageSizeMm: BRACKET_PAGE_MM } : {}
+        );
+    }
+
+    // Rasterizes a real PDF FILE (not one we generated) into one PNG
+    // per page via pdf.js, so it can go through the exact same proven
+    // print path as everything else — see printHtmlInFrame's comment
+    // for why printing the PDF itself doesn't work. Used only for the
+    // KO/Protest/Friendly sheet templates (SHEET_CONFIGS entries with
+    // fillFields:false); the TA sheet and bracket sheets never touch
+    // this since they're already images we drew ourselves.
+    async function renderPdfUrlToPngDataUrls(url, scale) {
+        if (!window.pdfjsLib) throw new Error("PDF renderer failed to load — check your connection and retry.");
+        scale = scale || 2;
+        const pdf = await pdfjsLib.getDocument(url).promise;
+        const urls = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement("canvas");
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext("2d");
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            urls.push(canvas.toDataURL("image/png"));
+        }
+        return urls;
+    }
+
+    async function openBracketPdfModal() {
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>Bracket Sheets (PDF)</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <p class="lq-field-hint" style="margin-bottom:1rem;">
+                    Rebuilt live from what's currently saved — the bracket's seeding plus every match's current
+                    status, corners, court assignment, and (once decided) its result — shown under the match
+                    number as e.g. "B 2-0 PTF" — and the Classification box is filled in with real names once
+                    🏅 Compute Results has run. This never depends on bracket_builder.html's own browser session,
+                    so it works even if that page was closed, refreshed, or its local draft was otherwise lost.
+                    Every sheet here goes straight to print — nothing downloads or opens a preview.
+                </p>
+                <div id="bracket-pdf-list"><p class="lq-field-hint">Loading brackets…</p></div>
+                <div class="lq-modal-actions">
+                    <button class="btn btn-primary" id="bracket-pdf-print-all-btn" onclick="printAllBracketsPDF()" disabled>🖨 Print All</button>
+                    <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        `);
+
+        await prepareBracketPdfData();
+
+        const listEl = document.getElementById("bracket-pdf-list");
+        if (!listEl) return; // modal was closed while loading
+        const printAllBtn = document.getElementById("bracket-pdf-print-all-btn");
+
+        if (reconstructedBrackets.length === 0) {
+            listEl.innerHTML = `<p class="lq-field-hint">No brackets found for this tournament yet — push brackets from bracket_builder.html first.</p>`;
+            return;
+        }
+
+        printAllBtn.disabled = false;
+        listEl.innerHTML = reconstructedBrackets.map(b => {
+            const missing = b.rounds.some(r => r.some(m => m.notInDatabase));
+            return `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:.5rem; padding:.4rem 0; border-bottom:1px solid var(--lq-border); font-size:.85rem;">
+                    <span>${escapeHtml(b.categoryLabel)}${missing ? ` <span style="color:var(--lq-amber);">· some matches missing from DB</span>` : ""}</span>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="printSingleBracketPdf('${escapeAttr(b.categoryCode)}', this)">🖨 Print</button>
+                </div>
+            `;
+        }).join("");
+    }
+
+    // Builds and prints just ONE category's sheet — the per-row "🖨
+    // Print" button in the list above. Same single-page assembly
+    // buildAndPrintAllBracketsPdf uses per bracket, just without the
+    // multi-page loop.
+    async function printSingleBracketPdf(categoryCode, btnEl) {
+        const bracket = reconstructedBrackets.find(b => b.categoryCode === categoryCode);
+        if (!bracket) return;
+
+        const originalText = btnEl ? btnEl.textContent : null;
+        if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Printing…"; }
+
+        try {
+            const { svg } = buildBracketSVG(bracket);
+            const pngUrl = await svgStringToPngDataUrl(svg, PAGE_W, PAGE_H, 2);
+            await printImagesSequence([pngUrl], true);
+        } catch (err) {
+            console.error("Failed to print bracket sheet", err);
+            alert(err.message || "Failed to print — try again.");
+        } finally {
+            if (btnEl) { btnEl.disabled = false; btnEl.textContent = originalText; }
+        }
+    }
+
+    // Core image assembly, decoupled from any particular button's
+    // disabled/text state — two different entry points call this: the
+    // "📄 Bracket PDFs" modal's own "Print All" button, and the
+    // "🏅 Compute Results" modal's shortcut button below, which needs to
+    // manage its own button element instead. One PNG per category, each
+    // becoming its own printed page via printImagesSequence.
+    async function buildAndPrintAllBracketsPdf() {
+        if (reconstructedBrackets.length === 0) throw new Error("No brackets to print.");
+
+        const pngUrls = [];
+        for (const bracket of reconstructedBrackets) {
+            const { svg } = buildBracketSVG(bracket);
+            const pngUrl = await svgStringToPngDataUrl(svg, PAGE_W, PAGE_H, 2);
+            pngUrls.push(pngUrl);
+        }
+        await printImagesSequence(pngUrls, true);
+    }
+
+    async function printAllBracketsPDF() {
+        const btn = document.getElementById("bracket-pdf-print-all-btn");
+        if (btn) { btn.disabled = true; btn.textContent = "Printing…"; }
+        try {
+            await buildAndPrintAllBracketsPdf();
+        } catch (err) {
+            console.error("Failed to print brackets PDF", err);
+            alert(err.message || "Failed to print — try again.");
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "🖨 Print All"; }
+        }
+    }
+
+    // Shortcut from the 🏅 Compute Results modal: rebuild everything
+    // fresh (bracket docs + live matches + the placements that modal's
+    // own compute step just wrote) and go straight to print, skipping
+    // the "📄 Bracket PDFs" modal's category list — the natural next
+    // step right after computing results is usually "now give me the
+    // sheets", not browsing categories one at a time.
+    async function printResultsBracketsPdf() {
+        const btn = document.getElementById("results-print-brackets-btn");
+        if (btn) { btn.disabled = true; btn.textContent = "Printing…"; }
+        try {
+            await prepareBracketPdfData();
+            await buildAndPrintAllBracketsPdf();
+        } catch (err) {
+            console.error("Failed to print brackets PDF from results modal", err);
+            alert(err.message || "Failed to print — try again.");
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "🖨 Print Bracket PDFs (with Results)"; }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // CLUB STANDINGS — the "🏆 Club Standings" button. Tallies every
+    // club's 1st/2nd/3rd-place finishes (from tournaments/{id}/
+    // division_rosters — the same "placement" field 🏅 Compute Results
+    // writes) plus total won fights (from every match doc currently in
+    // matchesById, this page's own live realtime listener — see
+    // subscribeAll()), weights each by an admin-chosen point value, and
+    // produces one ranked PDF across every club. Ties share a place —
+    // standard competition ranking (1, 1, 3 — never 1, 1, 2).
+    //
+    // SINGLE-ATHLETE CATEGORIES: a category with exactly one registrant
+    // never gets a bracket, never gets any match docs (bracket_builder.
+    // html skips it entirely — see its own skippedSingleEntryCount), and
+    // so never gets a "placement" field written by Compute Results
+    // either — that endpoint only ever looks at categories that actually
+    // have match docs. The optional checkbox below credits these lone
+    // registrants with 1st place directly from the raw roster entry
+    // count, since crediting them can't come from anywhere else.
+    // ═══════════════════════════════════════════════════════════════════
+
+    function openClubStandingsModal() {
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>Club Standings (PDF)</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <p class="lq-field-hint" style="margin-bottom:1rem;">
+                    Ranks every club by a weighted score: 1st/2nd/3rd-place finishes (from 🏅 Compute Results)
+                    plus total won fights, each worth whatever points you set below. Ties share the same place.
+                </p>
+                <div class="lq-detail-grid">
+                    <label>Points per 1st <input type="number" id="cs-pts-first" value="7" step="any"></label>
+                    <label>Points per 2nd <input type="number" id="cs-pts-second" value="3" step="any"></label>
+                    <label>Points per 3rd <input type="number" id="cs-pts-third" value="1" step="any"></label>
+                    <label>Points per won fight <input type="number" id="cs-pts-won" value="1" step="any"></label>
+                    <label class="lq-checkbox-label lq-span-2">
+                        <input type="checkbox" id="cs-include-single">
+                        Include categories with only one registered athlete (awarded 1st automatically — no fight was needed for that medal)
+                    </label>
+                </div>
+                <div id="club-standings-error" class="lq-alert-error hidden"></div>
+                <div class="lq-modal-actions">
+                    <button class="btn btn-primary" id="club-standings-print-btn" onclick="printClubStandingsPdf()">🖨 Print</button>
+                    <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        `);
+    }
+
+    // clubId -> clubName, off the same denormalized roll-up
+    // get_registered_clubs reads (tournaments/{id}/meta/registeredClubs)
+    // — the single reliable place a club's display name lives,
+    // independent of which roster entry happens to be looked at.
+    async function loadRegisteredClubsForStandings() {
+        const clubNameById = {};
+        try {
+            const doc = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("meta").doc("registeredClubs").get();
+            const data = doc.exists ? doc.data() : {};
+            Object.entries(data || {}).forEach(([clubId, info]) => { clubNameById[clubId] = (info && info.clubName) || clubId; });
+        } catch (err) {
+            console.error("Failed to load registered clubs for standings", err);
+        }
+        return clubNameById;
+    }
+
+    async function printClubStandingsPdf() {
+        const errEl = document.getElementById("club-standings-error");
+        errEl.classList.add("hidden");
+
+        const ptsFirst = Number(document.getElementById("cs-pts-first").value) || 0;
+        const ptsSecond = Number(document.getElementById("cs-pts-second").value) || 0;
+        const ptsThird = Number(document.getElementById("cs-pts-third").value) || 0;
+        const ptsWon = Number(document.getElementById("cs-pts-won").value) || 0;
+        const includeSingle = document.getElementById("cs-include-single").checked;
+
+        const btn = document.getElementById("club-standings-print-btn");
+        btn.disabled = true;
+        btn.textContent = "Printing…";
+
+        try {
+            const [rostersByAgeCode, clubNameById] = await Promise.all([
+                loadDivisionRostersForPdf(),
+                loadRegisteredClubsForStandings(),
+            ]);
+
+            // clubId -> { first, second, third, wonFights }
+            const tally = {};
+            const bump = (clubId, field, amount) => {
+                if (!clubId) return;
+                const row = tally[clubId] || (tally[clubId] = { first: 0, second: 0, third: 0, wonFights: 0 });
+                row[field] += amount;
+            };
+
+            Object.values(rostersByAgeCode).forEach(categoriesForAge => {
+                Object.values(categoriesForAge).forEach(entriesForCategory => {
+                    const entries = Object.values(entriesForCategory || {});
+                    entries.forEach(entry => {
+                        const clubId = entry.members && entry.members[0] ? entry.members[0].clubId : null;
+                        if (entry.placement === 1) bump(clubId, "first", 1);
+                        else if (entry.placement === 2) bump(clubId, "second", 1);
+                        else if (entry.placement === 3) bump(clubId, "third", 1);
+                    });
+                    if (includeSingle && entries.length === 1 && entries[0].placement == null) {
+                        const clubId = entries[0].members && entries[0].members[0] ? entries[0].members[0].clubId : null;
+                        bump(clubId, "first", 1);
+                    }
+                });
+            });
+
+            // Won fights: every match doc currently loaded (this page's
+            // own live listener), counted for whichever corner actually
+            // holds winnerEntryId — covers both real decisions and any
+            // manual walkover set via this page's own detail modal.
+            matchesById.forEach(m => {
+                if (!m.winnerEntryId) return;
+                const winnerCorner = m.blue && m.blue.entryId === m.winnerEntryId ? m.blue
+                    : m.red && m.red.entryId === m.winnerEntryId ? m.red
+                        : null;
+                if (winnerCorner && winnerCorner.clubId) bump(winnerCorner.clubId, "wonFights", 1);
+            });
+
+            const rows = Object.entries(tally).map(([clubId, counts]) => ({
+                clubId,
+                clubName: clubNameById[clubId] || clubId,
+                ...counts,
+                points: counts.first * ptsFirst + counts.second * ptsSecond + counts.third * ptsThird + counts.wonFights * ptsWon,
+            })).filter(r => r.first || r.second || r.third || r.wonFights);
+
+            if (rows.length === 0) {
+                errEl.textContent = "Nothing to rank yet — run 🏅 Compute Results first, or check the box to include single-athlete categories.";
+                errEl.classList.remove("hidden");
+                return;
+            }
+
+            rows.sort((a, b) => b.points - a.points || a.clubName.localeCompare(b.clubName));
+
+            // Standard competition ranking — ties share a place, and the
+            // next distinct place skips ahead by however many tied
+            // (1, 1, 3 — never 1, 1, 2).
+            let place = 0;
+            rows.forEach((r, i) => {
+                if (i === 0 || r.points !== rows[i - 1].points) place = i + 1;
+                r.place = place;
+            });
+
+            await printHtmlInFrame(buildClubStandingsHtml(rows));
+            closeModal();
+        } catch (err) {
+            console.error("Failed to print club standings PDF", err);
+            errEl.textContent = err.message || "Failed to print — try again.";
+            errEl.classList.remove("hidden");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "🖨 Print";
+        }
+    }
+
+    // Same visual language as the reference registration/weigh-in
+    // sheets: bold tournament title, a subheading, and a bordered
+    // table — built as plain HTML now (not jsPDF/autoTable), since it
+    // goes through printHtmlInFrame like everything else — see that
+    // function's own comment for why nothing on this page produces an
+    // actual PDF for printing purposes anymore.
+    function buildClubStandingsHtml(rows) {
+        const cell = (content, extra) => `<td style="border:1px solid #111; padding:6px 8px; ${extra || "text-align:center;"}">${content}</td>`;
+        const rowsHtml = rows.map(r => `
+            <tr>
+                ${cell(escapeHtml(String(r.place)))}
+                ${cell(escapeHtml(r.clubName), "text-align:left;")}
+                ${cell(r.first)}
+                ${cell(r.second)}
+                ${cell(r.third)}
+                ${cell(r.wonFights)}
+                ${cell(r.points)}
+            </tr>
+        `).join("");
+
+        const th = (label, extra) => `<th style="border:1px solid #111; padding:6px 8px; font-weight:700; ${extra || "text-align:center;"}">${escapeHtml(label)}</th>`;
+
+        return `
+            <div style="font-family: Arial, Helvetica, sans-serif; padding: 24px; box-sizing: border-box; color: #111;">
+                <div style="font-size: 20px; font-weight: 700;">${escapeHtml(TOURNAMENT_TITLE || "Tournament")}</div>
+                <div style="font-size: 16px; font-weight: 700; margin: 4px 0 16px;">Club Standings</div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <thead>
+                        <tr>
+                            ${th("Place")}
+                            ${th("Club", "text-align:left;")}
+                            ${th("1st")}
+                            ${th("2nd")}
+                            ${th("3rd")}
+                            ${th("Won Fights")}
+                            ${th("Points")}
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // INSERT MATCH — the "+" that appears when hovering a gap between two
     // rows (or above the first / below the last, or on an empty court).
     // Creates a brand-new match doc slotted exactly there, without
@@ -1293,15 +2569,14 @@ JAVASCRIPT
                 <div class="lq-detail-grid" style="margin-top:1rem;">
                     <label>Round Phase
                         <select id="insert-roundPhase">
-                            <option value="EXH" selected>EXH (exhibition/friendly)</option>
-                            ${ROUND_PHASE_OPTIONS.map(p => `<option value="${p}">${p}</option>`).join("")}
+                            ${ROUND_PHASE_OPTIONS.toReversed().map(p => `<option value="${p}">${p}</option>`).join("")}
                         </select>
                     </label>
                     <label>&nbsp;</label>
-                    <label>Round Time <input type="text" id="insert-roundTime" placeholder="e.g. 02:00"></label>
-                    <label>Break Time <input type="text" id="insert-breakTime" placeholder="e.g. 01:00"></label>
+                    <label>Round Time <input type="text" id="insert-roundTime" value="01:00" placeholder="e.g. 01:00"></label>
+                    <label>Break Time <input type="text" id="insert-breakTime" value="00:30" placeholder="e.g. 00:30"></label>
                     <label>PSS Size <input type="number" id="insert-pssSize" placeholder="optional"></label>
-                    <label>Hit Level <input type="number" id="insert-hitLevel" placeholder="optional"></label>
+                    <label>Hit Level <input type="number" id="insert-hitLevel" value="20" placeholder="optional"></label>
                     <label class="lq-checkbox-label lq-span-2">
                         <input type="checkbox" id="insert-isRanked">
                         Ranked / official bout (counts toward standings) — off by default for inserted matches
@@ -1466,7 +2741,7 @@ JAVASCRIPT
                 // Built straight from the in-memory newMatch object, not
                 // a matchesById lookup — the realtime listener may not
                 // have delivered this new document back yet.
-                openSheetPreviewForMatch(newMatch, "friendly");
+                quickPrintSheetForMatch(newMatch, "friendly", null);
             }
         } catch (err) {
             console.error("Insert failed", err);
@@ -1681,7 +2956,7 @@ JAVASCRIPT
         // Row click opens the fight detail/edit modal. Two quick-print
         // icons on the row cover TA + Friendly sheets instantly; the KO
         // and Protest sheets, plus previews of all four, live inside the
-        // detail modal itself (see openSheetPreview).
+        // detail modal itself (see quickPrintSheet).
         row.onclick = () => { if (!row.classList.contains("dragging")) openDetailModal(m.id); };
 
         const statusClass = isDone(m)
@@ -2021,41 +3296,15 @@ JAVASCRIPT
     // Backward-compatible thin wrapper — TA sheet specifically.
     function buildTaSheetDataUrl(m) { return buildSheetDataUrl(m, "ta"); }
 
-    // Prints a PDF template directly, unmodified — used for any sheet kind
-    // with fillFields:false. Loads it into a hidden iframe (same pattern as
-    // printImageDataUrl) and lets the browser's own PDF renderer handle it;
-    // there's nothing to draw, so no canvas is involved.
-    function printPdfUrl(url) {
-        return new Promise((resolve, reject) => {
-            const iframe = document.createElement("iframe");
-            iframe.style.position = "fixed";
-            iframe.style.right = "0";
-            iframe.style.bottom = "0";
-            iframe.style.width = "0";
-            iframe.style.height = "0";
-            iframe.style.border = "0";
-            document.body.appendChild(iframe);
-
-            const cleanup = () => {
-                setTimeout(() => {
-                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-                }, 1000);
-            };
-
-            iframe.onload = () => {
-                try {
-                    iframe.contentWindow.focus();
-                    iframe.contentWindow.print();
-                    resolve();
-                } catch (e) {
-                    reject(e);
-                } finally {
-                    cleanup();
-                }
-            };
-            iframe.onerror = () => { cleanup(); reject(new Error("PDF failed to load in print frame.")); };
-            iframe.src = url;
-        });
+    // Prints a PDF template FILE (used for any sheet kind with
+    // fillFields:false — KO/Protest/Friendly), by first rasterizing it
+    // to PNGs via pdf.js and then sending those through the exact same
+    // proven image-print path as everything else — see
+    // printHtmlInFrame's own comment for why the PDF itself is never
+    // printed directly.
+    async function printPdfUrl(url) {
+        const pngUrls = await renderPdfUrlToPngDataUrls(url);
+        return printImagesSequence(pngUrls);
     }
 
     // ── Fast one-click print (row button) — generates the sheet and sends
@@ -2068,14 +3317,12 @@ JAVASCRIPT
     // console runs on a dedicated print station, look at your browser's
     // kiosk-printing / "print automatically" launch flag to drop that
     // last click too. ────────────────────────────────────────────────────
-    async function quickPrintSheet(matchId, kind, btnEl) {
-        const m = matchesById.get(matchId);
+    async function quickPrintSheetForMatch(m, kind, btnEl) {
         if (!m) return;
 
         const config = SHEET_CONFIGS[kind];
-        const originalText = btnEl.textContent;
-        btnEl.disabled = true;
-        btnEl.textContent = "…";
+        const originalText = btnEl ? btnEl.textContent : null;
+        if (btnEl) { btnEl.disabled = true; btnEl.textContent = "…"; }
 
         try {
             if (config.fillFields) {
@@ -2084,69 +3331,45 @@ JAVASCRIPT
             } else {
                 await printPdfUrl(config.templateUrl);
             }
-            btnEl.classList.add("done-flash");
-            btnEl.textContent = "✓";
-            setTimeout(() => {
-                btnEl.classList.remove("done-flash");
-                btnEl.textContent = originalText;
-                btnEl.disabled = false;
-            }, 900);
+            if (btnEl) {
+                btnEl.classList.add("done-flash");
+                btnEl.textContent = "✓";
+                setTimeout(() => {
+                    btnEl.classList.remove("done-flash");
+                    btnEl.textContent = originalText;
+                    btnEl.disabled = false;
+                }, 900);
+            }
         } catch (e) {
             console.error(e);
-            btnEl.textContent = "!";
             alert(`Couldn't print the ${config.title}: ` + e.message);
-            btnEl.textContent = originalText;
-            btnEl.disabled = false;
+            if (btnEl) {
+                btnEl.textContent = originalText;
+                btnEl.disabled = false;
+            }
         }
+    }
+
+    // matchId-based wrapper — what every button on this page actually
+    // has on hand (a matchId, not the match object itself). Used by the
+    // row's own print icon, the Match Result modal's TA/KO/Protest
+    // buttons, and the (undecided-match) full editor's same three
+    // buttons.
+    async function quickPrintSheet(matchId, kind, btnEl) {
+        const m = matchesById.get(matchId);
+        if (!m) return;
+        return quickPrintSheetForMatch(m, kind, btnEl);
     }
 
     // Backward-compatible thin wrapper — TA sheet specifically.
     function quickPrintTaSheet(matchId, btnEl) { return quickPrintSheet(matchId, "ta", btnEl); }
 
 
+    // The exact mechanics already confirmed working for the TA sheet —
+    // now just delegates to the shared printHtmlInFrame, which does the
+    // same "write an <img>, wait for it to decode, then print" thing.
     function printImageDataUrl(dataUrl) {
-        return new Promise((resolve, reject) => {
-            const iframe = document.createElement("iframe");
-            iframe.style.position = "fixed";
-            iframe.style.right = "0";
-            iframe.style.bottom = "0";
-            iframe.style.width = "0";
-            iframe.style.height = "0";
-            iframe.style.border = "0";
-            document.body.appendChild(iframe);
-
-            const cleanup = () => {
-                // Give the print dialog a moment to actually open before
-                // yanking the iframe out from under it.
-                setTimeout(() => {
-                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-                }, 1000);
-            };
-
-            const doc = iframe.contentWindow.document;
-            doc.open();
-            doc.write(`<!DOCTYPE html><html><head><style>
-                html, body { margin: 0; padding: 0; }
-                img { width: 100%; display: block; }
-                @page { margin: 0; }
-            </style></head><body><img id="ta-print-img"></body></html>`);
-            doc.close();
-
-            const img = doc.getElementById("ta-print-img");
-            img.onload = () => {
-                try {
-                    iframe.contentWindow.focus();
-                    iframe.contentWindow.print();
-                    resolve();
-                } catch (e) {
-                    reject(e);
-                } finally {
-                    cleanup();
-                }
-            };
-            img.onerror = () => { cleanup(); reject(new Error("Image failed to load in print frame.")); };
-            img.src = dataUrl;
-        });
+        return printHtmlInFrame(`<img src="${dataUrl}">`);
     }
 
     // ── Fight detail / edit modal ────────────────────────────────────────
@@ -2187,6 +3410,14 @@ JAVASCRIPT
     function openDetailModal(matchId) {
         const m = matchesById.get(matchId);
         if (!m) return;
+
+        // Decided fights (per isDone() — status done/walkover/completed,
+        // or simply already carrying a winnerEntryId) get the restricted
+        // Match Result view instead: only the recorded winner/score/type
+        // can be corrected there, never court/timing/category, and
+        // correcting the winner cascades forward through the bracket —
+        // see openMatchResultModal's own comment for why.
+        if (isDone(m)) { openMatchResultModal(matchId); return; }
 
         currentDetailMatchId = matchId;
         pendingCornerReplacement = { blue: null, red: null };
@@ -2306,9 +3537,9 @@ JAVASCRIPT
 
                 <div class="lq-modal-actions">
                     <button class="btn btn-primary" id="detail-save-btn">Save Changes</button>
-                    <button class="btn btn-ghost" onclick="openSheetPreview('${matchId}', 'ta')">🖨 TA Sheet</button>
-                    <button class="btn btn-ghost" onclick="openSheetPreview('${matchId}', 'ko')">🥊 KO Sheet</button>
-                    <button class="btn btn-ghost" onclick="openSheetPreview('${matchId}', 'protest')">⚠ Protest Sheet</button>
+                    <button class="btn btn-ghost" onclick="quickPrintSheet('${matchId}', 'ta', this)">🖨 TA Sheet</button>
+                    <button class="btn btn-ghost" onclick="quickPrintSheet('${matchId}', 'ko', this)">🥊 KO</button>
+                    <button class="btn btn-ghost" onclick="quickPrintSheet('${matchId}', 'protest', this)">⚠ Protest</button>
                     <button class="btn btn-ghost" onclick="closeModal()">Close</button>
                 </div>
             </div>
@@ -2462,11 +3693,16 @@ JAVASCRIPT
         saveBtn.textContent = "Saving…";
 
         try {
-            const matchRef = fsDb
-                .collection("sports").doc(SPORT)
-                .collection("disciplines").doc(DISCIPLINE)
-                .collection("matches").doc(matchId);
-            await matchRef.set(updates, { merge: true });
+            const matchRef = matchDocRef(matchId);
+            const batch = fsDb.batch();
+            // This modal is only ever reachable for a match that ISN'T
+            // already decided (see openDetailModal's isDone() routing),
+            // so winnerEntryId here is always transitioning FROM null —
+            // straight to propagateWinnerChangeIfNeeded, which no-ops if
+            // it's still null (status left at pending/ready).
+            propagateWinnerChangeIfNeeded(m, winnerEntryId, batch);
+            batch.set(matchRef, updates, { merge: true });
+            await batch.commit();
             closeModal();
             // No manual re-render — the realtime listener picks up this
             // write as a docChange and renderCourts() runs again from it.
@@ -2479,101 +3715,319 @@ JAVASCRIPT
         }
     }
 
-    // Takes a match OBJECT directly rather than looking one up by id —
-    // needed for "Create & Print Friendly Sheet" in the insert-match
-    // modal, where the just-created match may not have arrived back via
-    // the realtime listener into matchesById yet. openSheetPreview below
-    // (matchId-based, used for existing fights) is a thin wrapper around
-    // this.
-    async function openSheetPreviewForMatch(m, kind) {
-        if (!m) return;
-        const config = SHEET_CONFIGS[kind];
-        const title = config.title;
+    // ═══════════════════════════════════════════════════════════════════
+    // MATCH RESULT (decided fights) — the restricted view openDetailModal
+    // routes to once isDone(m) is true. Shows the round-by-round scoring
+    // breakdown (from the match doc's own blue.points/red.points arrays,
+    // written by TkStrike's sync — see the match example this feature
+    // was built from) and lets staff correct only the winner, win_score,
+    // and win_type — never court, timing, category, or anything else a
+    // decided fight shouldn't need touching after the fact.
+    //
+    // WINNER-CHANGE PROPAGATION: nothing in this pipeline (not even
+    // TkStrike's own sync) ever writes a decided match's winner forward
+    // into the next round's corner — a still-unresolved corner just sits
+    // forever as {entryId: null, source: {matchId, slot: "winner"}}, and
+    // every "105 Winner"-style label in this app resolves that PURELY
+    // for display, from whatever's already in memory. Correcting a
+    // winner here is the one place that actually needs the real
+    // downstream document updated (a coach reading the wrong name off a
+    // court printout is a real problem), so this is also where that
+    // resolution is written for the first time — see
+    // applyCornerUpdateDownstream / propagateWinnerChangeIfNeeded below.
+    // ═══════════════════════════════════════════════════════════════════
 
-        if (!config.fillFields) {
-            // Nothing to fill in — show the PDF template as-is with a
-            // print/close toolbar wrapped around it.
-            const previewWindow = window.open("", "_blank");
-            previewWindow.document.open();
-            previewWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>${title}</title>
-            <style>
-                html, body { margin: 0; height: 100%; background: #52525b; font-family: sans-serif; }
-                .toolbar { position: sticky; top: 0; width: 100%; background: #27272a; padding: .75rem 1rem; display: flex; justify-content: center; gap: .75rem; z-index: 10; box-sizing: border-box; }
-                .toolbar button { padding: .5rem 1.25rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; background: #4f46e5; color: #fff; font-size: .9rem; }
-                .toolbar button.secondary { background: transparent; color: #fff; border: 1px solid #71717a; }
-                iframe { display: block; width: 100%; height: calc(100% - 56px); border: none; background: #fff; }
-                @media print {
-                    .toolbar { display: none; }
-                    iframe { height: 100%; }
+    function matchDocRef(matchId) {
+        return fsDb
+            .collection("sports").doc(SPORT)
+            .collection("disciplines").doc(DISCIPLINE)
+            .collection("matches").doc(matchId);
+    }
+
+    // Finds every match whose blue/red corner is sourced from
+    // `originMatchId` (corner.source.matchId === originMatchId) and
+    // rewrites that corner to `cornerData` — either a freshly-decided
+    // winner's full corner object, or a bare unresolved placeholder
+    // ({entryId: null, source: {...}}) when a correction upstream just
+    // invalidated whatever used to be there.
+    //
+    // If a downstream match had ALREADY been decided using the corner
+    // that's changing (i.e. this correction invalidates a result staff
+    // already recorded), that match is reset back to pending/ready — its
+    // own winner/win/win_score/win_type are cleared — and the correction
+    // cascades further, since whatever THAT match fed forward is now
+    // wrong too. A downstream match where this corner simply LOST is
+    // left decided; only its corner data changes. `visited` prevents
+    // touching the same match doc twice in one batch (Firestore batches
+    // reject duplicate writes to the same ref) and guards against any
+    // cyclical `source` data.
+    function applyCornerUpdateDownstream(originMatchId, cornerData, batch, visited) {
+        matchesById.forEach(m => {
+            if (visited.has(m.id)) return;
+            ["blue", "red"].forEach(side => {
+                const corner = m[side];
+                if (!corner || !corner.source || corner.source.matchId !== originMatchId) return;
+
+                const otherCorner = m[side === "blue" ? "red" : "blue"];
+                const bothKnown = !!cornerData.entryId && !!(otherCorner && otherCorner.entryId);
+                const update = { [side]: cornerData };
+
+                const invalidatesExistingResult = m.winnerEntryId && corner.entryId
+                    && corner.entryId === m.winnerEntryId && corner.entryId !== cornerData.entryId;
+
+                if (invalidatesExistingResult) {
+                    update.status = bothKnown ? "ready" : "pending";
+                    update.winnerEntryId = null;
+                    update.win = null;
+                    update.win_score = null;
+                    update.win_type = null;
+                } else if (!m.winnerEntryId) {
+                    update.status = bothKnown ? "ready" : "pending";
                 }
-            </style>
-        </head>
-        <body>
-            <div class="toolbar">
-                <button onclick="document.getElementById('sheet-frame').contentWindow.print()">Print</button>
-                <button class="secondary" onclick="window.close()">Close</button>
+
+                visited.add(m.id);
+                batch.set(matchDocRef(m.id), update, { merge: true });
+
+                if (invalidatesExistingResult) {
+                    // m's own former winner no longer means anything —
+                    // cascade a bare placeholder to whatever m fed
+                    // forward, same as if m had never been decided.
+                    applyCornerUpdateDownstream(m.id, { entryId: null, source: { matchId: m.id, slot: "winner" } }, batch, visited);
+                }
+            });
+        });
+    }
+
+    // Shared by both the (undecided-match) full editor's winner dropdown
+    // and the (decided-match) Match Result modal below — no-ops if the
+    // winner genuinely didn't change, so calling it unconditionally on
+    // every save is safe and cheap.
+    function propagateWinnerChangeIfNeeded(m, newWinnerEntryId, batch) {
+        if ((newWinnerEntryId || null) === (m.winnerEntryId || null)) return;
+        const visited = new Set([m.id]);
+        if (newWinnerEntryId) {
+            const winnerCorner = m.blue && m.blue.entryId === newWinnerEntryId ? m.blue
+                : m.red && m.red.entryId === newWinnerEntryId ? m.red
+                    : null;
+            if (!winnerCorner) return; // shouldn't happen — the dropdown only ever offers a corner's own entryId
+            applyCornerUpdateDownstream(m.id, { ...winnerCorner, source: { matchId: m.id, slot: "winner" } }, batch, visited);
+        } else {
+            applyCornerUpdateDownstream(m.id, { entryId: null, source: { matchId: m.id, slot: "winner" } }, batch, visited);
+        }
+    }
+
+    // Standard WT decision codes — matches the official reference chart
+    // (RSC/PTF/PTG/GDP/SUP/WDR/DSQ/DQB/PUN), stored lowercase on the
+    // match doc (e.g. "ptf") to match TkStrike's own sync convention —
+    // see the "win_type":"ptf" field on a completed match doc.
+    const WIN_TYPE_OPTIONS = [
+        ["rsc", "RSC — Referee Stops Contest"],
+        ["ptf", "PTF — Final score"],
+        ["ptg", "PTG — Point gap"],
+        ["gdp", "GDP — Golden Point"],
+        ["sup", "SUP — Superiority"],
+        ["wdr", "WDR — Withdrawal"],
+        ["dsq", "DSQ — Disqualification"],
+        ["dqb", "DQB — Win by disqualification for unsportsmanlike behavior"],
+        ["pun", "PUN — Referee's punitive declaration"],
+    ];
+
+    // The handful of round-score combinations a best-of-3 match can
+    // actually end on. If a match's saved win_score doesn't match one of
+    // these (older/hand-entered data), it's kept selectable as an extra
+    // "(current)" option rather than silently discarded — same pattern
+    // this file already uses for an unusual roundPhase value.
+    const WIN_SCORE_OPTIONS = ["0-0", "1-0", "0-1", "1-1", "2-0", "0-2", "2-1", "1-2"];
+
+    // Component fields on one round's points map, in display order, each
+    // paired with the short label shown on the sheet. Zero-value fields
+    // are skipped entirely — most of these are 0 on most rounds, and
+    // listing every field regardless would bury the ones that actually
+    // scored.
+    const ROUND_POINT_COMPONENTS = [
+        ["trunk", "trunk"], ["head", "head"], ["punch", "punch"],
+        ["rotation_trunk", "rot.trunk"], ["rotation_head", "rot.head"],
+        ["penalties", "pen"], ["hits", "hits"],
+    ];
+
+    function roundBreakdownLine(round) {
+        if (!round) return "";
+        const parts = ROUND_POINT_COMPONENTS
+            .map(([key, label]) => [label, Number(round[key]) || 0])
+            .filter(([, val]) => val > 0)
+            .map(([label, val]) => `${label} ${val}`);
+        return parts.length ? parts.join(", ") : "no scoring events";
+    }
+
+    // Round-by-round table (blue vs red points + breakdown per round) —
+    // built straight from the match doc's own blue.points/red.points
+    // arrays. Returns "" when there's nothing to show (a manual walkover
+    // set via the old editor has no points data at all, since no fight
+    // actually happened).
+    function buildRoundBreakdownHtml(m) {
+        const blueRounds = (m.blue && m.blue.points) || [];
+        const redRounds = (m.red && m.red.points) || [];
+        const roundCount = Math.max(blueRounds.length, redRounds.length);
+        if (roundCount === 0) return "";
+
+        const rowsHtml = Array.from({ length: roundCount }, (_, i) => {
+            const b = blueRounds[i], r = redRounds[i];
+            return `
+                <div style="display:grid; grid-template-columns: 42px 1fr 1fr; gap:.5rem; padding:.45rem 0; border-bottom:1px solid var(--lq-border); font-size:.78rem;">
+                    <div style="font-weight:700; color:var(--lq-muted);">R${i + 1}</div>
+                    <div>
+                        <div style="font-weight:700; color:var(--lq-blue);">${b ? escapeHtml(String(b.points ?? "0")) : "—"} pts</div>
+                        <div style="color:var(--lq-muted);">${escapeHtml(roundBreakdownLine(b))}</div>
+                    </div>
+                    <div>
+                        <div style="font-weight:700; color:var(--lq-red);">${r ? escapeHtml(String(r.points ?? "0")) : "—"} pts</div>
+                        <div style="color:var(--lq-muted);">${escapeHtml(roundBreakdownLine(r))}</div>
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+        return `
+            <div class="lq-detail-readonly" style="margin-top:1rem;">
+                <div style="font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--lq-muted); margin-bottom:.4rem;">Round-by-Round</div>
+                <div style="display:grid; grid-template-columns: 42px 1fr 1fr; font-size:.66rem; font-weight:700; text-transform:uppercase; color:var(--lq-muted); padding-bottom:.3rem;">
+                    <div></div><div>Blue</div><div>Red</div>
+                </div>
+                ${rowsHtml}
             </div>
-            <iframe id="sheet-frame" src="${config.templateUrl}"></iframe>
-        </body>
-        </html>
-    `);
-            previewWindow.document.close();
+        `;
+    }
+
+    function openMatchResultModal(matchId) {
+        const m = matchesById.get(matchId);
+        if (!m) return;
+
+        const blueName = participantLabel(m.blue);
+        const redName = participantLabel(m.red);
+        const canPickWinner = !!(m.blue && m.blue.entryId) && !!(m.red && m.red.entryId);
+
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>#${escapeHtml(String(m.displayNumber ?? "—"))} · ${escapeHtml(resolveCategoryLabel(m.categoryCode))} · Result</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <p class="lq-field-hint" style="margin-bottom:1rem;">
+                    This fight is already decided — only the recorded winner, score, and win type can be
+                    corrected here. Court, timing, category, and corners are locked; use Bulk Edit or fix it
+                    before the fight if those are wrong. Changing the winner also updates any later match that
+                    already has this fighter slotted in from this result.
+                </p>
+
+                <div class="lq-detail-corners">
+                    <div class="lq-detail-corner blue">
+                        <label>Blue Corner</label>
+                        <div class="lq-corner-current">${escapeHtml(blueName)}</div>
+                    </div>
+                    <div class="lq-detail-corner red">
+                        <label>Red Corner</label>
+                        <div class="lq-corner-current">${escapeHtml(redName)}</div>
+                    </div>
+                </div>
+
+                <div class="lq-detail-grid">
+                    <label class="lq-span-2">Winner
+                        <select id="result-winner" ${canPickWinner ? "" : "disabled"}>
+                            <option value="blue" ${m.win === "blue" ? "selected" : ""}>${escapeHtml(blueName)} (Blue)</option>
+                            <option value="red" ${m.win === "red" ? "selected" : ""}>${escapeHtml(redName)} (Red)</option>
+                        </select>
+                    </label>
+                    <label>Win Type
+                        <select id="result-win-type">
+                            <option value="" ${m.win_type ? "" : "selected"}>— none —</option>
+                            ${WIN_TYPE_OPTIONS.map(([code, label]) => `<option value="${code}" ${(m.win_type || "").toLowerCase() === code ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+                            ${m.win_type && !WIN_TYPE_OPTIONS.some(([code]) => code === (m.win_type || "").toLowerCase())
+                ? `<option value="${escapeAttr(m.win_type)}" selected>${escapeHtml(m.win_type)} (current)</option>`
+                : ""}
+                        </select>
+                    </label>
+                    <label>Score
+                        <select id="result-win-score">
+                            <option value="" ${m.win_score ? "" : "selected"}>— none —</option>
+                            ${WIN_SCORE_OPTIONS.map(score => `<option value="${score}" ${m.win_score === score ? "selected" : ""}>${score}</option>`).join("")}
+                            ${m.win_score && !WIN_SCORE_OPTIONS.includes(m.win_score)
+                ? `<option value="${escapeAttr(m.win_score)}" selected>${escapeHtml(m.win_score)} (current)</option>`
+                : ""}
+                        </select>
+                    </label>
+                </div>
+
+                ${canPickWinner ? "" : `<p class="lq-field-hint" style="margin-top:.5rem;">One corner still isn't a resolved athlete yet, so the winner can't be reassigned here.</p>`}
+
+                ${buildRoundBreakdownHtml(m)}
+
+                <div id="result-error" class="lq-alert-error hidden"></div>
+
+                <div class="lq-modal-actions">
+                    <button class="btn btn-primary" id="result-save-btn" ${canPickWinner ? "" : "disabled"}>Save Result</button>
+                    <button class="btn btn-ghost" onclick="quickPrintSheet('${matchId}', 'ta', this)">🖨 TA Sheet</button>
+                    <button class="btn btn-ghost" onclick="quickPrintSheet('${matchId}', 'ko', this)">🥊 KO</button>
+                    <button class="btn btn-ghost" onclick="quickPrintSheet('${matchId}', 'protest', this)">⚠ Protest</button>
+                    <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        `);
+
+        if (canPickWinner) document.getElementById("result-save-btn").onclick = () => saveMatchResult(matchId);
+    }
+
+    async function saveMatchResult(matchId) {
+        const m = matchesById.get(matchId);
+        if (!m) return;
+
+        const errEl = document.getElementById("result-error");
+        errEl.classList.add("hidden");
+
+        const winnerSide = document.getElementById("result-winner").value; // "blue" | "red"
+        const winType = document.getElementById("result-win-type").value.trim();
+        const winScore = document.getElementById("result-win-score").value.trim();
+        const winnerCorner = winnerSide === "blue" ? m.blue : m.red;
+
+        if (!winnerCorner || !winnerCorner.entryId) {
+            errEl.textContent = "That corner has no resolved athlete yet — can't set them as the winner.";
+            errEl.classList.remove("hidden");
             return;
         }
 
-        // fillFields:true path (jpg + canvas) — unchanged from before.
-        const previewWindow = window.open("", "_blank");
-        previewWindow.document.write(`<!DOCTYPE html><html><head><title>${title}</title></head>
-    <body style="margin:0;background:#52525b;display:flex;align-items:center;justify-content:center;font-family:sans-serif;">
-    <p style="color:#fff;">Generating ${title}…</p></body></html>`);
+        const saveBtn = document.getElementById("result-save-btn");
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving…";
+
         try {
-            const dataUrl = await buildSheetDataUrl(m, kind);
-            previewWindow.document.open();
-            previewWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>${title}</title>
-            <style>
-                body { margin: 0; background: #52525b; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }
-                .toolbar { position: sticky; top: 0; width: 100%; background: #27272a; padding: .75rem 1rem; display: flex; justify-content: center; gap: .75rem; z-index: 10; }
-                .toolbar button { padding: .5rem 1.25rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; background: #4f46e5; color: #fff; font-size: .9rem; }
-                .toolbar button.secondary { background: transparent; color: #fff; border: 1px solid #71717a; }
-                img { max-width: 900px; width: 100%; margin: 1.5rem 0; box-shadow: 0 10px 40px rgba(0,0,0,.4); background: #fff; }
-                @media print {
-                    .toolbar { display: none; }
-                    body { background: #fff; }
-                    img { box-shadow: none; margin: 0; max-width: 100%; }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="toolbar">
-                <button onclick="window.print()">Print</button>
-                <button class="secondary" onclick="window.close()">Close</button>
-            </div>
-            <img src="${dataUrl}" alt="${title}">
-        </body>
-        </html>
-    `);
-            previewWindow.document.close();
-        } catch (e) {
-            previewWindow.document.body.innerHTML = `<p style="color:#fff;">Failed to generate ${title}: ${e.message}</p>`;
+            const batch = fsDb.batch();
+            propagateWinnerChangeIfNeeded(m, winnerCorner.entryId, batch);
+            batch.set(matchDocRef(matchId), {
+                win: winnerSide,
+                win_score: winScore || null,
+                win_type: winType || null,
+                winnerEntryId: winnerCorner.entryId,
+            }, { merge: true });
+            await batch.commit();
+            closeModal();
+            // No manual re-render — the realtime listener picks up every
+            // write in the batch (this match plus any propagated ones)
+            // as its own docChange, and renderCourts() runs again.
+        } catch (err) {
+            console.error("Save result failed", err);
+            errEl.textContent = "Save failed: " + err.message;
+            errEl.classList.remove("hidden");
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Save Result";
         }
     }
 
-    async function openSheetPreview(matchId, kind) {
-        const m = matchesById.get(matchId);
-        if (!m) return;
-        return openSheetPreviewForMatch(m, kind);
-    }
-
-    // Backward-compatible thin wrapper — TA sheet specifically.
-    function openTaSheet(matchId) { return openSheetPreview(matchId, "ta"); }
+    // Takes a match OBJECT directly rather than looking one up by id —
+    // needed for "Create & Print Friendly Sheet" in the insert-match
+    // modal, where the just-created match may not have arrived back via
+    // the realtime listener into matchesById yet — see
+    // quickPrintSheetForMatch above, which every sheet on this page now
+    // routes through; nothing opens a preview window or downloads a
+    // file anymore.
 
 
     // ── Utils ────────────────────────────────────────────────────────────────

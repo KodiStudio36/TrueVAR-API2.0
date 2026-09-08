@@ -1,0 +1,418 @@
+{
+    "categories": {
+        "sportSchemas": {
+            "taekwondo": {
+                "key": "taekwondo",
+                "label": "Taekwondo",
+                "disciplines": {
+                    "poomsae": {
+                        "key": "poomsae",
+                        "label": "Poomsae",
+                        "dimensions": [
+                            {
+                                "key": "entry_type",
+                                "type": "discrete",
+                                "field": "entryType",
+                                "display": "Entry Type",
+                                "unit": null,
+                                "options": [
+                                    {
+                                        "code": "individual_poomsae",
+                                        "label": "Individual Poomsae",
+                                        "match_value": "individual_poomsae",
+                                        "participantCount": 1,
+                                        "min": null,
+                                        "max": null
+                                    },
+                                    {
+                                        "code": "pairs_poomsae",
+                                        "label": "Pairs Poomsae",
+                                        "match_value": "pairs_poomsae",
+                                        "participantCount": 2,
+                                        "min": null,
+                                        "max": null,
+                                        "gender_options": [
+                                            {
+                                                "code": "mixed",
+                                                "label": "Mixed",
+                                                "match_value": [
+                                                    "male",
+                                                    "female"
+                                                ],
+                                                "min": null,
+                                                "max": null
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "teams_poomsae",
+                                        "label": "Teams Poomsae",
+                                        "match_value": "teams_poomsae",
+                                        "participantCount": 3,
+                                        "min": null,
+                                        "max": null,
+                                        "gender_options": [
+                                            {
+                                                "code": "mixed",
+                                                "label": "Mixed",
+                                                "match_value": [
+                                                    "male",
+                                                    "female"
+                                                ],
+                                                "min": null,
+                                                "max": null
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "para_individual_poomsae",
+                                        "label": "Para Individual Poomsae",
+                                        "match_value": "para_individual_poomsae",
+                                        "participantCount": 1,
+                                        "min": null,
+                                        "max": null,
+                                        "age_options": [
+                                            {
+                                                "code": "cadets",
+                                                "label": "Cadets",
+                                                "match_value": null,
+                                                "min": 2012,
+                                                "max": 2014
+                                            },
+                                            {
+                                                "code": "juniors",
+                                                "label": "Juniors",
+                                                "match_value": null,
+                                                "min": 2009,
+                                                "max": 2011
+                                            },
+                                            {
+                                                "code": "seniors",
+                                                "label": "Seniors",
+                                                "match_value": null,
+                                                "min": 1920,
+                                                "max": 2010
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "para_pairs_poomsae",
+                                        "label": "Para Pairs Poomsae",
+                                        "match_value": "para_pairs_poomsae",
+                                        "participantCount": 2,
+                                        "min": null,
+                                        "max": null,
+                                        "age_options": [
+                                            {
+                                                "code": "cadets",
+                                                "label": "Cadets",
+                                                "match_value": null,
+                                                "min": 2012,
+                                                "max": 2014
+                                            },
+                                            {
+                                                "code": "juniors",
+                                                "label": "Juniors",
+                                                "match_value": null,
+                                                "min": 2009,
+                                                "max": 2011
+                                            },
+                                            {
+                                                "code": "seniors",
+                                                "label": "Seniors",
+                                                "match_value": null,
+                                                "min": 1920,
+                                                "max": 2010
+                                            }
+                                        ],
+                                        "gender_options": [
+                                            {
+                                                "code": "mixed",
+                                                "label": "Mixed",
+                                                "match_value": [
+                                                    "male",
+                                                    "female"
+                                                ],
+                                                "min": null,
+                                                "max": null
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "para_teams_poomsae",
+                                        "label": "Para Teams Poomsae",
+                                        "match_value": "para_teams_poomsae",
+                                        "participantCount": 3,
+                                        "min": null,
+                                        "max": null,
+                                        "age_options": [
+                                            {
+                                                "code": "cadets",
+                                                "label": "Cadets",
+                                                "match_value": null,
+                                                "min": 2012,
+                                                "max": 2014
+                                            },
+                                            {
+                                                "code": "juniors",
+                                                "label": "Juniors",
+                                                "match_value": null,
+                                                "min": 2009,
+                                                "max": 2011
+                                            },
+                                            {
+                                                "code": "seniors",
+                                                "label": "Seniors",
+                                                "match_value": null,
+                                                "min": 1920,
+                                                "max": 2010
+                                            }
+                                        ],
+                                        "gender_options": [
+                                            {
+                                                "code": "mixed",
+                                                "label": "Mixed",
+                                                "match_value": [
+                                                    "male",
+                                                    "female"
+                                                ],
+                                                "min": null,
+                                                "max": null
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "freestyle_individual_poomsae",
+                                        "label": "Freestyle Individual Poomsae",
+                                        "match_value": "freestyle_individual_poomsae",
+                                        "participantCount": 1,
+                                        "min": null,
+                                        "max": null,
+                                        "age_options": [
+                                            {
+                                                "code": "children",
+                                                "label": "Children",
+                                                "match_value": null,
+                                                "min": 2015,
+                                                "max": 2021
+                                            },
+                                            {
+                                                "code": "under_17",
+                                                "label": "Under 17",
+                                                "match_value": null,
+                                                "min": 2009,
+                                                "max": 2014
+                                            },
+                                            {
+                                                "code": "over_17",
+                                                "label": "Over 17",
+                                                "match_value": null,
+                                                "min": 1920,
+                                                "max": 2008
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "freestyle_pairs_poomsae",
+                                        "label": "Freestyle Pairs Poomsae",
+                                        "match_value": "freestyle_pairs_poomsae",
+                                        "participantCount": 2,
+                                        "min": null,
+                                        "max": null,
+                                        "age_options": [
+                                            {
+                                                "code": "children",
+                                                "label": "Children",
+                                                "match_value": null,
+                                                "min": 2015,
+                                                "max": 2021
+                                            },
+                                            {
+                                                "code": "under_17",
+                                                "label": "Under 17",
+                                                "match_value": null,
+                                                "min": 2009,
+                                                "max": 2014
+                                            },
+                                            {
+                                                "code": "over_17",
+                                                "label": "Over 17",
+                                                "match_value": null,
+                                                "min": 1920,
+                                                "max": 2008
+                                            }
+                                        ],
+                                        "gender_options": [
+                                            {
+                                                "code": "mixed",
+                                                "label": "Mixed",
+                                                "match_value": [
+                                                    "male",
+                                                    "female"
+                                                ],
+                                                "min": null,
+                                                "max": null
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "freestyle_teams_poomsae",
+                                        "label": "Freestyle Teams Poomsae",
+                                        "match_value": "freestyle_teams_poomsae",
+                                        "participantCount": 3,
+                                        "min": null,
+                                        "max": null,
+                                        "age_options": [
+                                            {
+                                                "code": "children",
+                                                "label": "Children",
+                                                "match_value": null,
+                                                "min": 2015,
+                                                "max": 2021
+                                            },
+                                            {
+                                                "code": "under_17",
+                                                "label": "Under 17",
+                                                "match_value": null,
+                                                "min": 2009,
+                                                "max": 2014
+                                            },
+                                            {
+                                                "code": "over_17",
+                                                "label": "Over 17",
+                                                "match_value": null,
+                                                "min": 1920,
+                                                "max": 2008
+                                            }
+                                        ],
+                                        "gender_options": [
+                                            {
+                                                "code": "mixed",
+                                                "label": "Mixed",
+                                                "match_value": [
+                                                    "male",
+                                                    "female"
+                                                ],
+                                                "min": null,
+                                                "max": null
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "depends_on": [],
+                                "thresholds": null,
+                                "thresholds_by": {},
+                                "open_top": false
+                            },
+                            {
+                                "key": "age",
+                                "type": "range",
+                                "field": "birthYear",
+                                "display": "Birth Year",
+                                "unit": null,
+                                "options": [
+                                    {
+                                        "code": "pupils",
+                                        "label": "Pupils",
+                                        "match_value": null,
+                                        "min": 2018,
+                                        "max": 2021
+                                    },
+                                    {
+                                        "code": "younger_cadets",
+                                        "label": "Younger Cadets",
+                                        "match_value": null,
+                                        "min": 2015,
+                                        "max": 2017
+                                    },
+                                    {
+                                        "code": "cadets",
+                                        "label": "Cadets",
+                                        "match_value": null,
+                                        "min": 2012,
+                                        "max": 2014
+                                    },
+                                    {
+                                        "code": "juniors",
+                                        "label": "Juniors",
+                                        "match_value": null,
+                                        "min": 2009,
+                                        "max": 2011
+                                    },
+                                    {
+                                        "code": "seniors_under_30",
+                                        "label": "Seniors under 30",
+                                        "match_value": null,
+                                        "min": 1996,
+                                        "max": 2008
+                                    },
+                                    {
+                                        "code": "seniors_over_30",
+                                        "label": "Seniors over 30",
+                                        "match_value": null,
+                                        "min": 1920,
+                                        "max": 1995
+                                    },
+                                    {
+                                        "code": "seniors_under_40",
+                                        "label": "Seniors under 40",
+                                        "match_value": null,
+                                        "min": 1986,
+                                        "max": 1995
+                                    },
+                                    {
+                                        "code": "seniors_under_50",
+                                        "label": "Seniors under 50",
+                                        "match_value": null,
+                                        "min": 1976,
+                                        "max": 1985
+                                    },
+                                    {
+                                        "code": "seniors_over_50",
+                                        "label": "Seniors over 50",
+                                        "match_value": null,
+                                        "min": 1920,
+                                        "max": 1975
+                                    }
+                                ],
+                                "depends_on": [],
+                                "thresholds": null,
+                                "thresholds_by": {},
+                                "open_top": true
+                            },
+                            {
+                                "key": "gender",
+                                "type": "discrete",
+                                "field": "gender",
+                                "display": "Gender",
+                                "unit": null,
+                                "options": [
+                                    {
+                                        "code": "men",
+                                        "label": "Male",
+                                        "match_value": "male",
+                                        "min": null,
+                                        "max": null
+                                    },
+                                    {
+                                        "code": "women",
+                                        "label": "Female",
+                                        "match_value": "female",
+                                        "min": null,
+                                        "max": null
+                                    }
+                                ],
+                                "depends_on": [
+                                    "age"
+                                ],
+                                "thresholds": null,
+                                "thresholds_by": {},
+                                "open_top": true
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}

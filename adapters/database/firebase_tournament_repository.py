@@ -1,23 +1,53 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 from datetime import datetime
+import logging
+
 from domain.ports.tournament_port import TournamentPort
 from google.cloud.firestore import Client
 from domain.entities import Tournament
 from domain.ports.tournament_port import TournamentPort
 
+from firebase_admin import db as rtdb  # Realtime Database, separate from Firestore
+
+logger = logging.getLogger(__name__)
+
+RTDB_URL = "https://easytkd-default-rtdb.europe-west1.firebasedatabase.app/"
+
+
 class FirebaseTournamentRepository(TournamentPort):
     """Concrete implementation of outbound port talking to Firebase Firestore"""
-    
+
     def __init__(self, db: Client):
         self.db = db
         self.collection = self.db.collection("tournaments")
+
+    def _delete_rtdb_tournament(self, tournament_id: str) -> None:
+        """
+        Best-effort cleanup of tournaments/{tournament_id} in the Realtime
+        Database. RTDB is a separate product from Firestore (different URL,
+        different region here — europe-west1), so it needs its own
+        reference with an explicit url= rather than relying on whatever
+        default database the firebase_admin app was initialized with.
+
+        Deleting a path that doesn't exist is a harmless no-op in RTDB, so
+        this is safe to call unconditionally on both delete and archive.
+        Wrapped in try/except so an RTDB outage doesn't roll back or fail
+        a Firestore operation that already succeeded.
+        """
+        try:
+            rtdb.reference(f"tournaments/{tournament_id}", url=RTDB_URL).delete()
+        except Exception:
+            logger.exception(
+                "Failed to delete RTDB tournaments/%s (Firestore side already committed)",
+                tournament_id,
+            )
 
     def createTournament(self, tournament: Tournament) -> Tournament:
         # Generates a new auto-id reference before writing
         doc_ref = self.collection.document()
         tournament.id = doc_ref.id
-        
+
         # Write to Firestore
         doc_ref.set(tournament.toJson())
         return tournament
@@ -38,26 +68,19 @@ class FirebaseTournamentRepository(TournamentPort):
         doc_ref = self.collection.document(tournament_id).get()
         if not doc_ref.exists:
             return None
-            
+
         data = doc_ref.to_dict()
         return Tournament.fromJson(doc_ref.id, data)
-    
+
     def getTournamentsPaginated(
         self, status: str, limit: int = 10, offset: int = 0,
         isExternalPublic: Optional[bool] = None,
     ) -> List[Tournament]:
-        """
-        Simple offset pagination, ordered newest-first. Fine for the
-        volumes a single-org dashboard deals with; if this collection
-        grows into the thousands, swap .offset() for a cursor
-        (start_after on the last doc snapshot) since Firestore still
-        reads+discards the skipped docs under the hood.
-        """
         query = self.db.collection("tournaments").where("status", "==", status)
         if isExternalPublic is not None:
             query = query.where("isExternalPublic", "==", isExternalPublic)
         query = query.order_by("dateTime").offset(offset).limit(limit)
-        
+
         docs = query.stream()
         return [Tournament.fromJson(doc.id, doc.to_dict()) for doc in docs]
 
@@ -65,21 +88,6 @@ class FirebaseTournamentRepository(TournamentPort):
         self, status: str, limit: int = 20,
         cursor_date_time: Optional[datetime] = None, cursor_id: Optional[str] = None,
     ) -> List[Tournament]:
-        """
-        Cursor pagination for the tournaments list page's infinite scroll —
-        start_after on explicit field VALUES (not a server-held cursor
-        object, and not offset()), so Firestore only ever reads the page
-        actually being returned, never the pages skipped to get there.
-        Cheap however many pages deep the admin scrolls, unlike
-        getTournamentsPaginated above.
-
-        order_by(dateTime, id) with BOTH cursor values (not just dateTime)
-        is what makes this stable: dateTime alone isn't guaranteed unique
-        across tournaments, and start_after on a non-unique field can
-        skip or repeat rows sitting on the exact same value. The document
-        id as a tiebreaker fixes that — same pattern as any keyset
-        pagination over a non-unique sort column.
-        """
         query = (
             self.collection
             .where("status", "==", status)
@@ -94,6 +102,9 @@ class FirebaseTournamentRepository(TournamentPort):
 
     def setTournamentStatus(self, tournament_id: str, status: str) -> None:
         self.collection.document(tournament_id).update({"status": status})
-        
+        if status == "archived":
+            self._delete_rtdb_tournament(tournament_id)
+
     def deleteTournament(self, tournament_id: str) -> None:
         self.collection.document(tournament_id).delete()
+        self._delete_rtdb_tournament(tournament_id)

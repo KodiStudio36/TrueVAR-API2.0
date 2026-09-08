@@ -58,7 +58,7 @@
                 Every athlete in your club roster is shown — age and gender are matched automatically once you pick one.
             </p>
 
-            <div id="searchResults"
+            <div id="searchResults" class="hidden"
                 style="min-height: 3rem; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
             </div>
 
@@ -91,6 +91,34 @@
         </p>
     </div>
 </div>
+
+{# ═══════════════════════════════════════════════════════════════════════
+ROSTER ROW STYLES — fixed-width placement badge so "1st"/"2nd"/"=3rd"
+labels of different lengths don't stair-step the athlete names below
+them, and a real @media rule (not JS) to hide the club name on narrow
+viewports. Being plain CSS, this reacts live the instant the viewport
+crosses 440px — resizing a desktop window or rotating a phone toggles it
+immediately, with no resize listener or re-render needed.
+═══════════════════════════════════════════════════════════════════════ #}
+<style>
+    .roster-place-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 44px;
+        padding: 0.1rem 0.4rem;
+        border-radius: 999px;
+        white-space: nowrap;
+        box-sizing: border-box;
+        flex-shrink: 0;
+    }
+
+    @media (max-width: 439px) {
+        .roster-club {
+            display: none;
+        }
+    }
+</style>
 
 <script>
     const TOURNAMENT_ID = "{{ tournament.id }}";
@@ -128,6 +156,21 @@
         const alpha2 = ALPHA3_TO_ALPHA2[(alpha3 || "").toUpperCase()];
         if (!alpha2) return "";
         return String.fromCodePoint(...[...alpha2].map(ch => 127397 + ch.charCodeAt(0)));
+    }
+
+    // Renders "1st", "2nd", "3rd", "11th", etc. from an integer
+    // placement. Used to label a roster entry with the result written by
+    // the admin panel's "Compute Results" button (see
+    // tournament_router.py's compute_tournament_results_endpoint), which
+    // stores a plain integer "placement" field on each entry inside
+    // division_rosters — 1 for the category winner, 2 for the runner-up,
+    // and a shared value (e.g. both semifinal losers get 3) for anyone
+    // eliminated earlier, since this bracket format has no separate
+    // bronze-medal match.
+    function ordinalLabel(n) {
+        const v = n % 100;
+        const suffix = (v >= 11 && v <= 13) ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
+        return `${n}${suffix}`;
     }
 
     let entryTypes = [];       // parsed from the schema — e.g. [Individual] for kyorugi, [Individual, Pairs, Team] for poomsae
@@ -192,13 +235,23 @@
     // before. Only the entry-type level gets a Register button — age,
     // gender, and (when unambiguous) weight are resolved automatically
     // from whichever athlete(s) get selected in the modal.
+    // CHANGE: the age → gender → weight tree is now built PER entry type
+    // instead of once for the whole discipline. Each entry_type option
+    // may supply its own `age_options` and/or `gender_options`, which
+    // override the discipline-level `age`/`gender` dimensions just for
+    // that entry type. This is what lets one discipline (e.g. "poomsae")
+    // hold nine entry types — Individual, Pairs, Teams, and their Para
+    // and Freestyle counterparts — even though Para/Freestyle use
+    // completely different age brackets than the standard ones, and
+    // Pairs/Teams use a single "Mixed" gender bracket while Individual
+    // splits into Male/Female. An entry type with no overrides falls
+    // back to the discipline-level dimensions exactly as before, so
+    // kyorugi (one entry type, no overrides) is unaffected.
     function parseCategories(schema) {
         const entryDim = schema.find(d => d.key === "entry_type");
         const ageDim = schema.find(d => d.key === "age");
         const genderDim = schema.find(d => d.key === "gender");
         const weightDim = schema.find(d => d.key === "weight"); // optional — some disciplines have no weight dimension at all
-
-        if (!ageDim || !genderDim) return [];
 
         // Schemas written before entry_type existed get a single implicit
         // "Individual" entry type so nothing breaks — this is exactly what
@@ -209,61 +262,63 @@
 
         const unit = (weightDim && weightDim.unit) || "kg";
 
-        // The age → gender → weight tree is the same regardless of entry
-        // type (weight brackets don't vary by entry type for a given
-        // discipline), so build it once and reuse it for every entry type.
-        const divisionList = ageDim.options.map(ageOpt => {
-            const genders = [];
+        return entryOptions.map(entryOpt => {
+            const ageOptions = entryOpt.age_options || (ageDim && ageDim.options) || [];
+            const genderOptions = entryOpt.gender_options || (genderDim && genderDim.options) || [];
 
-            genderDim.options.forEach(genderOpt => {
-                let weightCats;
+            const divisions = ageOptions.map(ageOpt => {
+                const genders = [];
 
-                if (weightDim) {
-                    const thresholdKey = `${ageOpt.code}|${genderOpt.code}`;
-                    const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[thresholdKey]) || [];
-                    if (thresholds.length === 0) return; // no weight config for this age/gender pair — skip
+                genderOptions.forEach(genderOpt => {
+                    let weightCats;
 
-                    weightCats = thresholds.map(w => ({
-                        code: `${ageOpt.code}_${genderOpt.code}_${w}`,
-                        label: `-${w}${unit}`,
-                        maxWeight: w,
-                    }));
-                    if (weightDim.open_top) {
-                        const top = thresholds[thresholds.length - 1];
-                        weightCats.push({
-                            code: `${ageOpt.code}_${genderOpt.code}_${top}plus`,
-                            label: `+${top}${unit}`,
-                            maxWeight: null,
-                        });
+                    if (weightDim) {
+                        const thresholdKey = `${ageOpt.code}|${genderOpt.code}`;
+                        const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[thresholdKey]) || [];
+                        if (thresholds.length === 0) return; // no weight config for this age/gender pair — skip
+
+                        weightCats = thresholds.map(w => ({
+                            code: `${ageOpt.code}_${genderOpt.code}_${w}`,
+                            label: `-${w}${unit}`,
+                            maxWeight: w,
+                        }));
+                        if (weightDim.open_top) {
+                            const top = thresholds[thresholds.length - 1];
+                            weightCats.push({
+                                code: `${ageOpt.code}_${genderOpt.code}_${top}plus`,
+                                label: `+${top}${unit}`,
+                                maxWeight: null,
+                            });
+                        }
+                    } else {
+                        // No weight dimension (e.g. poomsae) — age+gender IS
+                        // the terminal category. A single implicit bracket
+                        // with an empty label means the UI auto-selects it
+                        // and never shows a weight picker at all.
+                        weightCats = [{ code: `${ageOpt.code}_${genderOpt.code}`, label: "", maxWeight: undefined }];
                     }
-                } else {
-                    // No weight dimension (e.g. poomsae) — age+gender IS
-                    // the terminal category. A single implicit bracket
-                    // with an empty label means the UI auto-selects it
-                    // and never shows a weight picker at all.
-                    weightCats = [{ code: `${ageOpt.code}_${genderOpt.code}`, label: "", maxWeight: undefined }];
-                }
 
-                genders.push({ code: genderOpt.code, label: genderOpt.label, matchValue: genderOpt.match_value, weightCats });
-            });
+                    genders.push({ code: genderOpt.code, label: genderOpt.label, matchValue: genderOpt.match_value, weightCats });
+                });
 
-            if (genders.length === 0) return null;
+                if (genders.length === 0) return null;
+
+                return {
+                    code: ageOpt.code,
+                    label: ageOpt.label,
+                    ageMin: ageOpt.min,
+                    ageMax: ageOpt.max,
+                    genders,
+                };
+            }).filter(Boolean);
 
             return {
-                code: ageOpt.code,
-                label: ageOpt.label,
-                ageMin: ageOpt.min,
-                ageMax: ageOpt.max,
-                genders,
+                code: entryOpt.code,
+                label: entryOpt.label,
+                participantCount: entryOpt.participantCount || 1,
+                divisions,
             };
-        }).filter(Boolean);
-
-        return entryOptions.map(entryOpt => ({
-            code: entryOpt.code,
-            label: entryOpt.label,
-            participantCount: entryOpt.participantCount || 1,
-            divisions: divisionList,
-        }));
+        });
     }
 
     // A gender option's match_value can be:
@@ -405,7 +460,10 @@
     // Renders real registered athletes/teams for one division, grouped by
     // the full composed category label ("Seniors Male -68kg", never a
     // bare "-68kg") — pulled from the roster doc's `members` list, not
-    // just a count.
+    // just a count. Each row also shows a placement badge (1st/2nd/=3rd/
+    // etc.) once the admin panel's "Compute Results" button has written
+    // a "placement" field onto that entry — see
+    // compute_tournament_results_endpoint in tournament_router.py.
     // In templates/tournament.html
 
     // 1. Update renderDivisionBody to include the trash icon next to the Edit button
@@ -424,7 +482,28 @@
 
                 const fullLabel = c.label ? `${division.label} ${g.label} ${c.label}` : `${division.label} ${g.label}`;
 
-                const rowsHtml = Object.entries(entries).map(([entryId, entry]) => {
+                // Entries with a placement sort to the top (1st, then 2nd,
+                // then joint-3rd, etc.); everyone else keeps roster order.
+                const sortedEntries = Object.entries(entries).sort(([, a], [, b]) => {
+                    const pa = a.placement ?? Infinity;
+                    const pb = b.placement ?? Infinity;
+                    return pa - pb;
+                });
+
+                // How many entries in THIS weight bracket actually share
+                // each placement value — needed because "=" should only
+                // appear when a placement is genuinely shared. With a
+                // full power-of-two bracket every rank below 2nd has at
+                // least two people in it (both semifinal losers, etc.),
+                // but an odd-sized bracket (byes) can leave a single
+                // entry alone at 3rd/5th/etc., and that entry should NOT
+                // get an "=" prefix.
+                const placementCounts = {};
+                Object.values(entries).forEach(e => {
+                    if (e.placement != null) placementCounts[e.placement] = (placementCounts[e.placement] || 0) + 1;
+                });
+
+                const rowsHtml = sortedEntries.map(([entryId, entry]) => {
                     const members = entry.members || [];
                     const namesHtml = members.map(m => {
                         const flag = countryFlagEmoji(m.country);
@@ -435,6 +514,30 @@
                     const entryClubId = members[0] ? members[0].clubId : null;
                     const athleteIdsCsv = members.map(m => m.athleteId).join(",");
                     const canEdit = IS_CLUB_ADMIN && ADMIN_CLUB_ID && entryClubId === ADMIN_CLUB_ID;
+
+                    const placement = entry.placement;
+                    const isSharedPlacement = placement != null && (placementCounts[placement] || 0) > 1;
+                    const placementLabel = placement == null ? "" : (
+                        isSharedPlacement ? `=${ordinalLabel(placement)}` : ordinalLabel(placement)
+                    );
+                    const placementColors = placement === 1
+                        ? { bg: "#fef3c7", fg: "#b45309" }
+                        : placement === 2
+                            ? { bg: "#e2e8f0", fg: "#475569" }
+                            : { bg: "#ffedd5", fg: "#c2410c" };
+                    // roster-place-badge gives every REAL badge the SAME
+                    // fixed width (see the <style> block above) regardless
+                    // of whether the text is "1st" or "=3rd", so names
+                    // below it line up instead of stair-stepping by label
+                    // length. When there's no placement yet, nothing is
+                    // rendered at all — an empty placeholder span still
+                    // carries min-width: 44px, which reserves that gap on
+                    // every row even before any results exist.
+                    const placementBadge = placementLabel ? `
+                        <span class="roster-place-badge" style="font-weight: 700; font-size: 0.78rem; background: ${placementColors.bg}; color: ${placementColors.fg};">
+                            ${escapeHtml(placementLabel)}
+                        </span>
+                    ` : "";
 
                     const actionBtns = canEdit ? `
                     <div style="display: flex; gap: 0.35rem; align-items: center;">
@@ -459,7 +562,10 @@
 
                     return `
                     <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.3rem 0; font-size: 0.88rem;">
-                        <span>${namesHtml}${club ? ` <span class="text-muted">· ${escapeHtml(club)}</span>` : ""}</span>
+                        <span style="display: flex; align-items: center; gap: 0.5rem;">
+                            ${placementBadge}
+                            <span>${namesHtml}${club ? ` <span class="text-muted roster-club">· ${escapeHtml(club)}</span>` : ""}</span>
+                        </span>
                         ${actionBtns}
                     </div>
                 `;
@@ -550,6 +656,7 @@
 
         document.getElementById("athleteSearchInput").value = "";
         document.getElementById("searchResults").innerHTML = "";
+        document.getElementById("searchResults").classList.add("hidden");
         document.getElementById("registerMsg").classList.add("hidden");
         document.getElementById("confirmStep").classList.add("hidden");
         document.getElementById("searchStep").classList.remove("hidden");
@@ -622,10 +729,20 @@
             closeRegisterModal();
             return;
         }
+        // Full reset, not just the resolution state: without clearing
+        // selectedAthletes, picking a different athlete after Back
+        // APPENDS to the old selection instead of replacing it — for
+        // Individual (participantCount 1) that silently submits two
+        // athletes on one entry once you've been Back once.
+        selectedAthletes = [];
         eligibleCategories = [];
         chosenCategory = null;
         chosenBracket = null;
         resolvedCategory = null;
+        document.getElementById("athleteSearchInput").value = "";
+        document.getElementById("searchResults").innerHTML = "";
+        document.getElementById("searchResults").classList.add("hidden");
+        renderPickedAthletesBar();
         document.getElementById("confirmStep").classList.add("hidden");
         document.getElementById("searchStep").classList.remove("hidden");
     }
@@ -654,6 +771,7 @@
 
         if (q.length < 2) {
             resultsEl.innerHTML = "";
+            resultsEl.classList.add("hidden"); // no query yet — collapse the box instead of showing an empty bordered gap
             return;
         }
 
@@ -662,6 +780,7 @@
 
     async function runAthleteSearch(q) {
         const resultsEl = document.getElementById("searchResults");
+        resultsEl.classList.remove("hidden");
         resultsEl.innerHTML = `<p class="text-muted" style="font-size: 0.85rem; padding: 0.75rem;">Searching…</p>`;
 
         try {

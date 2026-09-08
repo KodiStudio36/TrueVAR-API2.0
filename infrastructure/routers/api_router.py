@@ -1360,6 +1360,199 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FINAL PLACEMENTS / RESULTS COMPUTATION
+# ═══════════════════════════════════════════════════════════════════════════
+# Backs the "🏅 Compute Results" button on dashboard/live_queue.html.
+# Derives 1st / 2nd / joint-3rd / joint-5th / ... placements per category
+# purely from each match's bracketRound + winnerEntryId (already written
+# by commit_brackets_endpoint and kept current by update_match_status_endpoint
+# / TkStrike's own sync), and writes the result onto each athlete's own
+# entry inside tournaments/{id}/division_rosters/{ageCode} — the exact
+# same collection tournament.html's public roster view already reads via
+# get_division_roster above, so no new read path is needed on that page,
+# just a new field to render.
+
+class CategoryResultSummary(BaseModel):
+    categoryCode: str
+    totalRounds: int
+    placementsAssigned: int
+    incompleteMatches: int
+    status: str  # "complete" | "partial" | "skipped"
+    detail: Optional[str] = None
+
+
+@router.post("/tournaments/{tournament_id}/results/compute",
+             dependencies=[Depends(require_operator("matches:manage"))])
+def compute_tournament_results_endpoint(
+    tournament_id: str,
+    repo: TournamentPort = Depends(get_tournament_repo),
+):
+    """
+    Walks every category's completed single-elimination bracket and
+    derives final placements (1st, 2nd, joint-3rd, joint-5th, ...) purely
+    from bracketRound + winnerEntryId, then writes each entry's placement
+    onto its division_rosters entry so tournament.html's public roster
+    view can read it straight off data it already fetches.
+
+    A match counts as "decided" when its status is "done", "walkover",
+    OR "completed" — TkStrike's own FirebaseSyncPlugin writes "completed"
+    directly onto the match doc once a fight actually finishes (along
+    with win/win_score/win_type/end_time), which is a DIFFERENT string
+    than the "done" status this file's own update_match_status_endpoint
+    uses for its manual override. Both mean the same thing — the fight
+    is over and winnerEntryId is set — so both are treated as decided
+    here; only "pending"/"ready" (or a missing winnerEntryId) count as
+    not yet decided.
+
+    PLACEMENT MATH: for a category whose bracket's final round is
+    totalRounds (the max bracketRound seen across ANY match in that
+    category, completed or not — the shape is fixed at commit time), a
+    match's LOSER at bracketRound r is placed at
+
+        placement = 2 ** (totalRounds - r) + 1
+
+    (final loser -> 2nd; both semifinal losers -> joint 3rd; the four
+    quarterfinal losers -> joint 5th; and so on.) There is no separate
+    bronze-medal match in this codebase's ROUND_PHASE_OPTIONS
+    (R32/R16/QF/SF/F only), so both semifinal losers share 3rd rather
+    than playing it off. The FINAL's winner is placement 1; winners of
+    every other round aren't placed by that round at all (they're only
+    placed once they eventually lose, or — for the champion — once the
+    final itself is decided).
+
+    A category is only processed once its final-round match is decided;
+    otherwise it's skipped entirely rather than half-written. This is
+    safe to re-run at any point during the tournament — it's idempotent
+    per category and only touches the "placement" field on each roster
+    entry, never "members".
+    """
+    tournament = repo.getTournament(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    matches_ref = (
+        db.collection("sports").document(tournament.sport)
+        .collection("disciplines").document(tournament.discipline)
+        .collection("matches")
+        .where("tournamentId", "==", tournament_id)
+    )
+
+    by_category: Dict[str, List[Dict]] = {}
+    match_docs_by_category: Dict[str, List] = {}
+    for doc in matches_ref.stream():
+        m = doc.to_dict()
+        code = m.get("categoryCode")
+        if not code:
+            continue
+        by_category.setdefault(code, []).append(m)
+        match_docs_by_category.setdefault(code, []).append(doc.reference)
+
+    tournament_ref = db.collection("tournaments").document(tournament_id)
+    results: List[CategoryResultSummary] = []
+
+    # "done"/"walkover" are this file's own manual-override statuses
+    # (see update_match_status_endpoint); "completed" is what TkStrike's
+    # FirebaseSyncPlugin writes directly onto the match doc once a real
+    # fight finishes. All three mean the match is over.
+    DECIDED_STATUSES = ("done", "walkover", "completed")
+
+    # ageCode -> {"athletes": {categoryCode: {entryId: {"placement": n}}}}
+    # Registration doc ids are deterministically "{categoryCode}_{entryId}"
+    # (see _execute_registration_create), so we can look up each entry's
+    # ageCode directly with no extra query/index needed.
+    roster_updates: Dict[str, Dict] = {}
+
+    def _queue_placement(category_code: str, entry_id: str, placement: int) -> bool:
+        reg_doc = tournament_ref.collection("registrations").document(f"{category_code}_{entry_id}").get()
+        if not reg_doc.exists:
+            return False
+        age_code = reg_doc.to_dict().get("ageCode")
+        if not age_code:
+            return False
+        bucket = roster_updates.setdefault(age_code, {"athletes": {}})
+        bucket["athletes"].setdefault(category_code, {})[entry_id] = {"placement": placement}
+        return True
+
+    for category_code, matches in by_category.items():
+        rounds = [m.get("bracketRound") for m in matches if m.get("bracketRound") is not None]
+        if not rounds:
+            results.append(CategoryResultSummary(
+                categoryCode=category_code, totalRounds=0, placementsAssigned=0,
+                incompleteMatches=len(matches), status="skipped",
+                detail="No bracketRound data on any match — not a generated bracket.",
+            ))
+            continue
+        total_rounds = max(rounds)
+
+        final_matches = [m for m in matches if m.get("bracketRound") == total_rounds]
+        final_match = final_matches[0] if final_matches else None
+        final_decided = bool(
+            final_match and final_match.get("status") in DECIDED_STATUSES and final_match.get("winnerEntryId")
+        )
+        if not final_decided:
+            results.append(CategoryResultSummary(
+                categoryCode=category_code, totalRounds=total_rounds, placementsAssigned=0,
+                incompleteMatches=len(matches), status="skipped",
+                detail="Final has not been decided yet.",
+            ))
+            continue
+
+        assigned = 0
+        incomplete = 0
+        for m in matches:
+            r = m.get("bracketRound")
+            if r is None:
+                continue
+            decided = m.get("status") in DECIDED_STATUSES and m.get("winnerEntryId")
+            if not decided:
+                incomplete += 1
+                continue
+
+            blue_id = (m.get("blue") or {}).get("entryId")
+            red_id = (m.get("red") or {}).get("entryId")
+            winner_id = m.get("winnerEntryId")
+            if not blue_id or not red_id or winner_id not in (blue_id, red_id):
+                incomplete += 1
+                continue
+            loser_id = red_id if winner_id == blue_id else blue_id
+
+            if _queue_placement(category_code, loser_id, 2 ** (total_rounds - r) + 1):
+                assigned += 1
+            if r == total_rounds and _queue_placement(category_code, winner_id, 1):
+                assigned += 1
+
+        results.append(CategoryResultSummary(
+            categoryCode=category_code, totalRounds=total_rounds, placementsAssigned=assigned,
+            incompleteMatches=incomplete, status="complete" if incomplete == 0 else "partial",
+        ))
+
+    # ── Commit roster writes, chunked under the 500-write batch cap ──
+    roster_items = list(roster_updates.items())
+    for i in range(0, len(roster_items), 400):
+        batch = db.batch()
+        for age_code, data in roster_items[i:i + 400]:
+            batch.set(tournament_ref.collection("division_rosters").document(age_code), data, merge=True)
+        batch.commit()
+
+    # ── Flag processed matches so future dashboards/exports can tell
+    # which matches already fed into a placement computation. ────────
+    decided_categories = {r.categoryCode for r in results if r.status in ("complete", "partial")}
+    flag_refs = [ref for cat, refs in match_docs_by_category.items() if cat in decided_categories for ref in refs]
+    for i in range(0, len(flag_refs), 400):
+        batch = db.batch()
+        for ref in flag_refs[i:i + 400]:
+            batch.set(ref, {"resultsProcessed": True}, merge=True)
+        batch.commit()
+
+    return {
+        "tournamentId": tournament_id,
+        "categoriesProcessed": len([r for r in results if r.status != "skipped"]),
+        "categoriesSkipped": len([r for r in results if r.status == "skipped"]),
+        "results": [r.dict() for r in results],
+    }
+
+
 @router.get("/tournaments/{tournament_id}", response_model=TournamentResponse)
 def tournament_page_endpoint(tournament_id: str, repo=Depends(get_tournament_repo)):
     """Acts as the dedicated view state for a single tournament profile."""

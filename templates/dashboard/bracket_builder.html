@@ -1646,20 +1646,48 @@
             if (yFeed !== yOut) line(xOutCenter, yFeed, xOutCenter, yOut);
         }
 
-        // Trivial case: a 2-entry bracket is just the Final, no left/right split.
+        // Trivial case: a 2-entry bracket is just the Final — laid out
+        // the same way as a real round-1 pair (see the general path
+        // below): one fighter on the left margin, one on the right,
+        // each with its own line running in toward the center match
+        // badge. Previously both names were stacked directly on top of
+        // each other in the middle of the page with no lines at all,
+        // which didn't read as a bracket.
         if (bracketSize <= 2) {
             const finalMatch = bracket.rounds[0][0];
             const cx = totalWidth / 2, cy = HEADER_H + (totalHeight - HEADER_H - FOOTER_H) / 2;
+
+            // Same header strip the multi-round path uses, just a single
+            // "Final" cell — keeps a 2-entrant category looking like a
+            // normal bracket sheet instead of a bare two-line list.
+            const headerY = 70, headerH = 18;
+            svgParts.push(`<rect x="10" y="${headerY}" width="${totalWidth - 20}" height="${headerH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
+            text(cx, 82, "middle", "Final", { bold: true, size: 9 });
+
             const blueName = participantDisplay(bracket, finalMatch.blue);
             const blueClub = participantClubName(bracket, finalMatch.blue);
             const redName = participantDisplay(bracket, finalMatch.red);
             const redClub = participantClubName(bracket, finalMatch.red);
-            text(cx, cy - 16, "middle", blueName, { size: 11 });
-            if (blueClub) text(cx, cy - 3, "middle", blueClub, { size: 10, color: "#64748b" });
-            text(cx, cy + 16, "middle", redName, { size: 11 });
-            if (redClub) text(cx, cy + 29, "middle", redClub, { size: 10, color: "#64748b" });
+            const nameFontSize = 11, clubFontSize = 10;
+
+            // Blue on the left margin (name right-growing from MARGIN_X),
+            // Red on the right margin (name growing left from the right
+            // edge) — mirrored exactly like round 1 of a real bracket.
+            text(MARGIN_X, cy - 1.5, "start", blueName, { size: nameFontSize });
+            const blueW = estimateTextWidth(blueName, nameFontSize);
+            if (blueClub) text(MARGIN_X, cy + clubFontSize + 0.5, "start", blueClub, { size: clubFontSize, color: "#64748b" });
+            const blueFeedX = MARGIN_X + blueW + 4;
+
+            text(totalWidth - MARGIN_X, cy - 1.5, "end", redName, { size: nameFontSize });
+            const redW = estimateTextWidth(redName, nameFontSize);
+            if (redClub) text(totalWidth - MARGIN_X - redW, cy + clubFontSize + 0.5, "start", redClub, { size: clubFontSize, color: "#64748b" });
+            const redFeedX = totalWidth - MARGIN_X - redW - 4;
+
+            line(blueFeedX, cy, cx, cy);
+            line(redFeedX, cy, cx, cy);
             badge(cx, cy, finalMatch.displayNumber ?? "");
-            return { svg: wrapSVG(totalWidth, totalHeight, svgParts, bracket, totalWidth / 2), width: totalWidth, height: totalHeight };
+
+            return { svg: wrapSVG(totalWidth, totalHeight, svgParts, bracket, cx), width: totalWidth, height: totalHeight };
         }
 
         const halfCount = bracket.rounds[0].length / 2; // round-1 matches per side
@@ -1763,7 +1791,7 @@
 
                 drawMerge(topFeedX, topY, botFeedX, botY, boxX);
                 badge(boxX, y, match.displayNumber ?? "");
-                entry.exitX = boxX + dir * BOX_HALF_W; // real badge -> exit from its far edge
+                entry.exitX = boxX + dir * BOX_HALF_W;
             });
         });
 
