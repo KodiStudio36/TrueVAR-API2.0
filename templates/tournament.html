@@ -247,6 +247,16 @@ immediately, with no resize listener or re-render needed.
     // splits into Male/Female. An entry type with no overrides falls
     // back to the discipline-level dimensions exactly as before, so
     // kyorugi (one entry type, no overrides) is unaffected.
+    // CHANGE: inserted an optional BELT CLASS level between age and
+    // gender. An entry type can declare `belt_class_options` (each with
+    // rank bounds `min`/`max` against the athlete's WT rank integer,
+    // 0 = 10th Gup ... 9 = 1st Gup ... 10 = 1st Dan ...). Entry types
+    // that don't declare it (kyorugi, Para/Freestyle Poomsae) get a
+    // single IMPLICIT belt class with an empty code/label, which
+    // contributes nothing to the composed category code or the display
+    // label — so their codes are byte-for-byte identical to before this
+    // feature existed. Only Individual/Pairs/Teams Poomsae, which do
+    // declare belt_class_options, get the extra code/label segment.
     function parseCategories(schema) {
         const entryDim = schema.find(d => d.key === "entry_type");
         const ageDim = schema.find(d => d.key === "age");
@@ -261,54 +271,69 @@ immediately, with no resize listener or re-render needed.
             : [{ code: "individual", label: "Individual", participantCount: 1 }];
 
         const unit = (weightDim && weightDim.unit) || "kg";
+        const IMPLICIT_BELT_CLASS = { code: "", label: "", min: null, max: null };
 
         return entryOptions.map(entryOpt => {
             const ageOptions = entryOpt.age_options || (ageDim && ageDim.options) || [];
             const genderOptions = entryOpt.gender_options || (genderDim && genderDim.options) || [];
+            const beltClassOptions = (entryOpt.belt_class_options && entryOpt.belt_class_options.length > 0)
+                ? entryOpt.belt_class_options
+                : [IMPLICIT_BELT_CLASS];
 
             const divisions = ageOptions.map(ageOpt => {
-                const genders = [];
+                const beltClasses = beltClassOptions.map(beltOpt => {
+                    const genders = [];
 
-                genderOptions.forEach(genderOpt => {
-                    let weightCats;
+                    genderOptions.forEach(genderOpt => {
+                        let weightCats;
+                        // Only the non-empty parts go into the code, so an
+                        // entry type with no belt class produces exactly
+                        // the same code shape as before this feature.
+                        const codeBase = [ageOpt.code, beltOpt.code, genderOpt.code].filter(Boolean).join("_");
 
-                    if (weightDim) {
-                        const thresholdKey = `${ageOpt.code}|${genderOpt.code}`;
-                        const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[thresholdKey]) || [];
-                        if (thresholds.length === 0) return; // no weight config for this age/gender pair — skip
+                        if (weightDim) {
+                            const thresholdKey = `${ageOpt.code}|${genderOpt.code}`;
+                            const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[thresholdKey]) || [];
+                            if (thresholds.length === 0) return; // no weight config for this age/gender pair — skip
 
-                        weightCats = thresholds.map(w => ({
-                            code: `${ageOpt.code}_${genderOpt.code}_${w}`,
-                            label: `-${w}${unit}`,
-                            maxWeight: w,
-                        }));
-                        if (weightDim.open_top) {
-                            const top = thresholds[thresholds.length - 1];
-                            weightCats.push({
-                                code: `${ageOpt.code}_${genderOpt.code}_${top}plus`,
-                                label: `+${top}${unit}`,
-                                maxWeight: null,
-                            });
+                            weightCats = thresholds.map(w => ({
+                                code: `${codeBase}_${w}`,
+                                label: `-${w}${unit}`,
+                                maxWeight: w,
+                            }));
+                            if (weightDim.open_top) {
+                                const top = thresholds[thresholds.length - 1];
+                                weightCats.push({
+                                    code: `${codeBase}_${top}plus`,
+                                    label: `+${top}${unit}`,
+                                    maxWeight: null,
+                                });
+                            }
+                        } else {
+                            // No weight dimension (e.g. poomsae) — the
+                            // belt class + gender level IS the terminal
+                            // category. A single implicit bracket with an
+                            // empty label auto-selects and skips the
+                            // weight picker, same as before.
+                            weightCats = [{ code: codeBase, label: "", maxWeight: undefined }];
                         }
-                    } else {
-                        // No weight dimension (e.g. poomsae) — age+gender IS
-                        // the terminal category. A single implicit bracket
-                        // with an empty label means the UI auto-selects it
-                        // and never shows a weight picker at all.
-                        weightCats = [{ code: `${ageOpt.code}_${genderOpt.code}`, label: "", maxWeight: undefined }];
-                    }
 
-                    genders.push({ code: genderOpt.code, label: genderOpt.label, matchValue: genderOpt.match_value, weightCats });
-                });
+                        genders.push({ code: genderOpt.code, label: genderOpt.label, matchValue: genderOpt.match_value, weightCats });
+                    });
 
-                if (genders.length === 0) return null;
+                    if (genders.length === 0) return null;
+
+                    return { code: beltOpt.code, label: beltOpt.label, rankMin: beltOpt.min, rankMax: beltOpt.max, genders };
+                }).filter(Boolean);
+
+                if (beltClasses.length === 0) return null;
 
                 return {
                     code: ageOpt.code,
                     label: ageOpt.label,
                     ageMin: ageOpt.min,
                     ageMax: ageOpt.max,
-                    genders,
+                    beltClasses,
                 };
             }).filter(Boolean);
 
@@ -337,23 +362,41 @@ immediately, with no resize listener or re-render needed.
         return mv === athleteGenderCode;
     }
 
+    // A belt class bracket with both rankMin and rankMax null is the
+    // IMPLICIT wildcard (entry types with no belt_class_options) and
+    // matches everyone, including an athlete with no rank on file. A
+    // real belt class bracket requires a known rank — an athlete with no
+    // rank recorded simply can't be placed into Individual/Pairs/Teams
+    // Poomsae until their rank is set.
+    function beltClassMatches(beltClass, rank) {
+        if (beltClass.rankMin == null && beltClass.rankMax == null) return true;
+        if (rank == null) return false;
+        if (beltClass.rankMin != null && rank < beltClass.rankMin) return false;
+        if (beltClass.rankMax != null && rank > beltClass.rankMax) return false;
+        return true;
+    }
+
     // Eligibility isn't a hand-authored list — it falls straight out of
-    // the age ranges and gender match rules actually overlapping. If
-    // Cadets is 2011-2013 and Juniors is 2009-2011, someone born in 2011
-    // is legitimately in both ranges at once; if a division has both a
-    // "Male" bracket and a "Mixed" bracket, a male athlete matches both.
-    // Returns every valid {division, gender} combination — 1 in the
-    // typical case, more when ranges/brackets genuinely overlap.
-    function resolveEligibleCategories(entryType, birthYear, athleteGenderCode) {
+    // the age ranges, belt class rank bounds, and gender match rules
+    // actually overlapping. If Cadets is 2011-2013 and Juniors is
+    // 2009-2011, someone born in 2011 is legitimately in both ranges at
+    // once; if a division has both a "Male" bracket and a "Mixed"
+    // bracket, a male athlete matches both. Returns every valid
+    // {division, beltClass, gender} combination — 1 in the typical case,
+    // more when ranges/brackets genuinely overlap.
+    function resolveEligibleCategories(entryType, birthYear, rank, athleteGenderCode) {
         if (birthYear == null) return [];
         const results = [];
 
         entryType.divisions.forEach(division => {
             if (birthYear < division.ageMin || birthYear > division.ageMax) return;
-            division.genders.forEach(genderBracket => {
-                if (genderMatches(genderBracket, athleteGenderCode)) {
-                    results.push({ division, gender: genderBracket });
-                }
+            division.beltClasses.forEach(beltClass => {
+                if (!beltClassMatches(beltClass, rank)) return;
+                beltClass.genders.forEach(genderBracket => {
+                    if (genderMatches(genderBracket, athleteGenderCode)) {
+                        results.push({ division, beltClass, gender: genderBracket });
+                    }
+                });
             });
         });
 
@@ -388,9 +431,9 @@ immediately, with no resize listener or re-render needed.
             // hide empty brackets, not the division itself.
             const divisionsHtml = entryType.divisions.map(division => {
                 let divisionTotal = 0;
-                division.genders.forEach(g => g.weightCats.forEach(c => {
+                division.beltClasses.forEach(bc => bc.genders.forEach(g => g.weightCats.forEach(c => {
                     divisionTotal += categoryCounts[`${entryType.code}_${c.code}`] || 0;
-                }));
+                })));
 
                 const bodyId = `divisionBody_${entryType.code}_${division.code}`;
                 return `
@@ -474,72 +517,73 @@ immediately, with no resize listener or re-render needed.
         const roster = divisionRosterCache[division.code] || {};
         let html = "";
 
-        division.genders.forEach(g => {
-            g.weightCats.forEach(c => {
-                const fullCode = `${entryTypeCode}_${c.code}`;
-                const entries = roster[fullCode];
-                if (!entries || Object.keys(entries).length === 0) return;
+        division.beltClasses.forEach(bc => {
+            bc.genders.forEach(g => {
+                g.weightCats.forEach(c => {
+                    const fullCode = `${entryTypeCode}_${c.code}`;
+                    const entries = roster[fullCode];
+                    if (!entries || Object.keys(entries).length === 0) return;
 
-                const fullLabel = c.label ? `${division.label} ${g.label} ${c.label}` : `${division.label} ${g.label}`;
+                    const fullLabel = [division.label, bc.label, g.label, c.label].filter(Boolean).join(" ");
 
-                // Entries with a placement sort to the top (1st, then 2nd,
-                // then joint-3rd, etc.); everyone else keeps roster order.
-                const sortedEntries = Object.entries(entries).sort(([, a], [, b]) => {
-                    const pa = a.placement ?? Infinity;
-                    const pb = b.placement ?? Infinity;
-                    return pa - pb;
-                });
+                    // Entries with a placement sort to the top (1st, then 2nd,
+                    // then joint-3rd, etc.); everyone else keeps roster order.
+                    const sortedEntries = Object.entries(entries).sort(([, a], [, b]) => {
+                        const pa = a.placement ?? Infinity;
+                        const pb = b.placement ?? Infinity;
+                        return pa - pb;
+                    });
 
-                // How many entries in THIS weight bracket actually share
-                // each placement value — needed because "=" should only
-                // appear when a placement is genuinely shared. With a
-                // full power-of-two bracket every rank below 2nd has at
-                // least two people in it (both semifinal losers, etc.),
-                // but an odd-sized bracket (byes) can leave a single
-                // entry alone at 3rd/5th/etc., and that entry should NOT
-                // get an "=" prefix.
-                const placementCounts = {};
-                Object.values(entries).forEach(e => {
-                    if (e.placement != null) placementCounts[e.placement] = (placementCounts[e.placement] || 0) + 1;
-                });
+                    // How many entries in THIS weight bracket actually share
+                    // each placement value — needed because "=" should only
+                    // appear when a placement is genuinely shared. With a
+                    // full power-of-two bracket every rank below 2nd has at
+                    // least two people in it (both semifinal losers, etc.),
+                    // but an odd-sized bracket (byes) can leave a single
+                    // entry alone at 3rd/5th/etc., and that entry should NOT
+                    // get an "=" prefix.
+                    const placementCounts = {};
+                    Object.values(entries).forEach(e => {
+                        if (e.placement != null) placementCounts[e.placement] = (placementCounts[e.placement] || 0) + 1;
+                    });
 
-                const rowsHtml = sortedEntries.map(([entryId, entry]) => {
-                    const members = entry.members || [];
-                    const namesHtml = members.map(m => {
-                        const flag = countryFlagEmoji(m.country);
-                        const rankLabel = formatRank(m.rank);
-                        return `${flag ? flag + " " : ""}${escapeHtml(m.name)}${rankLabel ? ` <span class="text-muted">(${escapeHtml(rankLabel)})</span>` : ""}`;
-                    }).join(" &amp; ");
-                    const club = members[0] ? members[0].club : "";
-                    const entryClubId = members[0] ? members[0].clubId : null;
-                    const athleteIdsCsv = members.map(m => m.athleteId).join(",");
-                    const canEdit = IS_CLUB_ADMIN && ADMIN_CLUB_ID && entryClubId === ADMIN_CLUB_ID;
+                    const rowsHtml = sortedEntries.map(([entryId, entry]) => {
+                        const members = entry.members || [];
+                        const namesHtml = members.map(m => {
+                            const flag = countryFlagEmoji(m.country);
+                            const rankLabel = formatRank(m.rank);
+                            return `${flag ? flag + " " : ""}${escapeHtml(m.name)}${rankLabel ? ` <span class="text-muted">(${escapeHtml(rankLabel)})</span>` : ""}`;
+                        }).join(" &amp; ");
+                        const club = members[0] ? members[0].club : "";
+                        const entryClubId = members[0] ? members[0].clubId : null;
+                        const athleteIdsCsv = members.map(m => m.athleteId).join(",");
+                        const canEdit = IS_CLUB_ADMIN && ADMIN_CLUB_ID && entryClubId === ADMIN_CLUB_ID;
 
-                    const placement = entry.placement;
-                    const isSharedPlacement = placement != null && (placementCounts[placement] || 0) > 1;
-                    const placementLabel = placement == null ? "" : (
-                        isSharedPlacement ? `=${ordinalLabel(placement)}` : ordinalLabel(placement)
-                    );
-                    const placementColors = placement === 1
-                        ? { bg: "#fef3c7", fg: "#b45309" }
-                        : placement === 2
-                            ? { bg: "#e2e8f0", fg: "#475569" }
-                            : { bg: "#ffedd5", fg: "#c2410c" };
-                    // roster-place-badge gives every REAL badge the SAME
-                    // fixed width (see the <style> block above) regardless
-                    // of whether the text is "1st" or "=3rd", so names
-                    // below it line up instead of stair-stepping by label
-                    // length. When there's no placement yet, nothing is
-                    // rendered at all — an empty placeholder span still
-                    // carries min-width: 44px, which reserves that gap on
-                    // every row even before any results exist.
-                    const placementBadge = placementLabel ? `
+                        const placement = entry.placement;
+                        const isSharedPlacement = placement != null && (placementCounts[placement] || 0) > 1;
+                        const placementLabel = placement == null ? "" : (
+                            isSharedPlacement ? `=${ordinalLabel(placement)}` : ordinalLabel(placement)
+                        );
+                        const placementColors = placement === 1
+                            ? { bg: "#fef3c7", fg: "#b45309" }
+                            : placement === 2
+                                ? { bg: "#e2e8f0", fg: "#475569" }
+                                : { bg: "#ffedd5", fg: "#c2410c" };
+                        // roster-place-badge gives every REAL badge the SAME
+                        // fixed width (see the <style> block above) regardless
+                        // of whether the text is "1st" or "=3rd", so names
+                        // below it line up instead of stair-stepping by label
+                        // length. When there's no placement yet, nothing is
+                        // rendered at all — an empty placeholder span still
+                        // carries min-width: 44px, which reserves that gap on
+                        // every row even before any results exist.
+                        const placementBadge = placementLabel ? `
                         <span class="roster-place-badge" style="font-weight: 700; font-size: 0.78rem; background: ${placementColors.bg}; color: ${placementColors.fg};">
                             ${escapeHtml(placementLabel)}
                         </span>
                     ` : "";
 
-                    const actionBtns = canEdit ? `
+                        const actionBtns = canEdit ? `
                     <div style="display: flex; gap: 0.35rem; align-items: center;">
                         <button type="button"
                             onclick="openEditRegistration('${entryTypeCode}', '${division.code}', '${fullCode}', '${athleteIdsCsv}')"
@@ -560,7 +604,7 @@ immediately, with no resize listener or re-render needed.
                     </div>
                 ` : "";
 
-                    return `
+                        return `
                     <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.3rem 0; font-size: 0.88rem;">
                         <span style="display: flex; align-items: center; gap: 0.5rem;">
                             ${placementBadge}
@@ -569,14 +613,15 @@ immediately, with no resize listener or re-render needed.
                         ${actionBtns}
                     </div>
                 `;
-                }).join("");
+                    }).join("");
 
-                html += `
+                    html += `
                 <div style="margin-top: 0.75rem;">
                     <div style="font-weight: 600; font-size: 0.88rem;">${escapeHtml(fullLabel)}</div>
                     <div style="margin-left: 0.5rem;">${rowsHtml}</div>
                 </div>
             `;
+                });
             });
         });
 
@@ -706,7 +751,7 @@ immediately, with no resize listener or re-render needed.
             return;
         }
 
-        eligibleCategories = resolveEligibleCategories(pendingEntryType, selectedAthletes[0].birthYear, selectedAthletes[0].gender);
+        eligibleCategories = resolveEligibleCategories(pendingEntryType, selectedAthletes[0].birthYear, selectedAthletes[0].rank, selectedAthletes[0].gender);
         renderResolutionStep();
     }
 
@@ -836,16 +881,20 @@ immediately, with no resize listener or re-render needed.
             // the search step open so the admin can pick the next one.
             document.getElementById("athleteSearchInput").value = "";
             document.getElementById("searchResults").innerHTML = "";
+            document.getElementById("searchResults").classList.add("hidden");
             renderPickedAthletesBar();
             return;
         }
 
         // Roster for this entry is complete — resolve the category.
-        // Multi-athlete eligibility (pairs/team) uses the first selected
-        // athlete's age/gender as the basis; kyorugi only ever has
-        // participantCount 1, so this is exactly the single-athlete case
-        // for every entry type that's actually live today.
-        eligibleCategories = resolveEligibleCategories(pendingEntryType, selectedAthletes[0].birthYear, selectedAthletes[0].gender);
+        // Age/gender eligibility still uses the first selected athlete
+        // as the basis (unchanged behavior for pairs/teams). Belt class
+        // is stricter: real WT rules require every member of a Pairs/
+        // Teams entry to actually qualify for the SAME class, so the
+        // eligible list is filtered down to classes every selected
+        // athlete's rank falls into, not just the first athlete's.
+        eligibleCategories = resolveEligibleCategories(pendingEntryType, selectedAthletes[0].birthYear, selectedAthletes[0].rank, selectedAthletes[0].gender)
+            .filter(ec => selectedAthletes.every(a => beltClassMatches(ec.beltClass, a.rank)));
         chosenCategory = null;
         chosenBracket = null;
         resolvedCategory = null;
@@ -873,17 +922,19 @@ immediately, with no resize listener or re-render needed.
 
         if (eligibleCategories.length === 0) {
             summaryEl.innerHTML = header + `
-                <p style="color: #b91c1c;">No category in ${escapeHtml(pendingEntryType.label)} matches this athlete's age and gender.</p>
+                <p style="color: #b91c1c;">No category in ${escapeHtml(pendingEntryType.label)} matches this athlete's age, gender, and belt rank.</p>
             `;
             return;
         }
 
-        // Step A — pick a (division, gender) combination, only shown when
-        // more than one genuinely applies. That happens either because
-        // two age ranges overlap for this birth year (e.g. Cadets
+        // Step A — pick a (division, beltClass, gender) combination, only
+        // shown when more than one genuinely applies. That happens either
+        // because two age ranges overlap for this birth year (e.g. Cadets
         // 2011-2013 and Juniors 2009-2011 both include 2011), or because
         // more than one gender bracket in the same division matches this
-        // athlete (e.g. a "Mixed" bracket alongside "Male").
+        // athlete (e.g. a "Mixed" bracket alongside "Male"). Belt class
+        // brackets don't overlap by rank, so they don't add extra
+        // ambiguity on their own — they just get folded into the label.
         if (!chosenCategory) {
             if (eligibleCategories.length === 1) {
                 chosenCategory = eligibleCategories[0];
@@ -891,7 +942,7 @@ immediately, with no resize listener or re-render needed.
                 const options = eligibleCategories.map((ec, idx) => `
                     <button type="button" onclick="chooseCategory(${idx})"
                         style="padding: 0.5rem 1.1rem; border: 1px solid var(--border); border-radius: 999px; background: none; cursor: pointer; font-size: 0.9rem;">
-                        ${escapeHtml(ec.division.label)} · ${escapeHtml(ec.gender.label)}
+                        ${[ec.division.label, ec.beltClass.label, ec.gender.label].filter(Boolean).map(escapeHtml).join(" · ")}
                     </button>
                 `).join("");
                 summaryEl.innerHTML = header + `
@@ -902,7 +953,7 @@ immediately, with no resize listener or re-render needed.
             }
         }
 
-        const { division, gender } = chosenCategory;
+        const { division, beltClass, gender } = chosenCategory;
 
         // Step B — weight bracket, only shown if there's more than one
         // (disciplines with no weight dimension collapse to a single
@@ -918,7 +969,7 @@ immediately, with no resize listener or re-render needed.
                     </button>
                 `).join("");
                 summaryEl.innerHTML = header + `
-                    <label class="field-label">Weight bracket — ${escapeHtml(division.label)} · ${escapeHtml(gender.label)}</label>
+                    <label class="field-label">Weight bracket — ${[division.label, beltClass.label, gender.label].filter(Boolean).map(escapeHtml).join(" · ")}</label>
                     <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem;">${options}</div>
                 `;
                 return;
@@ -929,8 +980,10 @@ immediately, with no resize listener or re-render needed.
         resolvedCategory = {
             code: `${pendingEntryType.code}_${chosenBracket.code}`,
             ageCode: division.code,
+            beltClassCode: beltClass.code || null,
             genderCode: gender.code,
-            label: `${pendingEntryType.label} · ${division.label} · ${gender.label}${chosenBracket.label ? " " + chosenBracket.label : ""}`,
+            label: [pendingEntryType.label, division.label, beltClass.label, gender.label].filter(Boolean).join(" · ")
+                + (chosenBracket.label ? " " + chosenBracket.label : ""),
         };
 
         submitBtn.disabled = false;
@@ -977,6 +1030,7 @@ immediately, with no resize listener or re-render needed.
                         oldAgeCode: editingRegistration.oldAgeCode,
                         newEntryTypeCode: pendingEntryType.code,
                         newAgeCode: resolvedCategory.ageCode,
+                        newBeltClassCode: resolvedCategory.beltClassCode,
                         newGenderCode: resolvedCategory.genderCode,
                         newCategoryCode: resolvedCategory.code,
                         newCategoryLabel: resolvedCategory.label,
@@ -989,6 +1043,7 @@ immediately, with no resize listener or re-render needed.
                         athleteIds: selectedAthletes.map(a => a.id),
                         entryTypeCode: pendingEntryType.code,
                         ageCode: resolvedCategory.ageCode,
+                        beltClassCode: resolvedCategory.beltClassCode,
                         genderCode: resolvedCategory.genderCode,
                         categoryCode: resolvedCategory.code,
                         categoryLabel: resolvedCategory.label,

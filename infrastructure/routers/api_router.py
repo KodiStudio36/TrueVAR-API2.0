@@ -306,7 +306,7 @@ def search_athletes(
 
     def _club_fields(a: dict) -> dict:
         sport_data = (a.get("sports") or {}).get(club_sport, {})
-        return {"club": sport_data.get("clubName", ""), "clubId": sport_data.get("clubId")}
+        return {"club": sport_data.get("clubName", ""), "clubId": sport_data.get("clubId"), "rank": sport_data.get("rank")}
 
     return {"athletes": [
         {
@@ -354,7 +354,7 @@ def search_athletes_admin(
 
     def _club_fields(a: dict) -> dict:
         sport_data = (a.get("sports") or {}).get(sport_key, {})
-        return {"club": sport_data.get("clubName", ""), "clubId": sport_data.get("clubId")}
+        return {"club": sport_data.get("clubName", ""), "clubId": sport_data.get("clubId"), "rank": sport_data.get("rank")}
 
     return {"athletes": [
         {
@@ -371,6 +371,7 @@ class RegisterEntryRequest(BaseModel):
     athleteIds: List[str]
     entryTypeCode: str
     ageCode: str
+    beltClassCode: Optional[str] = None
     genderCode: str
     categoryCode: str
     categoryLabel: str
@@ -433,6 +434,7 @@ def _execute_registration_create(
             "tournamentId": tournament_id,
             "entryTypeCode": payload.entryTypeCode,
             "ageCode": payload.ageCode,
+            "beltClassCode": payload.beltClassCode,
             "genderCode": payload.genderCode,
             "categoryCode": payload.categoryCode,
             "categoryLabel": payload.categoryLabel,
@@ -508,6 +510,7 @@ def get_athlete_endpoint(athlete_id: str, user: Optional[dict] = Depends(get_cur
         "associationId": sport_data.get("associationId"),
         "gender": data.get("gender"),
         "birthYear": _birth_year(data),
+        "rank": sport_data.get("rank"),
     }
 
 
@@ -517,6 +520,7 @@ class MoveRegistrationRequest(BaseModel):
     oldAgeCode: str
     newEntryTypeCode: str
     newAgeCode: str
+    newBeltClassCode: Optional[str] = None
     newGenderCode: str
     newCategoryCode: str
     newCategoryLabel: str
@@ -583,6 +587,7 @@ def _execute_registration_move(
             "tournamentId": tournament_id,
             "entryTypeCode": payload.newEntryTypeCode,
             "ageCode": payload.newAgeCode,
+            "beltClassCode": payload.newBeltClassCode,
             "genderCode": payload.newGenderCode,
             "categoryCode": payload.newCategoryCode,
             "categoryLabel": payload.newCategoryLabel,
@@ -797,7 +802,12 @@ class BracketCommitMatch(BaseModel):
     matchNumber: int
     displayNumber: Optional[float] = None
     blue: Dict
-    red: Dict
+    # Optional — a poomsae cut-off match is a solo, judged performance
+    # with no opponent at all, not just an unfilled one. Kyorugi (and
+    # poomsae's own single_elimination/round_robin systems) always send
+    # a real dict here, so this change is purely additive and doesn't
+    # alter their behavior.
+    red: Optional[Dict] = None
     status: str
     winnerEntryId: Optional[str] = None
     courtId: Optional[str] = None

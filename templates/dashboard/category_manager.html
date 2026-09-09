@@ -131,9 +131,9 @@ each browser's own print-to-PDF engine. #}
     // rank — kept byte-identical to that file's helpers on purpose so the
     // two roster views never visually drift apart.
     const RANK_LABELS = [
-        "10. Keup (White)", "9. Keup (White-Yellow)", "8. Keup (Yellow)", "7. Keup (Yellow-Green)",
-        "6. Keup (Green)", "5. Keup (Green-Blue)", "4. Keup (Blue)", "3. Keup (Blue-Red)",
-        "2. Keup (Red)", "1. Keup (Red-Black)", "1. Dan", "2. Dan", "3. Dan", "4. Dan",
+        "10. Keup", "9. Keup", "8. Keup", "7. Keup",
+        "6. Keup", "5. Keup", "4. Keup", "3. Keup",
+        "2. Keup", "1. Keup", "1. Dan", "2. Dan", "3. Dan", "4. Dan",
         "5. Dan", "6. Dan", "7. Dan", "8. Dan", "9. Dan",
     ];
     function formatRank(rank) {
@@ -184,44 +184,66 @@ each browser's own print-to-PDF engine. #}
     // eligibility, no per-entry-type Register button grouping like the
     // club-facing page. This tool just needs "every place an entry could
     // possibly live," to click on or drop onto.
+    //
+    // CHANGE: mirrors tournament.html's parseCategories exactly — each
+    // entry_type option can override age_options/gender_options, and can
+    // declare belt_class_options (Individual/Pairs/Teams Poomsae's Class
+    // D/C/B/A). Entry types without belt_class_options get a single
+    // implicit "" class that contributes nothing to the code, so
+    // kyorugi's codes are unaffected. This MUST stay in lockstep with
+    // parseCategories in tournament.html — a category code composed here
+    // has to be byte-identical to the one a real registration was saved
+    // under, or this page's counts/rosters silently show as empty even
+    // though the tournament page shows real registrations. If the code
+    // composition rule there ever changes again, mirror it here too.
     function flattenCategories(schema) {
         const entryDim = schema.find(d => d.key === "entry_type");
         const ageDim = schema.find(d => d.key === "age");
         const genderDim = schema.find(d => d.key === "gender");
         const weightDim = schema.find(d => d.key === "weight");
-        if (!ageDim || !genderDim) return [];
 
         const entryOptions = (entryDim && entryDim.options && entryDim.options.length > 0)
             ? entryDim.options
             : [{ code: "individual", label: "Individual" }];
         const unit = (weightDim && weightDim.unit) || "kg";
+        const IMPLICIT_BELT_CLASS = { code: "", label: "", min: null, max: null };
 
         const flat = [];
         entryOptions.forEach(entryOpt => {
-            ageDim.options.forEach(ageOpt => {
-                genderDim.options.forEach(genderOpt => {
-                    let weightCats;
-                    if (weightDim) {
-                        const key = `${ageOpt.code}|${genderOpt.code}`;
-                        const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[key]) || [];
-                        if (thresholds.length === 0) return;
-                        weightCats = thresholds.map(w => ({ code: `${ageOpt.code}_${genderOpt.code}_${w}`, label: `-${w}${unit}` }));
-                        if (weightDim.open_top) {
-                            const top = thresholds[thresholds.length - 1];
-                            weightCats.push({ code: `${ageOpt.code}_${genderOpt.code}_${top}plus`, label: `+${top}${unit}` });
-                        }
-                    } else {
-                        weightCats = [{ code: `${ageOpt.code}_${genderOpt.code}`, label: "" }];
-                    }
+            const ageOptions = entryOpt.age_options || (ageDim && ageDim.options) || [];
+            const genderOptions = entryOpt.gender_options || (genderDim && genderDim.options) || [];
+            const beltClassOptions = (entryOpt.belt_class_options && entryOpt.belt_class_options.length > 0)
+                ? entryOpt.belt_class_options
+                : [IMPLICIT_BELT_CLASS];
 
-                    weightCats.forEach(c => {
-                        flat.push({
-                            code: `${entryOpt.code}_${c.code}`,
-                            ageCode: ageOpt.code,
-                            genderCode: genderOpt.code,
-                            entryTypeCode: entryOpt.code,
-                            groupLabel: entryOpt.label,
-                            label: c.label ? `${ageOpt.label} ${genderOpt.label} ${c.label}` : `${ageOpt.label} ${genderOpt.label}`,
+            ageOptions.forEach(ageOpt => {
+                beltClassOptions.forEach(beltOpt => {
+                    genderOptions.forEach(genderOpt => {
+                        const codeBase = [ageOpt.code, beltOpt.code, genderOpt.code].filter(Boolean).join("_");
+                        let weightCats;
+                        if (weightDim) {
+                            const key = `${ageOpt.code}|${genderOpt.code}`;
+                            const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[key]) || [];
+                            if (thresholds.length === 0) return;
+                            weightCats = thresholds.map(w => ({ code: `${codeBase}_${w}`, label: `-${w}${unit}` }));
+                            if (weightDim.open_top) {
+                                const top = thresholds[thresholds.length - 1];
+                                weightCats.push({ code: `${codeBase}_${top}plus`, label: `+${top}${unit}` });
+                            }
+                        } else {
+                            weightCats = [{ code: codeBase, label: "" }];
+                        }
+
+                        weightCats.forEach(c => {
+                            flat.push({
+                                code: `${entryOpt.code}_${c.code}`,
+                                ageCode: ageOpt.code,
+                                beltClassCode: beltOpt.code || null,
+                                genderCode: genderOpt.code,
+                                entryTypeCode: entryOpt.code,
+                                groupLabel: entryOpt.label,
+                                label: [ageOpt.label, beltOpt.label, genderOpt.label, c.label].filter(Boolean).join(" "),
+                            });
                         });
                     });
                 });
@@ -444,6 +466,7 @@ each browser's own print-to-PDF engine. #}
                     athleteIds: [athlete.id],
                     entryTypeCode: cat.entryTypeCode,
                     ageCode: cat.ageCode,
+                    beltClassCode: cat.beltClassCode,
                     genderCode: cat.genderCode,
                     categoryCode: cat.code,
                     categoryLabel: `${cat.groupLabel} · ${cat.label}`,
@@ -517,6 +540,7 @@ each browser's own print-to-PDF engine. #}
                     oldAgeCode: draggedEntry.oldAgeCode,
                     newEntryTypeCode: cat.entryTypeCode,
                     newAgeCode: cat.ageCode,
+                    newBeltClassCode: cat.beltClassCode,
                     newGenderCode: cat.genderCode,
                     newCategoryCode: cat.code,
                     newCategoryLabel: `${cat.groupLabel} · ${cat.label}`,
@@ -921,6 +945,7 @@ each browser's own print-to-PDF engine. #}
                                 athleteIds: [athleteId],
                                 entryTypeCode: cat.entryTypeCode,
                                 ageCode: cat.ageCode,
+                                beltClassCode: cat.beltClassCode,
                                 genderCode: cat.genderCode,
                                 categoryCode: cat.code,
                                 categoryLabel: `${cat.groupLabel} · ${cat.label}`,
@@ -1143,7 +1168,7 @@ each browser's own print-to-PDF engine. #}
            min-width: auto, which lets a wide card in the roster pane
            expand its column beyond the container and force a horizontal
            scrollbar. minmax(0, ...) is what actually prevents that. */
-        grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+        grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
         gap: 1.25rem;
         width: 100%;
         box-sizing: border-box;

@@ -22,7 +22,33 @@
                                         "match_value": "individual_poomsae",
                                         "participantCount": 1,
                                         "min": null,
-                                        "max": null
+                                        "max": null,
+                                        "belt_class_options": [
+                                            {
+                                                "code": "class_d",
+                                                "label": "Class D: 9. - 7. Gup",
+                                                "min": 0,
+                                                "max": 3
+                                            },
+                                            {
+                                                "code": "class_c",
+                                                "label": "Class C: 6. - 4. Gup",
+                                                "min": 4,
+                                                "max": 6
+                                            },
+                                            {
+                                                "code": "class_b",
+                                                "label": "Class B: 3. - 1. Gup",
+                                                "min": 7,
+                                                "max": 9
+                                            },
+                                            {
+                                                "code": "class_a",
+                                                "label": "Class A: 1. Dan and higher",
+                                                "min": 10,
+                                                "max": null
+                                            }
+                                        ]
                                     },
                                     {
                                         "code": "pairs_poomsae",
@@ -31,6 +57,32 @@
                                         "participantCount": 2,
                                         "min": null,
                                         "max": null,
+                                        "belt_class_options": [
+                                            {
+                                                "code": "class_d",
+                                                "label": "Class D: 9. - 7. Gup",
+                                                "min": 0,
+                                                "max": 3
+                                            },
+                                            {
+                                                "code": "class_c",
+                                                "label": "Class C: 6. - 4. Gup",
+                                                "min": 4,
+                                                "max": 6
+                                            },
+                                            {
+                                                "code": "class_b",
+                                                "label": "Class B: 3. - 1. Gup",
+                                                "min": 7,
+                                                "max": 9
+                                            },
+                                            {
+                                                "code": "class_a",
+                                                "label": "Class A: 1. Dan and higher",
+                                                "min": 10,
+                                                "max": null
+                                            }
+                                        ],
                                         "gender_options": [
                                             {
                                                 "code": "mixed",
@@ -51,6 +103,32 @@
                                         "participantCount": 3,
                                         "min": null,
                                         "max": null,
+                                        "belt_class_options": [
+                                            {
+                                                "code": "class_d",
+                                                "label": "Class D: 9. - 7. Gup",
+                                                "min": 0,
+                                                "max": 3
+                                            },
+                                            {
+                                                "code": "class_c",
+                                                "label": "Class C: 6. - 4. Gup",
+                                                "min": 4,
+                                                "max": 6
+                                            },
+                                            {
+                                                "code": "class_b",
+                                                "label": "Class B: 3. - 1. Gup",
+                                                "min": 7,
+                                                "max": 9
+                                            },
+                                            {
+                                                "code": "class_a",
+                                                "label": "Class A: 1. Dan and higher",
+                                                "min": 10,
+                                                "max": null
+                                            }
+                                        ],
                                         "gender_options": [
                                             {
                                                 "code": "mixed",

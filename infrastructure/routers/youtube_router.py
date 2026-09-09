@@ -47,7 +47,7 @@ router = APIRouter()
 
 # Resolved once at module load; safe for single-process servers.
 REDIRECT_URI: str = os.getenv(
-    "YOUTUBE_REDIRECT_URI", "http://localhost:8000/youtube/callback"
+    "YOUTUBE_REDIRECT_URI", "https://truevar.eu/youtube/callback"
 )
 
 
