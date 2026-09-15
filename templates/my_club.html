@@ -20,13 +20,13 @@
 
     <div style="overflow-x: auto; margin-top: 1.25rem;">
         <table
-            style="width: 100%; border-collapse: collapse; font-size: clamp(0.85rem, 2vw + 0.5rem, 0.95rem); min-width: 480px;">
+            style="width: 100%; border-collapse: collapse; font-size: clamp(0.85rem, 2vw + 0.5rem, 0.95rem); min-width: 560px;">
             <thead>
                 <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                     <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Name</th>
-                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Gender</th>
                     <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Birth Year</th>
-                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;"></th>
+                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Belt</th>
+                    <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;">Gender</th>
                     <th style="padding: 0.6rem 0.5rem; color: var(--text-muted); font-weight: 600;"></th>
                 </tr>
             </thead>
@@ -52,6 +52,7 @@
     </div>
 </div>
 
+<script src="/static/js/truevar-lib.js"></script>
 <script>
     const CLUB_ID = {{ club_id | tojson }};
     const PAGE_SIZE = 10;
@@ -82,10 +83,12 @@
             rosterBody.innerHTML = data.athletes.map(a => `
                 <tr style="border-bottom: 1px solid var(--border);">
                     <td style="padding: 0.7rem 0.5rem; font-weight: 600; color: var(--ink);">${escapeHtml(a.displayName)}</td>
-                    <td style="padding: 0.7rem 0.5rem; text-transform: capitalize;">${escapeHtml(a.gender || "—")}</td>
                     <td style="padding: 0.7rem 0.5rem;" class="mono">${a.birthYear || "—"}</td>
-                    <td style="padding: 0.7rem 0.5rem;" class="mono"></td>
-                    <td style="padding: 0.7rem 0.5rem;" class="mono"></td>
+                    <td style="padding: 0.7rem 0.5rem;" class="mono">${beltLabel(a.rank)}</td>
+                    <td style="padding: 0.7rem 0.5rem; text-transform: capitalize;">${escapeHtml(a.gender || "—")}</td>
+                    <td style="padding: 0.7rem 0.5rem; text-align: right;">
+                        <a href="/athletes/${a.id}/edit" class="btn btn-secondary" style="padding: 0.35rem 0.8rem; font-size: 0.85rem;">Edit</a>
+                    </td>
                 </tr>
             `).join("");
         }
@@ -100,6 +103,14 @@
     function changePage(direction) {
         offset = Math.max(0, offset + direction * PAGE_SIZE);
         loadRoster();
+    }
+
+    // Belt label comes from the shared TrueVAR library so it stays in
+    // sync with every other page (create_athlete.html, tournament.html,
+    // category_manager.html) instead of drifting again like it did
+    // before ("10. GUP" here vs "10. Keup" elsewhere for the same rank).
+    function beltLabel(rank) {
+        return TrueVAR.beltLabel(rank) || "—";
     }
 
     function escapeHtml(str) {
@@ -117,5 +128,19 @@
     });
 
     loadRoster();
+
+    // ── Fix: athlete missing from the roster until a manual refresh ──
+    // create_athlete.html navigates back here with `history.back()`.
+    // Browsers frequently restore that previous page straight from the
+    // back/forward cache (bfcache) instead of re-running this script, so
+    // the roster fetched on the ORIGINAL page load (before the new/edited
+    // athlete existed) just sits there stale. `pageshow` fires on both a
+    // normal load and a bfcache restore, and `event.persisted` is true
+    // only for the latter — exactly when we need to force a fresh fetch.
+    window.addEventListener("pageshow", (event) => {
+        if (event.persisted) {
+            loadRoster();
+        }
+    });
 </script>
 {% endblock %}

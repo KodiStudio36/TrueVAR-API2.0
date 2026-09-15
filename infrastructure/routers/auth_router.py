@@ -299,5 +299,40 @@ async def render_create_athlete_page(
     return templates.TemplateResponse(request, "create_athlete.html", {
         "request": request,
         "club_country": club_country,
-        "club_sport": club_sport
+        "club_sport": club_sport,
+        "athlete_id": "",
+    })
+
+
+@router.get("/athletes/{athlete_id}/edit")
+async def render_edit_athlete_page(
+    athlete_id: str,
+    request: Request,
+    user: Optional[dict] = Depends(get_current_user)
+):
+    """
+    Edit counterpart to render_create_athlete_page. Reuses the exact same
+    create_athlete.html template — the template's own JS switches into
+    edit mode purely off the non-empty data-athlete-id attribute set here,
+    fetches the athlete via GET /api/athletes/{athlete_id}, and PUTs back
+    to the same endpoint on save. No server-side prefill logic needed:
+    club_country/club_sport are only used here for the (locked, in edit
+    mode) sport field's chrome, same as on the create page.
+    """
+    admin_club_id = get_admin_club_id(user)
+    club_country = ""
+    club_sport = ""
+
+    if admin_club_id:
+        club_doc = db.collection("clubs").document(admin_club_id).get()
+        if club_doc.exists:
+            data = club_doc.to_dict()
+            club_country = data.get("country", "").upper()
+            club_sport = data.get("sport", "").lower()
+
+    return templates.TemplateResponse(request, "create_athlete.html", {
+        "request": request,
+        "club_country": club_country,
+        "club_sport": club_sport,
+        "athlete_id": athlete_id,
     })

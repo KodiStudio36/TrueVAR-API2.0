@@ -1958,7 +1958,7 @@
         const numPrefix = m.displayNumber != null ? `${formatMatchNumber(m)}. ` : "";
         if (!m.red) {
             const badge = m.status === "pending" ? `<span class="badge badge-grey">pending</span>` : "";
-            return `<div class="bb-match-line">${numPrefix}${escapeHtml(n1)} <span class="text-muted">— solo</span> ${badge}</div>`;
+            return `<div class="bb-match-line">${numPrefix}${escapeHtml(n1)} <span class="text-muted">— performs solo</span> ${badge}</div>`;
         }
         const n2 = participantLabel(bracket.entries, m.red);
         const badge = m.status === "walkover" ? `<span class="badge badge-grey">walkover</span>` : m.status === "pending" ? `<span class="badge badge-grey">pending</span>` : "";
@@ -2869,7 +2869,7 @@
     // ══════════════════════════════════════════════════════════════════
     let draggedCategoryCode = null;
     const CATEGORY_BLOCK_PX_PER_MATCH = 16;
-    const CATEGORY_BLOCK_MIN_H = 64;
+    const CATEGORY_BLOCK_MIN_H = 72;
 
     // A bracket's own queuePosition isn't stored on the bracket object
     // itself — it's derived from its (contiguous) matches' own
@@ -3236,7 +3236,7 @@
             });
             if (!res.ok) {
                 const body = await res.json().catch(() => ({}));
-                throw new Error(body.detail || `Push failed (${res.status})`);
+                throw new Error(extractErrorDetail(body, `Push failed (${res.status})`));
             }
             showFlash("Brackets pushed to Firestore.");
             btn.textContent = "Pushed ✓";
@@ -3277,7 +3277,7 @@
             );
             if (!res.ok) {
                 const body = await res.json().catch(() => ({}));
-                throw new Error(body.detail || `Clean failed (${res.status})`);
+                throw new Error(extractErrorDetail(body, `Clean failed (${res.status})`));
             }
             const data = await res.json();
             showFlash(`Cleared ${data.deletedBrackets} bracket(s) and ${data.deletedMatches} match(es).`);
@@ -3297,6 +3297,24 @@
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = "🗑 Clean Pushed Data"; }
         }
+    }
+
+    // FastAPI's error body shape varies: a plain string detail (most
+    // handlers, e.g. `raise HTTPException(detail="...")`) vs. a 422
+    // validation error, where `detail` is an ARRAY of {loc, msg, type}
+    // objects. `new Error(body.detail)` on that array silently
+    // stringifies it via Array.toString() — "[object Object],[object
+    // Object]" — which is exactly the unreadable banner this replaces.
+    function extractErrorDetail(body, fallback) {
+        const detail = body && body.detail;
+        if (typeof detail === "string" && detail) return detail;
+        if (Array.isArray(detail) && detail.length > 0) {
+            return detail.map(d => {
+                const loc = Array.isArray(d.loc) ? d.loc.join(".") : "";
+                return loc ? `${loc}: ${d.msg}` : (d.msg || JSON.stringify(d));
+            }).join("; ");
+        }
+        return fallback;
     }
 
     function showFlash(text, isError) {

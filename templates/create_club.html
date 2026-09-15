@@ -36,16 +36,8 @@
                 <select id="c_state_select" required
                     style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid #ccc;">
                     <option value="" disabled selected>Select Country/State...</option>
-                    <option value="SVK">Slovakia (SVK)</option>
-                    <option value="CZE">Czech Republic (CZE)</option>
-                    <option value="AUT">Austria (AUT)</option>
-                    <option value="POL">Poland (POL)</option>
-                    <option value="DEU">Germany (DEU)</option>
-                    <option value="USA">United States (USA)</option>
-                    <option value="GBR">United Kingdom (GBR)</option>
-                    <option value="UKR">Ukraine (UKR)</option>
-                    <option value="HUN">Hungary (HUN)</option>
-                    <option value="CRO">Croatia (CRO)</option>
+                    <!-- Populated from TrueVAR.populateCountrySelect() in JS below — the full
+                         249-country ISO list, not the 10 hand-picked ones this used to have. -->
                 </select>
             </div>
 
@@ -65,7 +57,14 @@
     </div>
 </div>
 
+<script src="/static/js/truevar-lib.js"></script>
 <script>
+    document.addEventListener("DOMContentLoaded", () => {
+        // The "Select Country/State..." placeholder is already in the
+        // markup above, so skip the library's own blank option.
+        TrueVAR.populateCountrySelect(document.getElementById("c_state_select"), { includeBlank: false });
+    });
+
     async function submitClub(event) {
         event.preventDefault();
 

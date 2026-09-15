@@ -221,6 +221,10 @@ def list_club_athletes(
         if search_key and search_key not in first and search_key not in last:
             continue
         birthday = data.get("birthday")
+        # rank/isPara/paraCategory live under sports.{club_sport}, not at
+        # the top level of the athlete doc — pull them out here so the
+        # roster table (Belt column) actually has something to render.
+        sport_data = (data.get("sports") or {}).get(club_sport, {})
         all_athletes.append({
             "id": doc.id,
             "displayName": data.get("displayName") or f"{data.get('firstName','')} {data.get('lastName','')}".strip(),
@@ -228,6 +232,9 @@ def list_club_athletes(
             "country": data.get("country"),
             "birthYear": birthday.year if hasattr(birthday, "year") else None,
             "sports": list((data.get("sports") or {}).keys()),
+            "rank": sport_data.get("rank"),
+            "isPara": sport_data.get("isPara", False),
+            "paraCategory": sport_data.get("paraCategory"),
         })
 
     all_athletes.sort(key=lambda a: a["displayName"].lower())

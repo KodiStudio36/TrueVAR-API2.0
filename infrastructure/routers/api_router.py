@@ -95,6 +95,21 @@ class TournamentResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# ── PARA CLASSIFICATION ────────────────────────────────────────────────────
+# Fixed set of Para sport-class codes selectable when an athlete is flagged
+# isPara=True. Kept as a plain module-level list (not Firestore-driven) since
+# this is a small, rarely-changing classification table — mirrors the same
+# list rendered in create_athlete.html's paraCategory <select>.
+PARA_CATEGORIES = [
+    "P11", "P12",
+    "P21", "P22", "P23",
+    "P31", "P32", "P33", "P34", "P35",
+    "P41", "P42", "P43", "P44", "P45",
+    "P51", "P52", "P53",
+    "P60",
+    "P72",
+]
+
 class CreateAthleteRequest(BaseModel):
     firstName: str
     lastName: str
@@ -104,6 +119,20 @@ class CreateAthleteRequest(BaseModel):
     sport: str     # "taekwondo" or "boxing"
     rank: int
     associationId: Optional[str] = None  # optional, sport-scoped national/association federation ID
+    isPara: bool = False
+    paraCategory: Optional[str] = None   # required (one of PARA_CATEGORIES) when isPara is True
+
+
+class UpdateAthleteRequest(BaseModel):
+    firstName: str
+    lastName: str
+    gender: str
+    birthday: str
+    country: str
+    rank: int
+    associationId: Optional[str] = None
+    isPara: bool = False
+    paraCategory: Optional[str] = None
 
 VALID_STATUSES = {"active", "archived"}
 
@@ -217,6 +246,10 @@ def _build_roster_member(athlete_id: str, athlete: dict, sport: Optional[str]) -
         entry["rank"] = sport_data["rank"]
     if sport_data.get("associationId"):
         entry["associationId"] = sport_data["associationId"]
+    if sport_data.get("isPara"):
+        entry["isPara"] = True
+        if sport_data.get("paraCategory"):
+            entry["paraCategory"] = sport_data["paraCategory"]
     return entry
 
 
@@ -502,16 +535,101 @@ def get_athlete_endpoint(athlete_id: str, user: Optional[dict] = Depends(get_cur
     if sport_data.get("clubId") != admin_club_id:
         raise HTTPException(status_code=403, detail="You can only view athletes from your own club.")
 
+    birthday = data.get("birthday")
+
+    # firstNameDisplay/lastNameDisplay preserve original casing/diacritics
+    # for editing; "firstName"/"lastName" themselves stay lowercased +
+    # diacritic-stripped for the prefix-range search queries in
+    # search_athletes / search_athletes_admin above and must not be
+    # repurposed for display. Older athlete docs created before this field
+    # existed fall back to the normalized value (better than nothing).
     return {
         "id": athlete_id,
         "displayName": data.get("displayName") or f"{data.get('firstName','')} {data.get('lastName','')}".strip(),
+        "firstName": data.get("firstNameDisplay") or data.get("firstName", ""),
+        "lastName": data.get("lastNameDisplay") or data.get("lastName", ""),
+        "gender": data.get("gender"),
+        "birthday": birthday.strftime("%Y-%m-%d") if hasattr(birthday, "strftime") else None,
+        "birthYear": _birth_year(data),
+        "country": data.get("country"),
+        "sport": club_sport,
         "club": sport_data.get("clubName", ""),
         "clubId": sport_data.get("clubId"),
         "associationId": sport_data.get("associationId"),
-        "gender": data.get("gender"),
-        "birthYear": _birth_year(data),
         "rank": sport_data.get("rank"),
+        "isPara": sport_data.get("isPara", False),
+        "paraCategory": sport_data.get("paraCategory"),
     }
+
+
+@router.put("/athletes/{athlete_id}")
+async def update_athlete_endpoint(
+    athlete_id: str,
+    payload: UpdateAthleteRequest,
+    user: Optional[dict] = Depends(get_current_user),
+):
+    """
+    Edit counterpart to create_athlete_endpoint. Reuses the same club-scoped
+    ADMIN check and the same firstName/lastName normalization + display-name
+    handling, but resolves the athlete's *existing* sport entry (via the
+    admin's own club sport, same lookup get_athlete_endpoint uses) rather
+    than accepting a sport from the client — mirrors create_athlete_endpoint,
+    which likewise ignores any client-sent sport and always files the
+    athlete under the admin's club's configured sport.
+    """
+    admin_club_id = get_admin_club_id(user)
+    if not admin_club_id:
+        raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
+
+    club_sport = get_club_sport(admin_club_id)
+    if not club_sport:
+        raise HTTPException(status_code=500, detail="Club has no sport configured.")
+
+    athlete_ref = db.collection("athletes").document(athlete_id)
+    doc = athlete_ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Athlete not found.")
+
+    data = doc.to_dict()
+    sport_data = (data.get("sports") or {}).get(club_sport, {})
+    if sport_data.get("clubId") != admin_club_id:
+        raise HTTPException(status_code=403, detail="You can only edit athletes from your own club.")
+
+    try:
+        birth_dt = datetime.strptime(payload.birthday, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid birthday format. Expected YYYY-MM-DD.")
+
+    if payload.isPara and payload.paraCategory not in PARA_CATEGORIES:
+        raise HTTPException(status_code=400, detail="A valid para category is required when isPara is set.")
+
+    updated_sport_entry = dict(sport_data)
+    updated_sport_entry["rank"] = payload.rank
+    updated_sport_entry["isPara"] = payload.isPara
+    if payload.isPara and payload.paraCategory:
+        updated_sport_entry["paraCategory"] = payload.paraCategory
+    else:
+        updated_sport_entry.pop("paraCategory", None)
+
+    association_id = (payload.associationId or "").strip()
+    if association_id:
+        updated_sport_entry["associationId"] = association_id
+    else:
+        updated_sport_entry.pop("associationId", None)
+
+    athlete_ref.update({
+        "firstName": normalize_name(payload.firstName),
+        "lastName": normalize_name(payload.lastName),
+        "firstNameDisplay": payload.firstName.strip(),
+        "lastNameDisplay": payload.lastName.strip(),
+        "displayName": f"{payload.firstName} {payload.lastName}",
+        "gender": payload.gender.lower(),
+        "birthday": birth_dt,
+        "country": payload.country.upper(),
+        f"sports.{club_sport}": updated_sport_entry,
+    })
+
+    return {"id": athlete_id, "message": "Athlete updated successfully"}
 
 
 class MoveRegistrationRequest(BaseModel):
@@ -790,7 +908,13 @@ class BracketCommitBracket(BaseModel):
     format: str
     system: str
     orderingStrategy: str
-    placementStrategy: str
+    # Optional — only single_elimination has a real seed-placement
+    # strategy (which bracket slot each seed lands in). cut_off has no
+    # bracket slots at all, and round_robin's pairing order comes
+    # entirely from the circle method, not a placement strategy — the
+    # frontend correctly sends null for both, which a required `str`
+    # field would reject with a 422.
+    placementStrategy: Optional[str] = None
     entries: List[Dict]
     pssHitLevelSetId: Optional[str] = None
 
@@ -878,14 +1002,22 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
         doc_id = real_id_by_local_id[m.matchId]
         match_ref = matches_ref.document(doc_id)
 
-        def _resolve_corner(corner: Dict) -> Dict:
+        def _resolve_corner(corner: Optional[Dict]) -> Optional[Dict]:
+            # A poomsae cut-off match's red corner is genuinely None —
+            # it's a solo, judged performance with no opponent at all,
+            # not just an unresolved one. Passing that through as None
+            # (rather than dict()-ing it, which blows up on None) is
+            # exactly what BracketCommitMatch.red being Optional was
+            # meant to allow — see that field's own docstring.
+            if corner is None:
+                return None
             corner = dict(corner)
             source = corner.get("source")
             if source and source.get("matchId") in real_id_by_local_id:
                 corner["source"] = {**source, "matchId": real_id_by_local_id[source["matchId"]]}
             return corner
 
-        batch.set(match_ref, {
+        match_doc = {
             "tournamentId": tournament_id,
             "tournamentName": tournament_name,
             "categoryCode": m.bracketCategoryCode,
@@ -901,13 +1033,25 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
             "queuePosition": m.queuePosition,
             "pssSize": m.pssSize,
             "hitLevel": m.hitLevel,
+            "pssHitLevelSetId": m.pssHitLevelSetId,
             "roundTime": m.roundTime,
             "breakTime": m.breakTime,
             "isRanked": m.isRanked,
             "resolvedVestGen": m.resolvedVestGen,
             "requiresPlexiHelmet": m.requiresPlexiHelmet,
             "scheduledWithRelaxedConstraints": m.scheduledWithRelaxedConstraints,
-        }, merge=True)
+        }
+        # Omit any field that's genuinely None (a poomsae cut-off match's
+        # red/pssSize/hitLevel/resolvedVestGen, an unassigned match's
+        # courtId, etc.) rather than writing it as an explicit null —
+        # every consumer in this codebase already reads match fields via
+        # dict.get(), which returns None identically whether the key is
+        # absent or present-and-null, so this is purely cosmetic for
+        # existing readers and keeps a poomsae match doc free of a pile
+        # of kyorugi-only nulls that never apply to it. Booleans like
+        # requiresPlexiHelmet=False are NOT None, so they're kept.
+        match_doc = {k: v for k, v in match_doc.items() if v is not None}
+        batch.set(match_ref, match_doc, merge=True)
 
     # Equipment meta — same batch as brackets/matches, so a commit is
     # atomic-ish w.r.t. this file's own writes (all three either land
@@ -1657,6 +1801,7 @@ def normalize_name(value: str) -> str:
     stripped = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
     return stripped.lower().strip()
 
+
 @router.post("/athletes", status_code=status.HTTP_201_CREATED)
 async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[dict] = Depends(get_current_user)):
     admin_club_id = get_admin_club_id(user)
@@ -1675,7 +1820,18 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid birthday format. Expected YYYY-MM-DD.")
 
-    sport_entry = {"rank": payload.rank, "clubId": admin_club_id, "clubName": club_name}
+    if payload.isPara and payload.paraCategory not in PARA_CATEGORIES:
+        raise HTTPException(status_code=400, detail="A valid para category is required when isPara is set.")
+
+    sport_entry = {
+        "rank": payload.rank,
+        "clubId": admin_club_id,
+        "clubName": club_name,
+        "isPara": payload.isPara,
+    }
+    if payload.isPara and payload.paraCategory:
+        sport_entry["paraCategory"] = payload.paraCategory
+
     association_id = (payload.associationId or "").strip()
     if association_id:
         sport_entry["associationId"] = association_id
@@ -1683,6 +1839,11 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
     athlete_data = {
         "firstName": normalize_name(payload.firstName),
         "lastName": normalize_name(payload.lastName),
+        # Preserve original casing/diacritics for display + edit prefill —
+        # "firstName"/"lastName" above stay normalized for the prefix-range
+        # search queries in search_athletes / search_athletes_admin.
+        "firstNameDisplay": payload.firstName.strip(),
+        "lastNameDisplay": payload.lastName.strip(),
         "displayName": f"{payload.firstName} {payload.lastName}",
         "gender": payload.gender.lower(),
         "birthday": birth_dt,

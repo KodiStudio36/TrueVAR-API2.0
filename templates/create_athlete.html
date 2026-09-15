@@ -6,12 +6,14 @@
         Back to tournament</a>
 
     <div class="panel" style="padding: clamp(1.25rem, 5vw, 2.5rem); margin-top: 1rem;">
-        <h2 style="margin-bottom: 0.5rem;">Create Athlete</h2>
-        <p class="text-muted" style="margin-bottom: clamp(1.25rem, 4vw, 2rem);">Add a new athlete to your club roster.
+        <h2 id="pageTitle" style="margin-bottom: 0.5rem;">Create Athlete</h2>
+        <p id="pageSubtitle" class="text-muted" style="margin-bottom: clamp(1.25rem, 4vw, 2rem);">Add a new athlete to
+            your club roster.
         </p>
 
         <form id="createAthleteForm" onsubmit="submitAthlete(event)" data-club-country="{{ club_country }}"
-            data-club-sport="{{ club_sport }}" style="display: flex; flex-direction: column; gap: 1.1rem;">
+            data-club-sport="{{ club_sport }}" data-athlete-id="{{ athlete_id or '' }}"
+            style="display: flex; flex-direction: column; gap: 1.1rem;">
 
             <div class="form-grid-2">
                 <div>
@@ -57,6 +59,9 @@
                     <option value="taekwondo">Taekwondo</option>
                     <option value="boxing">Boxing / Box</option>
                 </select>
+                <p id="sportLockedNote" class="text-muted hidden" style="font-size: 0.8rem; margin-top: 0.35rem;">
+                    Fixed to your club's configured sport while editing.
+                </p>
             </div>
 
             <div>
@@ -66,35 +71,30 @@
                 <input type="text" id="a_association_id" placeholder="e.g. national federation ID for this sport">
             </div>
 
+            <!-- Para classification -->
+            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                <input type="checkbox" id="a_is_para" onchange="toggleParaCategory()"
+                    style="width: 1.1rem; height: 1.1rem;">
+                <label class="field-label" for="a_is_para" style="margin: 0;">This athlete competes in Para
+                    categories</label>
+            </div>
+
+            <div id="para_category_wrap" class="hidden">
+                <label class="field-label" for="a_para_category">Para Category</label>
+                <select id="a_para_category"
+                    style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border);">
+                    <option value="" disabled selected>Select para category...</option>
+                    <!-- Populated from PARA_CATEGORIES in JS below -->
+                </select>
+            </div>
+
             <!-- Taekwondo Specifics -->
             <div id="tkd_specifics" class="hidden"
                 style="background: var(--bg-alt); padding: clamp(0.85rem, 3vw, 1rem); border-radius: 6px; border: 1px solid var(--border);">
                 <label class="field-label" for="tkd_rank">Taekwondo Rank</label>
                 <select id="tkd_rank"
                     style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border);">
-                    <optgroup label="Color Belts (Keup)">
-                        <option value="0">10. Keup (White)</option>
-                        <option value="1">9. Keup (White-Yellow)</option>
-                        <option value="2">8. Keup (Yellow)</option>
-                        <option value="3">7. Keup (Yellow-Green)</option>
-                        <option value="4">6. Keup (Green)</option>
-                        <option value="5">5. Keup (Green-Blue)</option>
-                        <option value="6">4. Keup (Blue)</option>
-                        <option value="7">3. Keup (Blue-Red)</option>
-                        <option value="8">2. Keup (Red)</option>
-                        <option value="9">1. Keup (Red-Black)</option>
-                    </optgroup>
-                    <optgroup label="Black Belts (Dan/Poom)">
-                        <option value="10">1. Dan</option>
-                        <option value="11">2. Dan</option>
-                        <option value="12">3. Dan</option>
-                        <option value="13">4. Dan</option>
-                        <option value="14">5. Dan</option>
-                        <option value="15">6. Dan</option>
-                        <option value="16">7. Dan</option>
-                        <option value="17">8. Dan</option>
-                        <option value="18">9. Dan</option>
-                    </optgroup>
+                    <!-- Populated from TrueVAR.populateBeltSelect() in JS below -->
                 </select>
             </div>
 
@@ -117,69 +117,80 @@
     </div>
 </div>
 
+<script src="/static/js/truevar-lib.js"></script>
 <script>
-    // Complete ISO 3166-1 alpha-3 countries list sorted alphanumerically by country name
-    const ISO_COUNTRIES = [
-        { code: "AFG", name: "Afghanistan" }, { code: "ALB", name: "Albania" },
-        { code: "DZA", name: "Algeria" }, { code: "AND", name: "Andorra" },
-        { code: "AGO", name: "Angola" }, { code: "ARG", name: "Argentina" },
-        { code: "ARM", name: "Armenia" }, { code: "AUS", name: "Australia" },
-        { code: "AUT", name: "Austria" }, { code: "AZE", name: "Azerbaijan" },
-        { code: "BHR", name: "Bahrain" }, { code: "BGD", name: "Bangladesh" },
-        { code: "BLR", name: "Belarus" }, { code: "BEL", name: "Belgium" },
-        { code: "BIH", name: "Bosnia and Herzegovina" }, { code: "BRA", name: "Brazil" },
-        { code: "BGR", name: "Bulgaria" }, { code: "CAN", name: "Canada" },
-        { code: "CHL", name: "Chile" }, { code: "CHN", name: "China" },
-        { code: "COL", name: "Colombia" }, { code: "CRO", name: "Croatia" },
-        { code: "CUB", name: "Cuba" }, { code: "CYP", name: "Cyprus" },
-        { code: "CZE", name: "Czech Republic" }, { code: "DNK", name: "Denmark" },
-        { code: "EGY", name: "Egypt" }, { code: "EST", name: "Estonia" },
-        { code: "FIN", name: "Finland" }, { code: "FRA", name: "France" },
-        { code: "GEO", name: "Georgia" }, { code: "DEU", name: "Germany" },
-        { code: "GRC", name: "Greece" }, { code: "HUN", name: "Hungary" },
-        { code: "ISL", name: "Iceland" }, { code: "IND", name: "India" },
-        { code: "IRN", name: "Iran" }, { code: "IRL", name: "Ireland" },
-        { code: "ISR", name: "Israel" }, { code: "ITA", name: "Italy" },
-        { code: "JPN", name: "Japan" }, { code: "KAZ", name: "Kazakhstan" },
-        { code: "KOR", name: "Korea (South)" }, { code: "LVA", name: "Latvia" },
-        { code: "LTU", name: "Lithuania" }, { code: "LUX", name: "Luxembourg" },
-        { code: "MEX", name: "Mexico" }, { code: "MDA", name: "Moldova" },
-        { code: "MNE", name: "Montenegro" }, { code: "NLD", name: "Netherlands" },
-        { code: "NZL", name: "New Zealand" }, { code: "MKD", name: "North Macedonia" },
-        { code: "NOR", name: "Norway" }, { code: "POL", name: "Poland" },
-        { code: "PRT", name: "Portugal" }, { code: "ROU", name: "Romania" },
-        { code: "SRB", name: "Serbia" }, { code: "SVK", name: "Slovakia" },
-        { code: "SVN", name: "Slovenia" }, { code: "ESP", name: "Spain" },
-        { code: "SWE", name: "Sweden" }, { code: "CHE", name: "Switzerland" },
-        { code: "TUR", name: "Turkey" }, { code: "UKR", name: "Ukraine" },
-        { code: "GBR", name: "United Kingdom" }, { code: "USA", name: "United States" }
-    ].sort((a, b) => a.name.localeCompare(b.name));
+    // Mirrors backend PARA_CATEGORIES in routers_athletes.py — keep in sync.
+    const PARA_CATEGORIES = [
+        "P11", "P12",
+        "P21", "P22", "P23",
+        "P31", "P32", "P33", "P34", "P35",
+        "P41", "P42", "P43", "P44", "P45",
+        "P51", "P52", "P53",
+        "P60",
+        "P72",
+    ];
+
+    const form = document.getElementById("createAthleteForm");
+    const ATHLETE_ID = (form.getAttribute("data-athlete-id") || "").trim();
+    const IS_EDIT = ATHLETE_ID.length > 0;
 
     document.addEventListener("DOMContentLoaded", () => {
-        populateAndPreselectCountries();
-        preselectSport();
+        populateCountries();
+        populateBelts();
+        populateParaCategories();
+        setupModeChrome();
+
+        if (IS_EDIT) {
+            loadAthleteForEdit();
+        } else {
+            preselectCountryFromClub();
+            preselectSportFromClub();
+        }
     });
 
-    function populateAndPreselectCountries() {
-        const select = document.getElementById("a_country");
-        const form = document.getElementById("createAthleteForm");
-        const clubCountry = (form.getAttribute("data-club-country") || "").toUpperCase();
+    function setupModeChrome() {
+        if (!IS_EDIT) return;
+        document.getElementById("pageTitle").textContent = "Edit Athlete";
+        document.getElementById("pageSubtitle").textContent = "Update this athlete's details.";
+        document.getElementById("submitBtn").textContent = "Save Changes";
+        // The backend always files the athlete under the admin's own club's
+        // configured sport regardless of what's selected here (see
+        // create_athlete_endpoint / update_athlete_endpoint), so editing the
+        // sport mid-edit would be misleading — lock it once we're in edit mode.
+        document.getElementById("a_sport").disabled = true;
+        document.getElementById("sportLockedNote").classList.remove("hidden");
+    }
 
-        ISO_COUNTRIES.forEach(c => {
+    function populateCountries() {
+        // The <option value="" disabled selected>Select country...</option>
+        // placeholder is already in the markup above, so skip the
+        // library's own blank option to avoid a duplicate.
+        TrueVAR.populateCountrySelect(document.getElementById("a_country"), { includeBlank: false });
+    }
+
+    function populateBelts() {
+        TrueVAR.populateBeltSelect(document.getElementById("tkd_rank"));
+    }
+
+    function populateParaCategories() {
+        const select = document.getElementById("a_para_category");
+        PARA_CATEGORIES.forEach(code => {
             const opt = document.createElement("option");
-            opt.value = c.code;
-            opt.textContent = `${c.name} (${c.code})`;
+            opt.value = code;
+            opt.textContent = `Para ${code}`;
             select.appendChild(opt);
         });
+    }
 
+    function preselectCountryFromClub() {
+        const clubCountry = (form.getAttribute("data-club-country") || "").toUpperCase();
         if (clubCountry) {
-            select.value = clubCountry;
+            document.getElementById("a_country").value = clubCountry;
         }
     }
 
-    function preselectSport() {
+    function preselectSportFromClub() {
         const select = document.getElementById("a_sport");
-        const form = document.getElementById("createAthleteForm");
         let clubSport = (form.getAttribute("data-club-sport") || "").toLowerCase();
 
         // Handle naming variations between backend ("box") and frontend options ("boxing")
@@ -203,6 +214,54 @@
         if (sport === "boxing") boxDiv.classList.remove("hidden");
     }
 
+    function toggleParaCategory() {
+        const checked = document.getElementById("a_is_para").checked;
+        const wrap = document.getElementById("para_category_wrap");
+        const select = document.getElementById("a_para_category");
+
+        wrap.classList.toggle("hidden", !checked);
+        select.required = checked;
+        if (!checked) {
+            select.value = "";
+        }
+    }
+
+    async function loadAthleteForEdit() {
+        const msg = document.getElementById("formMsg");
+        try {
+            const res = await fetch(`/api/athletes/${ATHLETE_ID}`);
+            if (!res.ok) {
+                throw new Error("Couldn't load this athlete.");
+            }
+            const a = await res.json();
+
+            document.getElementById("a_firstname").value = a.firstName || "";
+            document.getElementById("a_lastname").value = a.lastName || "";
+            if (a.gender) document.getElementById("a_gender").value = a.gender;
+            if (a.birthday) document.getElementById("a_birthday").value = a.birthday;
+            if (a.country) document.getElementById("a_country").value = a.country;
+            if (a.sport) {
+                document.getElementById("a_sport").value = a.sport;
+                toggleSportSpecifics();
+            }
+            if (a.associationId) document.getElementById("a_association_id").value = a.associationId;
+            if (a.rank !== undefined && a.rank !== null) {
+                document.getElementById("tkd_rank").value = String(a.rank);
+            }
+
+            document.getElementById("a_is_para").checked = !!a.isPara;
+            toggleParaCategory();
+            if (a.isPara && a.paraCategory) {
+                document.getElementById("a_para_category").value = a.paraCategory;
+            }
+        } catch (err) {
+            msg.textContent = err.message || "Couldn't load this athlete.";
+            msg.style.background = "#fee2e2";
+            msg.style.color = "#b91c1c";
+            msg.classList.remove("hidden");
+        }
+    }
+
     async function submitAthlete(event) {
         event.preventDefault();
 
@@ -210,7 +269,7 @@
         const msg = document.getElementById("formMsg");
 
         submitBtn.disabled = true;
-        submitBtn.textContent = "Creating...";
+        submitBtn.textContent = IS_EDIT ? "Saving..." : "Creating...";
         msg.classList.add("hidden");
 
         const sport = document.getElementById("a_sport").value;
@@ -221,6 +280,18 @@
         }
 
         const associationId = document.getElementById("a_association_id").value.trim();
+        const isPara = document.getElementById("a_is_para").checked;
+        const paraCategory = document.getElementById("a_para_category").value;
+
+        if (isPara && !paraCategory) {
+            msg.textContent = "Please select a para category.";
+            msg.style.background = "#fee2e2";
+            msg.style.color = "#b91c1c";
+            msg.classList.remove("hidden");
+            submitBtn.disabled = false;
+            submitBtn.textContent = IS_EDIT ? "Save Changes" : "Create Athlete";
+            return;
+        }
 
         const payload = {
             firstName: document.getElementById("a_firstname").value.trim(),
@@ -229,8 +300,13 @@
             birthday: document.getElementById("a_birthday").value,
             country: document.getElementById("a_country").value,
             sport: sport,
-            rank: rankValue
+            rank: rankValue,
+            isPara: isPara,
         };
+
+        if (isPara) {
+            payload.paraCategory = paraCategory;
+        }
 
         // Optional, sport-scoped on the backend — only send it if filled in,
         // rather than sending an empty string.
@@ -239,18 +315,20 @@
         }
 
         try {
-            const res = await fetch("/api/athletes", {
-                method: "POST",
+            const res = await fetch(IS_EDIT ? `/api/athletes/${ATHLETE_ID}` : "/api/athletes", {
+                method: IS_EDIT ? "PUT" : "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
             });
 
             if (!res.ok) {
                 const body = await res.json();
-                throw new Error(body.detail || "Failed to create athlete");
+                throw new Error(body.detail || `Failed to ${IS_EDIT ? "update" : "create"} athlete`);
             }
 
-            msg.textContent = "Athlete successfully added to your club roster!";
+            msg.textContent = IS_EDIT
+                ? "Athlete updated successfully!"
+                : "Athlete successfully added to your club roster!";
             msg.style.background = "var(--blue-bg)";
             msg.style.color = "var(--blue-text)";
             msg.classList.remove("hidden");
@@ -265,7 +343,7 @@
             msg.style.color = "#b91c1c";
             msg.classList.remove("hidden");
             submitBtn.disabled = false;
-            submitBtn.textContent = "Create Athlete";
+            submitBtn.textContent = IS_EDIT ? "Save Changes" : "Create Athlete";
         }
     }
 </script>
