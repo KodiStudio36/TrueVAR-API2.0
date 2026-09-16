@@ -1170,8 +1170,8 @@ JAVASCRIPT
             title: fd.get("title"),
             location: fd.get("location"),
             // The f-datetime field is pre-filled with the tournament's raw
-            // UTC digits (see the value="{{ tournament.dateTime.strftime(...)
-            // }}" above) — NOT the browser's local time. Converting it with
+            // UTC digits (see the value= attribute on #f-datetime above,
+            // rendered from tournament.dateTime.strftime) — NOT the browser's local time. Converting it with
             // `new Date(...).toISOString()` would silently reinterpret those
             // UTC digits as local time and shift the stored instant by the
             // editor's UTC offset on every save, even with nothing changed.
