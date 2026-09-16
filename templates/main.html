@@ -22,7 +22,7 @@
                 {{ t.location | default('Location to be announced') }}
             </p>
             <p class="text-muted" style="font-size: 0.95rem;">
-                {{ t.dateTime | default('Date to be announced') }}
+                {{ (t.dateTime.strftime("%d %b %Y, %H:%M") ~ " UTC") if t.dateTime else 'Date to be announced' }}
             </p>
         </div>
 

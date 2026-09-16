@@ -20,8 +20,11 @@
     </div>
 
     <div class="form-group">
-        <label for="dateTime">Date and Time:</label>
+        <label for="dateTime">Date and Time (UTC):</label>
         <input type="datetime-local" id="dateTime" name="dateTime" required>
+        <small style="color: #64748b; display: block; margin-top: 0.25rem;">
+            Entered and stored in UTC, not your browser's local time zone — see the note below the form.
+        </small>
     </div>
 
     <div class="form-group">
@@ -80,7 +83,7 @@
     <div id="registrationSettingsGroup"
         style="display: none; background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
         <div class="form-group" style="margin-bottom: 1rem;">
-            <label for="registrationDeadline">Registration Deadline:</label>
+            <label for="registrationDeadline">Registration Deadline (UTC):</label>
             <input type="datetime-local" id="registrationDeadline" name="registrationDeadline">
         </div>
 
@@ -92,9 +95,17 @@
         </div>
     </div>
 
+    <p style="color: #64748b; font-size: 0.85rem; margin-top: 1rem;">
+        ⓘ Both date/time fields above are UTC, not your local time — e.g. if the event actually starts at
+        9:00am in Bratislava (CEST, UTC+2), enter <strong>07:00</strong> here. This app has no per-tournament
+        time zone setting; every stored time is UTC and every form that shows or edits one uses these same raw
+        UTC digits, so times stay consistent everywhere it's displayed.
+    </p>
+
     <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">Create Tournament</button>
 </form>
 
+<script src="/static/js/truevar-lib.js"></script>
 <script>
     const registrationCheckbox = document.getElementById("isRegistrationOpen");
     const registrationSettingsGroup = document.getElementById("registrationSettingsGroup");
@@ -221,13 +232,17 @@
     document.getElementById('createTournamentForm').addEventListener('submit', async function (e) {
         e.preventDefault();
 
-        const rawDateTime = document.getElementById('dateTime').value;
-        const formattedDateTime = new Date(rawDateTime).toISOString();
+        // Both datetime-local fields on this form are UTC digits by
+        // convention (see the ⓘ note above the submit button and
+        // TrueVAR.utcInputToIso's own docstring in truevar-lib.js) — NOT
+        // `new Date(raw).toISOString()`, which would silently reinterpret
+        // them as the browser's local time zone instead.
+        const formattedDateTime = TrueVAR.utcInputToIso(document.getElementById('dateTime').value);
         const isRegistrationOpen = document.getElementById('isRegistrationOpen').checked;
 
         // Parse registration deadline if provided
         const rawDeadline = document.getElementById('registrationDeadline').value;
-        const formattedDeadline = (isRegistrationOpen && rawDeadline) ? new Date(rawDeadline).toISOString() : null;
+        const formattedDeadline = (isRegistrationOpen && rawDeadline) ? TrueVAR.utcInputToIso(rawDeadline) : null;
 
         let categoriesData = null;
 

@@ -8,7 +8,8 @@
         <span class="tag tag-navy">{{ tournament.sport | default('Multi-Sport') }}</span>
         <h2 style="margin-top: 0.75rem;">{{ tournament.title }}</h2>
         <p class="text-muted" style="font-size: 1rem; margin-top: 0.4rem;">
-            {{ tournament.location | default('TBD') }} &middot; {{ tournament.dateTime | default('Date TBD') }}
+            {{ tournament.location | default('TBD') }} &middot;
+            {{ (tournament.dateTime.strftime("%d %b %Y, %H:%M") ~ " UTC") if tournament.dateTime else 'Date TBD' }}
         </p>
     </div>
 </div>
@@ -18,7 +19,13 @@
     <div
         style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
         <h3>Categories</h3>
-        <span id="categoryCount" class="text-muted" style="font-size: 0.9rem;"></span>
+        <div style="display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap;">
+            <span id="categoryCount" class="text-muted" style="font-size: 0.9rem;"></span>
+            <button type="button" class="btn btn-secondary" style="padding: 0.4rem 0.9rem; font-size: 0.85rem;"
+                onclick="openClubsOverlay()">
+                View All Clubs &amp; Athletes
+            </button>
+        </div>
     </div>
     <p class="text-muted" style="font-size: 0.95rem; margin-top: -0.3rem; margin-bottom: 1.1rem;">
         For club owners. Search for an athlete and register them — age, gender, and (where more than
@@ -89,6 +96,42 @@
         <p id="registerMsg" class="hidden"
             style="background: var(--blue-bg); color: var(--blue-text); border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.95rem; margin-top: 1.25rem;">
         </p>
+    </div>
+</div>
+
+<!-- ── ALL CLUBS & ATHLETES OVERLAY ─────────────────────────────────── -->
+{# Read-only aggregate view, built entirely from data this page already
+fetches division-by-division (GET /api/tournaments/{id}/division-rosters/
+{ageCode}) — every entry in those rosters is already visible to anyone
+who expands a division in the Categories list above, so this just
+re-groups the same public data by club instead of by division/weight
+bracket. No new endpoint, no new auth surface: nothing here can be
+written to, and nothing is exposed that a visitor couldn't already see
+by opening every division by hand. #}
+<div id="clubsOverlay" class="hidden"
+    style="position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 1.5rem;">
+    <div class="panel"
+        style="padding: 2rem; max-width: 640px; width: 100%; max-height: 85vh; overflow-y: auto; display: flex; flex-direction: column;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
+            <div>
+                <h3 style="margin: 0;">All Clubs &amp; Registered Athletes</h3>
+                <p class="text-muted" style="font-size: 0.85rem; margin-top: 0.3rem;">
+                    Read-only — grouped from this tournament's public division rosters.
+                </p>
+            </div>
+            <button type="button" onclick="closeClubsOverlay()"
+                style="background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.9rem; cursor: pointer; flex-shrink: 0;">
+                Close
+            </button>
+        </div>
+
+        <input type="text" id="clubsSearchInput" placeholder="Filter by athlete or club name…"
+            oninput="onClubsSearchInput()" autocomplete="off" style="margin: 1rem 0 0.4rem;">
+        <span id="clubsOverlayCount" class="text-muted" style="font-size: 0.82rem; margin-bottom: 0.75rem;"></span>
+
+        <div id="clubsList">
+            <p class="text-muted" style="padding: 1rem 0;">Loading…</p>
+        </div>
     </div>
 </div>
 
@@ -219,6 +262,11 @@ immediately, with no resize listener or re-render needed.
         await Promise.all([loadCategorySchema(), loadCategoryCounts()]);
         renderCategories();
     }
+    // Stored so openClubsOverlay() (and anything else added later) can
+    // await entryTypes/categoryCounts being ready instead of racing the
+    // page's own initial load — a click before the first fetch resolves
+    // would otherwise see an empty entryTypes and render nothing.
+    const initPromise = init();
 
     // ── PARSER ──────────────────────────────────────────────────────
     // Expands the dimension schema into a tree of
@@ -1087,6 +1135,165 @@ immediately, with no resize listener or re-render needed.
         }[ch]));
     }
 
-    init();
+    // ── ALL CLUBS & ATHLETES (read-only aggregate view) ───────────────
+    // Groups the SAME per-division roster data the Categories accordion
+    // above already fetches (division-rosters/{ageCode}) by club instead
+    // of by division/weight-bracket. Nothing new is read or exposed —
+    // every entry shown here is already visible to anyone who expands
+    // every division by hand; this just saves them the clicking. Results
+    // are cached in clubsData after the first load and only rebuilt if
+    // the overlay is reopened after new divisions have been fetched
+    // elsewhere on the page (cheap to just recompute from
+    // divisionRosterCache each time, since no extra network calls are
+    // needed once a division's roster is already cached).
+    let clubsData = null; // [{ clubId, clubName, entries: [...] }], sorted by clubName
+
+    async function openClubsOverlay() {
+        document.getElementById("clubsOverlay").classList.remove("hidden");
+        document.getElementById("clubsSearchInput").value = "";
+        document.getElementById("clubsList").innerHTML = `<p class="text-muted" style="padding: 1rem 0;">Loading every division's roster…</p>`;
+
+        await initPromise; // entryTypes must be populated before we know which ageCodes exist
+        await loadAllClubsData();
+        renderClubsOverlay("");
+    }
+
+    function closeClubsOverlay() {
+        document.getElementById("clubsOverlay").classList.add("hidden");
+    }
+
+    // Builds { fullCategoryCode: "Entry Type · Division BeltClass Gender Weight" }
+    // from the already-parsed entryTypes tree — same composition
+    // renderDivisionBody uses for its own per-bracket heading, just
+    // prefixed with the entry-type label since this view spans every
+    // entry type at once instead of being nested under one.
+    function buildCategoryLabelMap() {
+        const map = {};
+        entryTypes.forEach(entryType => {
+            entryType.divisions.forEach(division => {
+                division.beltClasses.forEach(bc => {
+                    bc.genders.forEach(g => {
+                        g.weightCats.forEach(c => {
+                            const fullCode = `${entryType.code}_${c.code}`;
+                            const label = [division.label, bc.label, g.label, c.label].filter(Boolean).join(" ");
+                            map[fullCode] = [entryType.label, label].filter(Boolean).join(" · ");
+                        });
+                    });
+                });
+            });
+        });
+        return map;
+    }
+
+    // Fetches every division's roster that isn't already cached (reuses
+    // divisionRosterCache — divisions the visitor already expanded in
+    // the Categories accordion cost nothing here), then regroups every
+    // entry across every division/category by clubId.
+    async function loadAllClubsData() {
+        const ageCodes = new Set();
+        entryTypes.forEach(et => et.divisions.forEach(d => ageCodes.add(d.code)));
+
+        await Promise.all([...ageCodes].map(async (ageCode) => {
+            if (ageCode in divisionRosterCache) return;
+            try {
+                const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/division-rosters/${ageCode}`);
+                if (!res.ok) throw new Error(`Roster fetch failed: ${res.status}`);
+                const data = await res.json();
+                divisionRosterCache[ageCode] = data.athletes || {};
+            } catch (err) {
+                console.error(`Failed to load roster for division ${ageCode}`, err);
+                divisionRosterCache[ageCode] = divisionRosterCache[ageCode] || {};
+            }
+        }));
+
+        const labelMap = buildCategoryLabelMap();
+        const clubs = {};
+
+        ageCodes.forEach((ageCode) => {
+            const rosterByCategory = divisionRosterCache[ageCode] || {};
+            Object.entries(rosterByCategory).forEach(([categoryCode, entries]) => {
+                Object.values(entries).forEach((entry) => {
+                    (entry.members || []).forEach((m) => {
+                        const clubKey = m.clubId || "__unassigned__";
+                        const bucket = clubs[clubKey] || (clubs[clubKey] = {
+                            clubId: m.clubId || null,
+                            clubName: m.club || "No club on file",
+                            entries: [],
+                        });
+                        bucket.entries.push({
+                            name: m.name,
+                            country: m.country,
+                            rank: m.rank,
+                            categoryLabel: labelMap[categoryCode] || categoryCode,
+                            placement: entry.placement,
+                        });
+                    });
+                });
+            });
+        });
+
+        Object.values(clubs).forEach((c) => c.entries.sort((a, b) => a.name.localeCompare(b.name)));
+        clubsData = Object.values(clubs).sort((a, b) => a.clubName.localeCompare(b.clubName));
+    }
+
+    function renderClubsOverlay(filter) {
+        const listEl = document.getElementById("clubsList");
+        if (!clubsData) {
+            listEl.innerHTML = `<p class="text-muted" style="padding: 1rem 0;">Loading…</p>`;
+            return;
+        }
+
+        const q = (filter || "").trim().toLowerCase();
+        const filteredClubs = clubsData
+            .map((club) => ({
+                ...club,
+                entries: q
+                    ? club.entries.filter((e) => e.name.toLowerCase().includes(q) || club.clubName.toLowerCase().includes(q))
+                    : club.entries,
+            }))
+            .filter((club) => club.entries.length > 0);
+
+        const totalAthletes = filteredClubs.reduce((sum, c) => sum + c.entries.length, 0);
+        document.getElementById("clubsOverlayCount").textContent = totalAthletes === 0
+            ? (q ? "No matches." : "No registrations yet.")
+            : `${totalAthletes} ${totalAthletes === 1 ? "registration" : "registrations"} across ${filteredClubs.length} ${filteredClubs.length === 1 ? "club" : "clubs"}`;
+
+        if (filteredClubs.length === 0) {
+            listEl.innerHTML = `<p class="text-muted" style="padding: 1rem 0;">${q ? "No matching athletes or clubs." : "No athletes registered in this tournament yet."}</p>`;
+            return;
+        }
+
+        // Every club starts expanded while filtering (so a name match is
+        // immediately visible without an extra click); with no filter,
+        // only the first club opens by default, same convention as the
+        // Categories accordion above.
+        listEl.innerHTML = filteredClubs.map((club, i) => `
+            <details style="border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.85rem; margin-bottom: 0.6rem;" ${(i === 0 || q) ? "open" : ""}>
+                <summary style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.95rem; list-style: revert;">
+                    <span>${escapeHtml(club.clubName)}</span>
+                    <span class="text-muted" style="font-weight: 400; font-size: 0.82rem;">${club.entries.length} registered</span>
+                </summary>
+                <div style="margin-top: 0.6rem;">
+                    ${club.entries.map((e) => {
+            const flag = countryFlagEmoji(e.country);
+            const rankLabel = formatRank(e.rank);
+            const placementLabel = e.placement != null ? ordinalLabel(e.placement) : "";
+            return `
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.35rem 0; font-size: 0.88rem; border-top: 1px solid var(--border);">
+                                <span>${flag ? flag + " " : ""}${escapeHtml(e.name)}${rankLabel ? ` <span class="text-muted">(${escapeHtml(rankLabel)})</span>` : ""}</span>
+                                <span class="text-muted" style="font-size: 0.8rem; text-align: right;">
+                                    ${escapeHtml(e.categoryLabel)}${placementLabel ? ` · ${escapeHtml(placementLabel)}` : ""}
+                                </span>
+                            </div>
+                        `;
+        }).join("")}
+                </div>
+            </details>
+        `).join("");
+    }
+
+    function onClubsSearchInput() {
+        renderClubsOverlay(document.getElementById("clubsSearchInput").value);
+    }
 </script>
 {% endblock %}

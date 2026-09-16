@@ -88,7 +88,7 @@
         { alpha2: "CD", alpha3: "COD", name: "Congo, The Democratic Republic of the" },
         { alpha2: "CK", alpha3: "COK", name: "Cook Islands" },
         { alpha2: "CR", alpha3: "CRI", name: "Costa Rica" },
-        { alpha2: "HR", alpha3: "CRO", name: "Croatia" },
+        { alpha2: "HR", alpha3: "HRV", name: "Croatia" },
         { alpha2: "CU", alpha3: "CUB", name: "Cuba" },
         { alpha2: "CW", alpha3: "CUW", name: "Cura\u00e7ao" },
         { alpha2: "CY", alpha3: "CYP", name: "Cyprus" },
@@ -419,6 +419,47 @@
         }
     }
 
+    // ── UTC-as-local convention for <input type="datetime-local"> ──────
+    // Every date/time this app stores (tournament dateTime, registration
+    // deadline) is a real UTC instant, and every server-rendered form
+    // field is filled with that instant's raw UTC digits with NO
+    // conversion (e.g. tournament_detail.html's edit form does
+    // tournament.dateTime.strftime('%Y-%m-%dT%H:%M')). A <input
+    // type="datetime-local"> has no timezone concept of its own — the
+    // moment you hand its value to `new Date(...)`, the browser silently
+    // reinterprets those digits as ITS OWN local time zone. Mixing
+    // "digits are UTC" (how the form is filled) with "digits are local"
+    // (how `new Date(...).toISOString()` reads them back on submit) is
+    // exactly what caused tournament times to drift by the editor's UTC
+    // offset on every single save — even without touching the date
+    // field. These two helpers make the convention explicit and
+    // SYMMETRIC: a datetime-local's digits are always UTC, both when
+    // building the ISO string to send to the server and when converting
+    // a server value back into the input, regardless of the browser's
+    // actual time zone. Use utcInputToIso() wherever a form currently
+    // does `new Date(input.value).toISOString()`, and isoToUtcInput()
+    // anywhere a value needs to be pushed into a datetime-local field
+    // from JS (Jinja-rendered strftime values need no conversion — they
+    // already print raw UTC digits, which already matches this
+    // convention).
+    function utcInputToIso(value) {
+        if (!value) return null;
+        // "2026-09-19T07:00" (no seconds) or "2026-09-19T07:00:00" -> always
+        // pad to a full ISO instant with an explicit "Z" so this is parsed
+        // as UTC everywhere it's sent (Date, Pydantic, JSON.parse, etc.) —
+        // never left ambiguous for a second interpreter to reinterpret.
+        const withSeconds = value.length === 16 ? `${value}:00` : value;
+        return `${withSeconds}.000Z`;
+    }
+
+    function isoToUtcInput(isoOrDate) {
+        if (!isoOrDate) return "";
+        const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+        if (Number.isNaN(d.getTime())) return "";
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    }
+
     global.TrueVAR = {
         COUNTRIES,
         toAlpha2,
@@ -430,5 +471,7 @@
         BELT_LABELS,
         beltLabel,
         populateBeltSelect,
+        utcInputToIso,
+        isoToUtcInput,
     };
 })(window);

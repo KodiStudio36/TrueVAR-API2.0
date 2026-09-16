@@ -498,6 +498,57 @@ def _execute_registration_create(
         raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
 
 
+def _check_registration_window(tournament_id: str) -> None:
+    """
+    Enforces isRegistrationOpen + registrationDeadline before a club-facing
+    registration is created. Previously nothing in this file checked either
+    of these at all — a club could register athletes into a tournament that
+    was never opened for registration, or after its deadline had passed,
+    and nothing would stop it.
+
+    Deliberately called ONLY from the club-facing register_entry_endpoint,
+    not admin_register_entry_endpoint — staff already have an unguarded
+    "no eligibility checks" override for everything else in this file (see
+    admin_remove_registration_endpoint's own docstring), and a deadline is
+    exactly the kind of thing staff legitimately need to be able to push
+    past (e.g. accepting a late entry by hand).
+
+    registrationDeadline is stored as a plain ISO string inside
+    tournaments/{id}.settings (not a Firestore Timestamp, unlike dateTime
+    itself — see the chat note on this inconsistency), so it's parsed
+    defensively here the same way consume_invite_token already has to for
+    permission_tokens.expiresAt.
+    """
+    tournament_doc = db.collection("tournaments").document(tournament_id).get()
+    if not tournament_doc.exists:
+        raise HTTPException(status_code=404, detail="Tournament not found.")
+
+    data = tournament_doc.to_dict()
+    if not data.get("isRegistrationOpen"):
+        raise HTTPException(status_code=403, detail="Registration is not open for this tournament.")
+
+    deadline_raw = (data.get("settings") or {}).get("registrationDeadline")
+    if not deadline_raw:
+        return
+
+    deadline = None
+    try:
+        if hasattr(deadline_raw, "tzinfo"):  # already a Firestore Timestamp / datetime
+            deadline = deadline_raw
+        else:
+            deadline = datetime.fromisoformat(str(deadline_raw).replace("Z", "+00:00"))
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        deadline = None  # unparseable — fail open rather than blocking every registration on bad data
+
+    if deadline and datetime.now(timezone.utc) > deadline:
+        raise HTTPException(
+            status_code=403,
+            detail=f"The registration deadline for this tournament ({deadline.strftime('%d %b %Y, %H:%M')} UTC) has passed.",
+        )
+
+
 @router.post("/tournaments/{tournament_id}/registrations", status_code=status.HTTP_201_CREATED)
 def register_entry_endpoint(
     tournament_id: str,
@@ -508,6 +559,7 @@ def register_entry_endpoint(
     if not admin_club_id:
         raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
 
+    _check_registration_window(tournament_id)
     _execute_registration_create(tournament_id, payload, requesting_club_id=admin_club_id, enforce_club_match=True)
     return {"message": "Entry registered", "categoryCode": payload.categoryCode}
 

@@ -69,8 +69,9 @@
                     <dd>{{ tournament.location }}</dd>
                 </div>
                 <div class="info-cell">
-                    <dt>Date & Time</dt>
-                    <dd>{{ tournament.dateTime.strftime("%d %b %Y — %H:%M") }}</dd>
+                    <dt>Date &amp; Time (UTC)</dt>
+                    <dd>{{ tournament.dateTime.strftime("%d %b %Y — %H:%M") ~ " UTC" if tournament.dateTime else "TBD"
+                        }}</dd>
                 </div>
                 <div class="info-cell">
                     <dt>Courts</dt>
@@ -139,9 +140,12 @@
                     <input id="f-location" type="text" name="location" value="{{ tournament.location }}" required>
                 </div>
                 <div class="form-field">
-                    <label for="f-datetime">Date & Time</label>
+                    <label for="f-datetime">Date &amp; Time (UTC)</label>
                     <input id="f-datetime" type="datetime-local" name="dateTime"
                         value="{{ tournament.dateTime.strftime('%Y-%m-%dT%H:%M') }}" required>
+                    <small class="text-muted" style="font-size: 0.75rem;">
+                        UTC, not your local time zone — see the ⓘ note below the form.
+                    </small>
                 </div>
                 <div class="form-field">
                     <label for="f-courts">Number of Courts</label>
@@ -190,6 +194,11 @@
                     </label>
                 </div>
             </div>
+            <p class="text-muted" style="font-size: 0.8rem; margin-top: 1rem;">
+                ⓘ Date &amp; Time above is UTC, matching how it's stored and shown everywhere else in this app —
+                not a conversion of your browser's local time. If you don't change it, saving leaves it exactly
+                as it was.
+            </p>
             <div class="form-actions">
                 <button type="submit" class="btn btn-primary" id="save-btn">Save Changes</button>
                 <button type="button" class="btn btn-ghost" onclick="toggleEdit(false)">Cancel</button>
@@ -245,6 +254,14 @@
             </div>
             <span class="badge badge-green">Open</span>
         </div>
+        {% set deadline_raw = tournament.settings.get('registrationDeadline') %}
+        {% if deadline_raw %}
+        <p class="text-muted" style="margin-bottom: 0.5rem; font-size: 0.85rem;">
+            Deadline: <strong>{{ deadline_raw }}</strong>
+            <span style="color:#b45309;">— stored as raw text (see note in chat); not guaranteed to parse as UTC
+                everywhere it's read.</span>
+        </p>
+        {% endif %}
         <p class="text-muted" style="margin-bottom:1.25rem;">
             Club admins register athletes into categories through the public registration system.
             Before generating brackets, finalize the field here — move any entry between categories
@@ -307,8 +324,10 @@
                     <span class="yt-info-value">{{ tournament.courtNum }}</span>
                 </div>
                 <div class="yt-info-item">
-                    <span class="yt-info-label">Stream date</span>
-                    <span class="yt-info-value">{{ tournament.dateTime.strftime("%d %b %Y") }}</span>
+                    <span class="yt-info-label">Stream date &amp; time (UTC)</span>
+                    <span class="yt-info-value">
+                        {{ tournament.dateTime.strftime("%d %b %Y, %H:%M") ~ " UTC" if tournament.dateTime else "TBD" }}
+                    </span>
                 </div>
                 <div class="yt-info-item">
                     <span class="yt-info-label">Numbering</span>
@@ -905,6 +924,7 @@ STYLES
 {# ═══════════════════════════════════════════════════════════════════════════
 JAVASCRIPT
 ═══════════════════════════════════════════════════════════════════════════ #}
+<script src="/static/js/truevar-lib.js"></script>
 <script>
     "use strict";
 
@@ -914,6 +934,21 @@ JAVASCRIPT
 
     // ── Sport → Discipline → Provider → Mode cascade config ──────────────
     // ★ marks the default at each level (most-used option, pre-selected).
+    //
+    // ⚠ NOTE: this list is NOT the same as tournament_create.html's
+    // SPORT_DATA (different modes for DAEDO/Kyorugi: "Integrated
+    // TkStrike"/"External TkStrike" here vs. "...Gen2"/"...Gen3" there;
+    // Boxing's provider key is "Custom" here vs. "Bout Cntrl" there).
+    // A tournament created via tournament_create.html with e.g.
+    // provider "TrueVAR" or mode "External TkStrike Gen3" won't be
+    // found in THIS list, so the edit-form fallback below silently
+    // substitutes this page's own default instead of preserving the
+    // real stored value — editing could quietly change the scoring
+    // provider/mode even if you don't touch those fields. Worth
+    // reconciling into one shared list (same pattern as this app's
+    // country/belt data already living in truevar-lib.js) rather than
+    // patching further here blind, since I don't know which list is
+    // meant to be authoritative.
     const SPORT_DATA = {
         "Taekwondo": {
             defaultDiscipline: "Kyorugi",
@@ -1134,7 +1169,15 @@ JAVASCRIPT
         const payload = {
             title: fd.get("title"),
             location: fd.get("location"),
-            dateTime: new Date(fd.get("dateTime")).toISOString(),
+            // The f-datetime field is pre-filled with the tournament's raw
+            // UTC digits (see the value="{{ tournament.dateTime.strftime(...)
+            // }}" above) — NOT the browser's local time. Converting it with
+            // `new Date(...).toISOString()` would silently reinterpret those
+            // UTC digits as local time and shift the stored instant by the
+            // editor's UTC offset on every save, even with nothing changed.
+            // TrueVAR.utcInputToIso() treats the digits as UTC on the way
+            // back out too, matching how they were filled in.
+            dateTime: TrueVAR.utcInputToIso(fd.get("dateTime")),
             courtNum: parseInt(fd.get("courtNum"), 10),
             sport: fd.get("sport"),
             discipline: fd.get("discipline"),
