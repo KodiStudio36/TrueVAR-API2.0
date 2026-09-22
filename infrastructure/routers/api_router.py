@@ -65,6 +65,10 @@ class CreateTournamentRequest(BaseModel):
     isRegistrationOpen: bool = False
     registrationDeadline: Optional[datetime] = None
     categories: Optional[Dict] = None
+    # Only meaningful when isRegistrationOpen is False — a pointer to an
+    # outside registration site (Google Form, federation portal, etc.)
+    # shown on the public tournament page instead of the in-app flow.
+    externalRegistrationUrl: Optional[str] = None
 
 class UpdateTournamentRequest(BaseModel):
     title: str
@@ -79,6 +83,7 @@ class UpdateTournamentRequest(BaseModel):
     isExternalPublic: bool
     venueName: str
     numbering: str
+    externalRegistrationUrl: Optional[str] = None
 
 class TournamentResponse(BaseModel):
     id: str | None
@@ -166,6 +171,13 @@ def create_tournament_endpoint(
             "mode": payload.mode,
             # Consolidated registration config inside settings
             "registrationDeadline": payload.registrationDeadline.isoformat() if payload.registrationDeadline else None,
+            # Only stored when registration is closed here — it's a pointer
+            # to somewhere else, not something that should coexist with the
+            # in-app registration flow.
+            "externalRegistrationUrl": (
+                (payload.externalRegistrationUrl or "").strip() or None
+                if not payload.isRegistrationOpen else None
+            ),
         },
     )
 
@@ -1806,6 +1818,7 @@ def update_tournament_endpoint(
                 "numbering": payload.numbering,
                 "provider": payload.provider,
                 "mode": payload.mode,
+                "externalRegistrationUrl": (payload.externalRegistrationUrl or "").strip() or None,
             },
         )
     except ValueError as exc:

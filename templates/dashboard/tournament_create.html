@@ -79,7 +79,7 @@
         <label for="isRegistrationOpen"><strong>Open tournament for public registration</strong></label>
     </div>
 
-    <!-- Container for registration settings (Deadline + File Upload) -->
+    <!-- Container for registration settings (Deadline + File Upload) — shown when registration is OPEN -->
     <div id="registrationSettingsGroup"
         style="display: none; background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
         <div class="form-group" style="margin-bottom: 1rem;">
@@ -92,6 +92,20 @@
             <input type="file" id="categoriesJsonFile" accept=".json">
             <small style="color: #64748b; display: block; margin-top: 0.25rem;">Upload JSON file containing
                 divisions/categories.</small>
+        </div>
+    </div>
+
+    <!-- Container for an external registration link — shown when registration is CLOSED here -->
+    <div id="externalRegistrationGroup"
+        style="background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
+        <div class="form-group" style="margin-bottom: 0;">
+            <label for="externalRegistrationUrl">External Registration Link (optional):</label>
+            <input type="url" id="externalRegistrationUrl" name="externalRegistrationUrl"
+                placeholder="https://example.com/register">
+            <small style="color: #64748b; display: block; margin-top: 0.25rem;">
+                If athletes register somewhere else instead, paste that link here. It'll show as a button
+                on the public tournament page and open in a new tab.
+            </small>
         </div>
     </div>
 
@@ -109,10 +123,18 @@
 <script>
     const registrationCheckbox = document.getElementById("isRegistrationOpen");
     const registrationSettingsGroup = document.getElementById("registrationSettingsGroup");
+    const externalRegistrationGroup = document.getElementById("externalRegistrationGroup");
 
-    registrationCheckbox.addEventListener("change", (e) => {
-        registrationSettingsGroup.style.display = e.target.checked ? "block" : "none";
-    });
+    // Registration is either handled in-app (deadline + categories JSON)
+    // OR pointed at an outside site (external link) — never both, so the
+    // two groups are simple opposites of the same checkbox.
+    function syncRegistrationGroups() {
+        const isOpen = registrationCheckbox.checked;
+        registrationSettingsGroup.style.display = isOpen ? "block" : "none";
+        externalRegistrationGroup.style.display = isOpen ? "none" : "block";
+    }
+
+    registrationCheckbox.addEventListener("change", syncRegistrationGroups);
 
     // ── Sport → Discipline → Provider → Mode cascade config ──────────────
     // ★ marks the default at each level (most-used option, pre-selected).
@@ -227,6 +249,7 @@
     // ── Initial population (defaults) ─────────────────────────────────────
     populateSports();
     cascadeFromSport(DEFAULT_SPORT);
+    syncRegistrationGroups();
 
     // ── Submit ───────────────────────────────────────────────────────────
     document.getElementById('createTournamentForm').addEventListener('submit', async function (e) {
@@ -243,6 +266,12 @@
         // Parse registration deadline if provided
         const rawDeadline = document.getElementById('registrationDeadline').value;
         const formattedDeadline = (isRegistrationOpen && rawDeadline) ? TrueVAR.utcInputToIso(rawDeadline) : null;
+
+        // External registration link only applies when registration is
+        // NOT handled in-app — mirrors syncRegistrationGroups() above.
+        const externalRegistrationUrl = !isRegistrationOpen
+            ? (document.getElementById('externalRegistrationUrl').value.trim() || null)
+            : null;
 
         let categoriesData = null;
 
@@ -276,7 +305,8 @@
             // Registration data
             isRegistrationOpen: isRegistrationOpen,
             registrationDeadline: formattedDeadline,
-            categories: categoriesData
+            categories: categoriesData,
+            externalRegistrationUrl: externalRegistrationUrl
         };
 
         try {
@@ -317,6 +347,7 @@
             document.getElementById("numbering").value = t.settings?.numbering || "Numbers";
             document.getElementById("isStream").checked = !!t.settings?.isStream;
             document.getElementById("isExternalPublic").checked = t.settings?.isExternalPublic !== false;
+            document.getElementById("externalRegistrationUrl").value = t.settings?.externalRegistrationUrl || "";
 
             // Re-run the cascade using the copied source's actual values,
             // falling back to defaults at each level if a value is missing

@@ -14,7 +14,30 @@
     </div>
 </div>
 
+<!-- ── EXTERNAL REGISTRATION BANNER ────────────────────────────────── -->
+{# Shown only when this tournament is NOT taking registrations in-app.
+Requires the domain entity passed in as `tournament` to expose both
+isRegistrationOpen and settings.externalRegistrationUrl (see
+tournament_router.py's create/update endpoints, which write both onto
+tournaments/{id} and tournaments/{id}.settings respectively). #}
+{% if not tournament.isRegistrationOpen and tournament.settings.externalRegistrationUrl %}
+<div class="panel"
+    style="padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; background: var(--blue-bg); border: 1px solid var(--border);">
+    <div>
+        <div style="font-weight: 600;">Registration for this tournament happens on another site.</div>
+        <p class="text-muted" style="font-size: 0.88rem; margin-top: 0.2rem;">
+            This tournament isn't taking registrations here — use the link below.
+        </p>
+    </div>
+    <a href="{{ tournament.settings.externalRegistrationUrl }}" target="_blank" rel="noopener noreferrer"
+        class="btn btn-primary" style="text-decoration: none; white-space: nowrap;">
+        Go to Registration ↗
+    </a>
+</div>
+{% endif %}
+
 <!-- ── CATEGORIES ──────────────────────────────────────────────────── -->
+{% if tournament.isRegistrationOpen %}
 <div style="margin-bottom: clamp(1.75rem, 6vw, 3rem);">
     <div
         style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
@@ -98,6 +121,7 @@
         </p>
     </div>
 </div>
+{% endif %}
 
 <!-- ── ALL CLUBS & ATHLETES OVERLAY ─────────────────────────────────── -->
 {# Read-only aggregate view, built entirely from data this page already
@@ -259,8 +283,10 @@ immediately, with no resize listener or re-render needed.
     }
 
     async function init() {
+        {% if tournament.isRegistrationOpen %}
         await Promise.all([loadCategorySchema(), loadCategoryCounts()]);
         renderCategories();
+        {% endif %}
     }
     // Stored so openClubsOverlay() (and anything else added later) can
     // await entryTypes/categoryCounts being ready instead of racing the

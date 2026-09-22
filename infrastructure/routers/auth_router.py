@@ -237,13 +237,38 @@ async def main_page(
     user: Optional[dict] = Depends(get_current_user),
     tournament_repo=Depends(get_tournament_repo),
 ):
-    """Renders main dashboard with tournaments."""
-    tournaments = tournament_repo.getTournamentsPaginated(status="active", limit=10, offset=0, isExternalPublic=True)
+    """
+    Renders the landing page with two feeds:
+      - `tournaments`: active-status tournaments for the horizontal
+        "upcoming" rail. main.html additionally filters these down to
+        dateTime >= now, since "active" just means not-yet-archived, not
+        necessarily still in the future.
+      - `archived_tournaments`: a small preview of past tournaments for
+        the "Past Tournaments" grid, newest-first. getTournamentsPaginated
+        doesn't expose an ordering parameter, so we sort client-side here
+        rather than assume what order the repo returns — sorting is
+        cheap at this size (limit=6) and keeps this page correct
+        regardless of the repo's internal default.
+    """
+    tournaments = tournament_repo.getTournamentsPaginated(
+        status="active", limit=10, offset=0, isExternalPublic=True
+    )
+
+    archived_tournaments = tournament_repo.getTournamentsPaginated(
+        status="archived", limit=6, offset=0, isExternalPublic=True
+    )
+    archived_tournaments = sorted(
+        archived_tournaments,
+        key=lambda t: t.dateTime or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
 
     return templates.TemplateResponse(request, "main.html", {
         "request": request,
         "user": user,
-        "tournaments": tournaments
+        "tournaments": tournaments,
+        "archived_tournaments": archived_tournaments,
+        "now": datetime.now(timezone.utc),
     })
 
 

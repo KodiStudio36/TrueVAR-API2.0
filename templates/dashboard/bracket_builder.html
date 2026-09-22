@@ -991,6 +991,17 @@
     // guarantee — with enough entries from one club, some proximity can
     // be mathematically unavoidable. conflictCount on the return value
     // reports how many round-1 pairs still clash after swapping.
+    //
+    // FIX: the swap search now tries all four possible one-for-one
+    // swaps between the clashing pair (a, b) and a candidate pair
+    // (c, d) — a<->c, a<->d, b<->c, b<->d — instead of only ever trying
+    // b<->c. The old version gave up on a candidate pair entirely the
+    // moment that one specific swap didn't work, even when a different
+    // swap against the SAME candidate pair would have cleanly resolved
+    // both sides (e.g. c clashes with a, but d doesn't — the old code
+    // never tried b<->d or a<->d). `null` (a bye slot) never clashes
+    // with anything, so it's also now treated as a valid swap partner
+    // instead of being skipped outright.
     function placeClubCountrySpread(seededEntries, bracketSize) {
         let slots = placeStandard(seededEntries, bracketSize);
 
@@ -1006,17 +1017,32 @@
             for (let i = 0; i < slots.length; i += 2) {
                 const a = slots[i], b = slots[i + 1];
                 if (!pairClash(a, b)) continue;
-                for (let j = 0; j < slots.length; j += 2) {
+
+                let swapped = false;
+                for (let j = 0; j < slots.length && !swapped; j += 2) {
                     if (j === i) continue;
                     const c = slots[j], d = slots[j + 1];
-                    if (!c) continue;
+
+                    // Try every one-for-one swap between {a, b} and
+                    // {c, d} that would clear BOTH pairs at once. Order
+                    // matters only for readability here — the first one
+                    // that works is taken, same "greedy, first fit"
+                    // spirit as before.
                     if (!pairClash(a, c) && !pairClash(b, d)) {
                         slots[i + 1] = c; slots[j] = b;
-                        improved = true;
-                        break;
+                        swapped = true;
+                    } else if (!pairClash(a, d) && !pairClash(b, c)) {
+                        slots[i + 1] = d; slots[j + 1] = b;
+                        swapped = true;
+                    } else if (!pairClash(b, c) && !pairClash(a, d)) {
+                        slots[i] = c; slots[j] = a;
+                        swapped = true;
+                    } else if (!pairClash(b, d) && !pairClash(a, c)) {
+                        slots[i] = d; slots[j + 1] = a;
+                        swapped = true;
                     }
                 }
-                if (improved) break;
+                if (swapped) { improved = true; break; }
             }
         }
 
@@ -2519,13 +2545,35 @@
 
     // ── Download all brackets as one PDF, one bracket per page ─────────
     // Rendered via canvas rather than jsPDF's native SVG support (patchy
-    // browser-to-browser) — each bracket's SVG is rasterized to a PNG at
-    // `scale`x resolution first, then dropped onto a page sized to match
-    // the SVG's own A4-landscape canvas (PAGE_W x PAGE_H) so there's no
-    // stretching. CHANGE: only single_elimination brackets go through
-    // buildBracketSVG (see its own doc comment) — cut_off/round_robin
-    // brackets are skipped here rather than fed into a renderer built
-    // for a different shape, and the summary flash says so explicitly.
+    // browser-to-browser) — each bracket's SVG is rasterized to an image
+    // at `scale`x resolution first, then dropped onto a page sized to
+    // match the SVG's own A4-landscape canvas (PAGE_W x PAGE_H) so
+    // there's no stretching. CHANGE: only single_elimination brackets go
+    // through buildBracketSVG (see its own doc comment) — cut_off/
+    // round_robin brackets are skipped here rather than fed into a
+    // renderer built for a different shape, and the summary flash says
+    // so explicitly.
+    //
+    // FIX (file-size bug): the rasterized page used to be embedded as a
+    // PNG via doc.addImage(url, "PNG", ...). jsPDF's PNG path doesn't
+    // just copy the PNG's own compressed bytes into the PDF — it decodes
+    // the PNG back to a raw pixel buffer and re-encodes it with its own
+    // encoder, AND — since every canvas.toDataURL("image/png") always
+    // carries an alpha channel — writes that alpha out as a SEPARATE
+    // full-resolution SMask image stream layered on top of the color
+    // data, even though the canvas is always fully opaque (a plain
+    // white background is filled in before anything is drawn — see
+    // svgStringToPngDataUrl). That doubling, multiplied by one page per
+    // category, is what turned a tournament's worth of draw sheets into
+    // a 700MB+ file. Switching to JPEG fixes this: JPEG has no alpha
+    // channel to duplicate, and jsPDF's JPEG path embeds the JPEG's own
+    // DCT-compressed byte stream directly with no re-encoding at all —
+    // exactly the same "let the browser's own image codec do the
+    // compression" approach live_queue.html already uses when it prints
+    // these same sheets (there, the browser's native PDF-from-print
+    // pipeline does the equivalent job). The function name below still
+    // says "Png" for minimal diff/history noise, but it now returns a
+    // JPEG data URL.
     function svgStringToPngDataUrl(svgString, width, height, scale) {
         return new Promise((resolve, reject) => {
             const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
@@ -2540,7 +2588,13 @@
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 URL.revokeObjectURL(url);
-                resolve(canvas.toDataURL("image/png"));
+                // JPEG, not PNG — see this function's own doc comment
+                // above for why this one change is what actually fixes
+                // the 700MB PDF. Sheets are white-background line art
+                // and small text, so 0.92 quality keeps them crisp while
+                // still compressing far better than jsPDF's PNG+SMask
+                // path ever did.
+                resolve(canvas.toDataURL("image/jpeg", 0.92));
             };
             img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
             img.src = url;
@@ -2588,9 +2642,15 @@
 
             for (let i = 0; i < pages.length; i++) {
                 const { svg, width, height } = pages[i];
-                const pngUrl = await svgStringToPngDataUrl(svg, width, height, scale);
+                const jpgUrl = await svgStringToPngDataUrl(svg, width, height, scale);
                 if (i > 0) doc.addPage([width, height], orientationOf(pages[i]));
-                doc.addImage(pngUrl, "PNG", 0, 0, width, height);
+                // "JPEG" here, matching the data URL svgStringToPngDataUrl
+                // now actually produces — see that function's own doc
+                // comment for why this single change is the fix for the
+                // 700MB-PDF bug (jsPDF embeds a JPEG's own compressed
+                // stream as-is, instead of decoding+re-encoding a PNG
+                // plus a redundant full-resolution alpha mask).
+                doc.addImage(jpgUrl, "JPEG", 0, 0, width, height);
             }
 
             const safeTitle = (TOURNAMENT_TITLE || "brackets").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
@@ -2635,6 +2695,10 @@
     // QF/SF/F columns the way an elimination fight does; that would need
     // its own column shape (performance order / round-robin leg number)
     // to be useful, which is a separate follow-up.
+    //
+    // NOTE: this doc is built with autoTable's own text drawing, not
+    // embedded rasterized images, so it was never part of the PDF
+    // file-size bug above and needs no change here.
     // ══════════════════════════════════════════════════════════════════
     const CLUB_SHEET_MARGIN = 14; // mm, both sides — A4 width is 210mm
     const ROUND_PHASE_COLUMNS = ["R32", "R16", "QF", "SF", "F"];
