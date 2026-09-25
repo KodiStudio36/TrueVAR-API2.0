@@ -1,0 +1,586 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin: 0 0 0.25rem;
+    }
+
+    .section-hint {
+        font-size: 0.85rem;
+        margin: 0 0 0.9rem;
+    }
+
+    .identity-box {
+        background: var(--bg-alt);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: clamp(0.85rem, 3vw, 1rem);
+    }
+
+    /* ── Days ─────────────────────────────────────────── */
+    .day-block {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: clamp(0.85rem, 3vw, 1rem);
+        background: var(--bg-alt);
+    }
+
+    .day-block+.day-block {
+        margin-top: 0.9rem;
+    }
+
+    .day-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.85rem;
+        flex-wrap: wrap;
+    }
+
+    .day-head h4 {
+        margin: 0;
+        font-size: 1rem;
+    }
+
+    .day-date {
+        font-weight: 400;
+        font-size: 0.85rem;
+        margin-left: 0.35rem;
+    }
+
+    .link-btn {
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        font-size: 0.85rem;
+        color: #b91c1c;
+        cursor: pointer;
+        text-decoration: underline;
+    }
+
+    /* ── Court grid ───────────────────────────────────── */
+    .court-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .court-card,
+    .court-add {
+        aspect-ratio: 1 / 1;
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .court-card {
+        --court-accent: #2563eb;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-top: 4px solid var(--court-accent);
+        padding: 0.6rem;
+        position: relative;
+    }
+
+    .court-card[data-discipline="kyorugi"] {
+        --court-accent: #2563eb;
+    }
+
+    .court-card[data-discipline="poomsae"] {
+        --court-accent: #7c3aed;
+    }
+
+    .court-card[data-discipline="livestream"] {
+        --court-accent: #dc2626;
+    }
+
+    .court-card[data-discipline="livestream_ivr"] {
+        --court-accent: #ea580c;
+    }
+
+    .court-card-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.8rem;
+    }
+
+    .court-remove {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.1rem;
+        line-height: 1;
+        padding: 0.1rem 0.3rem;
+        color: inherit;
+        opacity: 0.55;
+        border-radius: 4px;
+    }
+
+    .court-remove:hover,
+    .court-remove:focus-visible {
+        opacity: 1;
+        background: #fee2e2;
+        color: #b91c1c;
+    }
+
+    .court-number {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: clamp(2rem, 7vw, 2.6rem);
+        font-weight: 700;
+        color: var(--court-accent);
+    }
+
+    .court-card select {
+        width: 100%;
+        padding: 0.35rem;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        font-size: 0.85rem;
+    }
+
+    .court-add {
+        align-items: center;
+        justify-content: center;
+        gap: 0.25rem;
+        border: 2px dashed var(--border);
+        background: transparent;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.9rem;
+        color: inherit;
+        opacity: 0.75;
+    }
+
+    .court-add:hover,
+    .court-add:focus-visible {
+        opacity: 1;
+        border-color: #2563eb;
+    }
+
+    .court-add span {
+        font-size: 1.8rem;
+        line-height: 1;
+    }
+
+    .day-summary {
+        font-size: 0.8rem;
+        margin: 0.75rem 0 0;
+    }
+
+    .add-day-btn {
+        margin-top: 0.9rem;
+        width: 100%;
+        border-style: dashed !important;
+    }
+</style>
+
+<div style="max-width: 760px; margin: clamp(1.25rem, 5vw, 2rem) auto;">
+    <a href="javascript:history.back()" class="text-muted" style="font-size: 0.95rem; text-decoration: none;">&larr;
+        Back</a>
+
+    <div class="panel" style="padding: clamp(1.25rem, 5vw, 2.5rem); margin-top: 1rem;">
+        <h2 style="margin-bottom: 0.5rem;">Request a Tournament</h2>
+        <p class="text-muted" style="margin-bottom: clamp(1.25rem, 4vw, 2rem);">
+            Tell us about your event and how many courts you need each day. We'll review the request and get back to
+            you by email.
+        </p>
+
+        <form id="requestTournamentForm" onsubmit="submitRequest(event)" novalidate
+            data-logged-in="{{ 'true' if current_user else 'false' }}"
+            style="display: flex; flex-direction: column; gap: 1.1rem;">
+
+            <!-- ── Contact ─────────────────────────────────────── -->
+            <div>
+                <h3 class="section-title">Your details</h3>
+
+                {% if current_user %}
+                <div class="identity-box">
+                    <p style="margin: 0;">
+                        Requesting as
+                        <strong>{{ current_user.get('firstname', '') }} {{ current_user.get('lastname', '') }}</strong>
+                    </p>
+                </div>
+                {% else %}
+                <p class="text-muted section-hint">
+                    <a href="/login">Log in</a>
+                    to use your account, or fill in your contact details below.
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 1.1rem;">
+                    <div class="form-grid-2">
+                        <div>
+                            <label class="field-label" for="r_firstname">First Name</label>
+                            <input type="text" id="r_firstname" autocomplete="given-name" required>
+                        </div>
+                        <div>
+                            <label class="field-label" for="r_lastname">Last Name</label>
+                            <input type="text" id="r_lastname" autocomplete="family-name" required>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="field-label" for="r_email">Email</label>
+                        <input type="email" id="r_email" autocomplete="email" required>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid var(--border); margin: 0.25rem 0;">
+
+            <!-- ── Tournament ──────────────────────────────────── -->
+            <div>
+                <h3 class="section-title" style="margin-bottom: 0.9rem;">Tournament</h3>
+                <div style="display: flex; flex-direction: column; gap: 1.1rem;">
+                    <div>
+                        <label class="field-label" for="t_title">Full Tournament Name</label>
+                        <input type="text" id="t_title" required placeholder="e.g. Slovak Open 2027">
+                    </div>
+
+                    <div>
+                        <label class="field-label" for="t_start">Tournament Start Date</label>
+                        <input type="date" id="t_start" required onchange="renderDays()">
+                    </div>
+
+                    <div class="form-grid-2">
+                        <div>
+                            <label class="field-label" for="t_state">State</label>
+                            <select id="t_state" required
+                                style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border);">
+                                <option value="" disabled>Select state...</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="field-label" for="t_city">City</label>
+                            <input type="text" id="t_city" required>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid var(--border); margin: 0.25rem 0;">
+
+            <!-- ── Days & courts ───────────────────────────────── -->
+            <div>
+                <h3 class="section-title">Courts</h3>
+                <p class="text-muted section-hint">
+                    Add a square for every court you need and choose what runs on it.
+                </p>
+
+                <div id="daysContainer"></div>
+
+                <button type="button" class="btn add-day-btn" onclick="addDay()">+ Add another day</button>
+            </div>
+
+            <div style="margin-top: 0.75rem;">
+                <button type="submit" id="submitBtn" class="btn btn-primary" style="width: 100%;">Send
+                    Request</button>
+            </div>
+
+            <p id="formMsg" class="hidden" role="status"
+                style="border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.95rem; margin: 0; text-align: center;">
+            </p>
+        </form>
+    </div>
+</div>
+
+<script src="/static/js/truevar-lib.js"></script>
+<script>
+    // Mirrors backend COURT_DISCIPLINES in tournament_drafts router — keep in sync.
+    const COURT_DISCIPLINES = [
+        { value: "kyorugi", label: "Kyorugi" },
+        { value: "livestream", label: "Livestream" },
+        { value: "livestream_ivr", label: "Livestream + IVR" },
+        { value: "poomsae", label: "Poomsae" },
+    ];
+    const MAX_DAYS = 7;
+    const MAX_COURTS_PER_DAY = 20;
+
+    const form = document.getElementById("requestTournamentForm");
+    const IS_LOGGED_IN = form.getAttribute("data-logged-in") === "true";
+
+    // Single source of truth for the court layout; the DOM is re-rendered from it.
+    let days = [{ courts: [{ discipline: "kyorugi" }] }];
+
+    document.addEventListener("DOMContentLoaded", () => {
+        populateStates();
+        setMinStartDate();
+        renderDays();
+    });
+
+    function populateStates() {
+        const select = document.getElementById("t_state");
+        TrueVAR.populateCountrySelect(select, { includeBlank: false });
+
+        // Default to Slovakia regardless of whether the lib uses SK / SVK codes.
+        const slovakia = Array.from(select.options).find(o =>
+            ["SK", "SVK"].includes((o.value || "").toUpperCase()) ||
+            /^slovakia$/i.test(o.textContent.trim())
+        );
+        if (slovakia) select.value = slovakia.value;
+    }
+
+    function setMinStartDate() {
+        const today = new Date();
+        const iso = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+        document.getElementById("t_start").min = iso;
+    }
+
+    function dayDateLabel(dayIndex) {
+        const start = document.getElementById("t_start").value;
+        if (!start) return "";
+        const d = new Date(start + "T00:00:00");
+        d.setDate(d.getDate() + dayIndex);
+        return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+    }
+
+    // ── Mutations ─────────────────────────────────────────────
+    function addDay() {
+        if (days.length >= MAX_DAYS) {
+            showMsg(`A tournament can have at most ${MAX_DAYS} days.`, true);
+            return;
+        }
+        // Start the new day with the previous day's layout — usually the same hall.
+        const prev = days[days.length - 1];
+        days.push({ courts: prev.courts.map(c => ({ ...c })) });
+        renderDays();
+    }
+
+    function removeDay(dayIndex) {
+        days.splice(dayIndex, 1);
+        renderDays();
+    }
+
+    function addCourt(dayIndex) {
+        const courts = days[dayIndex].courts;
+        if (courts.length >= MAX_COURTS_PER_DAY) return;
+        const lastDiscipline = courts.length ? courts[courts.length - 1].discipline : "kyorugi";
+        courts.push({ discipline: lastDiscipline });
+        renderDays();
+        // Keep focus on the add button so several courts can be added quickly by keyboard.
+        const btn = document.querySelector(`[data-add-court="${dayIndex}"]`);
+        if (btn) btn.focus();
+    }
+
+    function removeCourt(dayIndex, courtIndex) {
+        days[dayIndex].courts.splice(courtIndex, 1);
+        renderDays();
+    }
+
+    function setDiscipline(dayIndex, courtIndex, value) {
+        days[dayIndex].courts[courtIndex].discipline = value;
+        const card = document.querySelector(`[data-court="${dayIndex}-${courtIndex}"]`);
+        if (card) card.setAttribute("data-discipline", value);
+        updateSummary(dayIndex);
+    }
+
+    // ── Rendering ─────────────────────────────────────────────
+    function renderDays() {
+        const container = document.getElementById("daysContainer");
+        container.innerHTML = "";
+
+        days.forEach((day, dayIndex) => {
+            const block = document.createElement("div");
+            block.className = "day-block";
+
+            // Header
+            const head = document.createElement("div");
+            head.className = "day-head";
+
+            const h = document.createElement("h4");
+            h.textContent = `Day ${dayIndex + 1}`;
+            const dateLabel = dayDateLabel(dayIndex);
+            if (dateLabel) {
+                const span = document.createElement("span");
+                span.className = "text-muted day-date";
+                span.textContent = dateLabel;
+                h.appendChild(span);
+            }
+            head.appendChild(h);
+
+            if (dayIndex > 0) {
+                const rm = document.createElement("button");
+                rm.type = "button";
+                rm.className = "link-btn";
+                rm.textContent = "Remove day";
+                rm.onclick = () => removeDay(dayIndex);
+                head.appendChild(rm);
+            }
+            block.appendChild(head);
+
+            // Court grid
+            const grid = document.createElement("div");
+            grid.className = "court-grid";
+
+            day.courts.forEach((court, courtIndex) => {
+                grid.appendChild(buildCourtCard(dayIndex, courtIndex, court));
+            });
+
+            if (day.courts.length < MAX_COURTS_PER_DAY) {
+                const add = document.createElement("button");
+                add.type = "button";
+                add.className = "court-add";
+                add.setAttribute("data-add-court", dayIndex);
+                add.innerHTML = "<span>+</span>Add court";
+                add.onclick = () => addCourt(dayIndex);
+                grid.appendChild(add);
+            }
+            block.appendChild(grid);
+
+            const summary = document.createElement("p");
+            summary.className = "text-muted day-summary";
+            summary.id = `daySummary-${dayIndex}`;
+            block.appendChild(summary);
+
+            container.appendChild(block);
+            updateSummary(dayIndex);
+        });
+    }
+
+    function buildCourtCard(dayIndex, courtIndex, court) {
+        const card = document.createElement("div");
+        card.className = "court-card";
+        card.setAttribute("data-court", `${dayIndex}-${courtIndex}`);
+        card.setAttribute("data-discipline", court.discipline);
+
+        const top = document.createElement("div");
+        top.className = "court-card-top";
+        const label = document.createElement("span");
+        label.className = "text-muted";
+        label.textContent = "Court";
+        top.appendChild(label);
+
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "court-remove";
+        rm.innerHTML = "&times;";
+        rm.setAttribute("aria-label", `Remove court ${courtIndex + 1} on day ${dayIndex + 1}`);
+        rm.onclick = () => removeCourt(dayIndex, courtIndex);
+        top.appendChild(rm);
+        card.appendChild(top);
+
+        const num = document.createElement("div");
+        num.className = "court-number";
+        num.textContent = courtIndex + 1;
+        card.appendChild(num);
+
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", `Discipline for court ${courtIndex + 1} on day ${dayIndex + 1}`);
+        COURT_DISCIPLINES.forEach(d => {
+            const opt = document.createElement("option");
+            opt.value = d.value;
+            opt.textContent = d.label;
+            select.appendChild(opt);
+        });
+        select.value = court.discipline;
+        select.onchange = e => setDiscipline(dayIndex, courtIndex, e.target.value);
+        card.appendChild(select);
+
+        return card;
+    }
+
+    function updateSummary(dayIndex) {
+        const el = document.getElementById(`daySummary-${dayIndex}`);
+        if (!el) return;
+        const courts = days[dayIndex].courts;
+        if (!courts.length) {
+            el.textContent = "No courts yet — add at least one.";
+            return;
+        }
+        const counts = {};
+        courts.forEach(c => { counts[c.discipline] = (counts[c.discipline] || 0) + 1; });
+        const parts = COURT_DISCIPLINES
+            .filter(d => counts[d.value])
+            .map(d => `${counts[d.value]} ${d.label}`);
+        el.textContent = `${courts.length} court${courts.length === 1 ? "" : "s"}: ${parts.join(", ")}`;
+    }
+
+    // ── Submit ────────────────────────────────────────────────
+    function showMsg(text, isError) {
+        const msg = document.getElementById("formMsg");
+        msg.textContent = text;
+        msg.style.background = isError ? "#fee2e2" : "var(--blue-bg)";
+        msg.style.color = isError ? "#b91c1c" : "var(--blue-text)";
+        msg.classList.remove("hidden");
+    }
+
+    function validate(payload) {
+        if (!IS_LOGGED_IN) {
+            const r = payload.requester;
+            if (!r.firstname || !r.lastname) return "Enter your first and last name, or log in.";
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email)) return "Enter a valid email address.";
+        }
+        if (!payload.title) return "Enter the full tournament name.";
+        if (!payload.startDate) return "Choose the tournament start date.";
+        if (!payload.state) return "Choose a state.";
+        if (!payload.city) return "Enter the city.";
+        const emptyDay = payload.days.findIndex(d => d.courts.length === 0);
+        if (emptyDay !== -1) return `Day ${emptyDay + 1} has no courts. Add a court or remove the day.`;
+        return null;
+    }
+
+    async function submitRequest(event) {
+        event.preventDefault();
+
+        const submitBtn = document.getElementById("submitBtn");
+        document.getElementById("formMsg").classList.add("hidden");
+
+        const payload = {
+            title: document.getElementById("t_title").value.trim(),
+            startDate: document.getElementById("t_start").value,
+            state: document.getElementById("t_state").value,
+            city: document.getElementById("t_city").value.trim(),
+            days: days.map(d => ({ courts: d.courts.map(c => ({ discipline: c.discipline })) })),
+        };
+
+        if (!IS_LOGGED_IN) {
+            payload.requester = {
+                firstname: document.getElementById("r_firstname").value.trim(),
+                lastname: document.getElementById("r_lastname").value.trim(),
+                email: document.getElementById("r_email").value.trim(),
+            };
+        }
+
+        const error = validate(payload);
+        if (error) {
+            showMsg(error, true);
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Sending...";
+
+        try {
+            const res = await fetch("/api/tournament-drafts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                const detail = Array.isArray(body.detail) ? body.detail[0]?.msg : body.detail;
+                throw new Error(detail || "The request couldn't be sent. Try again.");
+            }
+
+            showMsg("Request sent. We'll be in touch soon.", false);
+            submitBtn.textContent = "Request Sent";
+
+            setTimeout(() => {
+                window.location.href = "/";
+            }, 1200);
+        } catch (err) {
+            showMsg(err.message, true);
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Send Request";
+        }
+    }
+</script>
+{% endblock %}

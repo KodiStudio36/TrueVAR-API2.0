@@ -305,6 +305,14 @@ async def tournament_detail_page(
         "admin_club_id": get_admin_club_id(user),
     })
 
+@router.get("/request-tournament")
+async def request_tournament_page(request: Request, user: Optional[dict] = Depends(get_current_user)):
+    return templates.TemplateResponse(request, "request_tournament.html", {
+        "request": request,
+        "user": user,          # base.html likely reads `user` like your other pages
+        "current_user": user,
+    })
+
 @router.get("/athletes/new")
 async def render_create_athlete_page(
     request: Request,

@@ -30,7 +30,9 @@
         Everything below runs in your browser — nothing is written to Firestore until you hit
         <strong>Push to Firebase</strong>. Configure courts and vest numbers (these save immediately, like the
         category manager), then Generate to compute brackets and court ordering as a local draft you can
-        drag-and-drop to adjust before committing.
+        drag-and-drop to adjust before committing. Three <strong>hard locks</strong> are enforced and re-checked
+        before every push: the rest gap between the same athlete's matches, no same-club first-round pairs when
+        avoidable, and one court per category.
     </p>
 
     {# ── CONFIG ROW: courts (local only) + vest sizes (auto-derived) ────── #}
@@ -44,7 +46,8 @@
             <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
                 Pre-filled from this tournament's court count. This is session-only — nothing here is saved to
                 Firestore, so it resets if you leave the page. Vest numbers can repeat across courts (different
-                physical vests); the rest-gap applies globally across every court running in parallel.
+                physical vests). The min-gap number is a <strong>hard lock</strong>: two matches that can involve the
+                same athlete are always at least that many fights apart (the court holds if it has to).
                 <strong>The ID field must exactly match that court's own TrueVAR-Core court_id</strong> — a
                 mismatch here is why a court-side server would see no matches at all, with no error to point at it.
             </p>
@@ -68,11 +71,12 @@
             </div>
             <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
                 Session-only, like Courts. Vest counts are keyed by size + generation — the scheduler
-                won't double-book more vests of a size/gen than you enter here, accounting for a
+                tries not to double-book more vests of a size/gen than you enter here, accounting for a
                 transfer buffer when a vest is reused on a different court. Plexi helmets work the same
                 way: the "Plexi" checkbox on a court above is a soft preference (categories needing one
                 incline toward that court), not a hard requirement — actual availability is governed by
-                the helmet count below plus the same transfer buffer.
+                the helmet count below plus the same transfer buffer. Equipment is soft: if nothing is
+                free after a short wait, the match is placed anyway and flagged.
             </p>
 
             <div class="bb-equip-block">
@@ -102,10 +106,10 @@
                         onchange="assumedRoundsPerMatch = parseInt(this.value) || 3">
                 </label>
                 <label class="bb-field"
-                    title="Hard cap — no court may be scheduled more than this many fights ahead of the currently least-busy court">
-                    <span>Court balance threshold (fights)</span>
-                    <input type="number" min="1" id="courtBalanceThresholdInput" value="5"
-                        onchange="courtBalanceThreshold = parseInt(this.value) || 5">
+                    title="Categories are balanced across courts by fight count. A plexi-helmet category stays on a Plexi court unless that court would end up more than this many fights heavier than a non-plexi alternative.">
+                    <span>Plexi court tolerance (fights)</span>
+                    <input type="number" min="0" id="courtBalanceThresholdInput" value="5"
+                        onchange="courtBalanceThreshold = parseInt(this.value) || 0">
                 </label>
             </div>
         </div>
@@ -162,8 +166,8 @@
             <label class="bb-field" id="placementFieldWrap">
                 <span>Seed placement</span>
                 <select id="placementSelect">
-                    <option value="club_country_spread">Club + country spread</option>
-                    <option value="standard">Standard (seed order only)</option>
+                    <option value="club_country_spread">Club spread (hard lock) + country tie-break</option>
+                    <option value="standard">Standard (seed order only — checker flags avoidable club pairs)</option>
                 </select>
             </label>
             <label class="bb-field" id="pssSetFieldWrap">
@@ -177,14 +181,16 @@
         </div>
         <p class="text-muted" style="font-size: 0.8rem; margin-top: 0.6rem;">
             Each dropdown is a registry — new algorithms slot in without touching the pipeline around them.
-            Only one option exists per slot today; more can be registered later (see ORDERING_STRATEGIES /
-            PLACEMENT_STRATEGIES / BRACKET_SYSTEMS in this page's script).
+            More can be registered later (see ORDERING_STRATEGIES / PLACEMENT_STRATEGIES / BRACKET_SYSTEMS in
+            this page's script).
         </p>
         <div id="generateSummary" class="bb-generate-summary"></div>
     </div>
 
     {# ── RESULTS ────────────────────────────────────────────────────────── #}
     <div id="resultsSection" class="hidden">
+
+        <div id="hardLockReport" class="card-panel bb-pane bb-lock-report hidden" style="margin-bottom: 0.75rem;"></div>
 
         <div class="bb-view-pins">
             <div style="display:flex; gap:0.5rem;">
@@ -210,8 +216,8 @@
             <h2 class="panel-title" style="font-size:1.05rem; margin-bottom: 0.35rem;">Court Order</h2>
             <p id="courtOrderHint" class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
                 The whole tournament is scheduled up front — later rounds show as "101 Winner" placeholders
-                until their feeder match resolves. Drag a match to reorder it within a court, or onto a
-                different court entirely.
+                until their feeder match resolves. Drag a match to reorder it within its court; dragging it onto a
+                different court moves its whole category there.
             </p>
             <div id="unassignedWarning" class="hidden"></div>
             <div id="courtColumns" class="bb-court-columns"></div>
@@ -245,7 +251,7 @@
     const TOURNAMENT_DATE = "{{ tournament.dateTime | default('') }}";
     const TOURNAMENT_LOCATION = "{{ tournament.location | default('') }}";
 
-    let courts = [];             // [{label, vestNumbers, minGapBetweenSameAthlete, ageOrder, plexiCapable}] — TRUE local state, never written to Firestore
+    let courts = [];             // [{id, label, vestNumbers, minGapBetweenSameAthlete, ageOrder, plexiCapable, allowedVestGen}] — TRUE local state, never written to Firestore
 
     // ── Equipment state: session-local, same lifecycle as `courts` — never
     // written to Firestore, resets if you leave the page. ────────────────
@@ -254,9 +260,13 @@
     let plexiHelmetCount = 2;      // total physical plexi helmets available
     let transferBufferSeconds = 300; // time required before a vest/helmet can be reused elsewhere (walk-over + fit time)
     let assumedRoundsPerMatch = 3; // used only to estimate match duration for equipment interval checks — see estimateMatchDurationSeconds
-    let courtBalanceThreshold = 5; // HARD cap: no court may be scheduled more than this many fights ahead of the currently least-busy court (category-to-court itself stays a soft preference — see generateCourtOrdering)
+    let courtBalanceThreshold = 5; // plexi court tolerance: how many extra fights a plexi court may carry before a plexi category is sent to a non-plexi court (see assignCategoriesToCourts)
     let flatCategories = [];     // populated categories only: {code, ageCode, genderCode, entryTypeCode, groupLabel, label, ageMin, ageMax, weightIndex}
     let divisionRosterCache = {};
+
+    // ── Hard-lock state ──────────────────────────────────────────────────
+    let categoryCourtPins = {};    // categoryCode -> courtId, set by dragging a match to another court (moves the whole category). Session-only.
+    let lastOrderingResult = null; // last generateCourtOrdering result (court loads, hold counts)
 
     // ── Sport-mode detection ─────────────────────────────────────────────
     // Signaled by the SCHEMA, not a hardcoded discipline name check: a
@@ -270,9 +280,9 @@
 
     let generatedBrackets = [];  // [{categoryCode, categoryLabel, entries, rounds}]
     let generatedMatches = [];   // flat list across every category, mutated in place by drag-and-drop
-    let __measureCanvasCtx = null; // lazily-created scratch <canvas> 2D context, reused purely to measure real text widths (see estimateTextWidth in buildBracketSVG) — far more accurate than a char-count heuristic, and no point/px unit-conversion pitfalls
+    let __measureCanvasCtx = null; // lazily-created scratch <canvas> 2D context, reused purely to measure real text widths (see estimateTextWidth in buildBracketSVG)
     let pssHitLevelSets = [];    // [{id, provider, year, label, note, pssHitLevels}] — every set available for this discipline
-    let leftLogoDataUrl = "/static/assets/logos/world_taekwondo.png";  // base64 data URL, embedded directly into the SVG so it's self-contained (no external image reference to break on download/print)
+    let leftLogoDataUrl = "/static/assets/logos/world_taekwondo.png";  // converted to a base64 data URL in init() so the SVG is self-contained
     let rightLogoDataUrl = "/static/assets/logos/truevar.png";
 
     function onLogoSelected(event, side) {
@@ -288,17 +298,13 @@
     let selectedPssHitLevelSetId = null;
 
     // Both default logo paths are same-origin static assets, but the SVG
-    // they end up embedded in gets rasterized onto a <canvas> for the
-    // "Download All (PDF)" / "Download Club Sheets" exports (see
-    // svgStringToPngDataUrl) — and a <canvas> that has ever drawn an
+    // they end up embedded in gets rasterized onto a <canvas> for the PDF
+    // exports (see svgStringToPngDataUrl) — and a canvas that has drawn an
     // <image> loaded from anything other than a data: URL is treated as
-    // tainted by most browsers once that SVG is itself loaded via a
-    // blob: URL, so canvas.toDataURL() silently fails and the logos
-    // never make it into the PDF. They render fine in the inline browser
-    // preview (openBracketPreview just sets innerHTML), which is what
-    // made this easy to miss. Converting both logos to self-contained
-    // base64 data URLs up front — not just the ones a user manually
-    // re-uploads via onLogoSelected — avoids the taint entirely.
+    // tainted once that SVG is itself loaded via a blob: URL, so
+    // canvas.toDataURL() silently fails and the logos never make it into
+    // the PDF. Converting both logos to base64 data URLs up front avoids
+    // the taint entirely.
     async function loadLogoAsDataUrl(url) {
         if (!url || url.startsWith("data:")) return url || null;
         try {
@@ -339,9 +345,7 @@
     // Toggles the kyorugi-only panes (Vest Size & Hit-Level, Equipment,
     // PSS table dropdown) against the poomsae-only pane (Poomsae Timing),
     // and repopulates the bracket-system dropdown with whichever systems
-    // actually apply to this discipline. Kyorugi's own dropdown options
-    // and panes are left completely untouched when isPoomsaeMode is
-    // false — this only ever ADDS a branch, never edits the existing one.
+    // actually apply to this discipline.
     function applySportModeUI() {
         document.getElementById("vestPane").classList.toggle("hidden", isPoomsaeMode);
         document.getElementById("equipmentPane").classList.toggle("hidden", isPoomsaeMode);
@@ -352,7 +356,7 @@
         if (hintEl) {
             hintEl.textContent = isPoomsaeMode
                 ? "Every category runs as one uninterrupted block, first match to last — drag a whole category card onto a different court, or reorder it within one. Individual matches inside a category aren't shown or draggable on their own; block height is roughly proportional to how many matches it has, so you can balance courts by eye."
-                : `The whole tournament is scheduled up front — later rounds show as "101 Winner" placeholders until their feeder match resolves. Drag a match to reorder it within a court, or onto a different court entirely.`;
+                : `The whole tournament is scheduled up front — later rounds show as "101 Winner" placeholders until their feeder match resolves. Drag a match to reorder it within its court (holds are inserted automatically to keep the rest gap); dragging it onto a different court moves its whole category there.`;
         }
 
         const systemSelect = document.getElementById("systemSelect");
@@ -368,12 +372,9 @@
         onSystemSelectChange();
     }
 
-    // Seed placement only means anything for an elimination bracket — a
-    // cut-off has no bracket slots to place into, and round-robin's
-    // pairing order comes from the circle method, not a placement
-    // strategy. Hidden rather than removed so nothing else has to guard
-    // against the element being absent. The cut-off structure toggle is
-    // the mirror image — only relevant when cut_off is actually selected.
+    // Seed placement only means anything for an elimination bracket. The
+    // cut-off structure toggle is the mirror image — only relevant when
+    // cut_off is actually selected.
     function onSystemSelectChange() {
         const system = document.getElementById("systemSelect").value;
         document.getElementById("placementFieldWrap").classList.toggle("hidden", system !== "single_elimination");
@@ -381,22 +382,14 @@
         if (cutOffWrap) cutOffWrap.classList.toggle("hidden", system !== "cut_off");
     }
 
-
-    // Pre-seeds from the tournament's own courtNum field (already an
-    // existing tournament property) so there's something sensible to
-    // start editing instead of an empty list.
+    // Pre-seeds from the tournament's own courtNum field.
     //
     // IMPORTANT: court.id is what gets written as `courtId` on every
     // scheduled match doc, and it's exactly what a court-side
     // TrueVAR-Core instance's bound `court_id` must equal for its
-    // Firestore watch query to find anything at all — a mismatch here
-    // means that instance's match cache stays permanently empty, which
-    // looks like "GET /matches returns nothing" with no error anywhere.
-    // Plain ordinal numbers ("1", "2", "3"...) are the sane default since
-    // that's the most common physical court-numbering convention, but
-    // this is a genuine guess — the id field below is directly editable
-    // specifically so it can be corrected to match whatever court_id
-    // value your actual deployed court-side servers are configured with.
+    // Firestore watch query to find anything at all. Plain ordinal
+    // numbers ("1", "2", "3"...) are the default; the id field is
+    // editable so it can be corrected to match the deployed servers.
     function loadCourtsLocal() {
         const courtNum = {{ tournament.courtNum | default (0)
     }};
@@ -411,12 +404,8 @@
         renderCourtsList();
     }
 
-    // CHANGE: poomsae gets a shorter row — no vest numbers, plexi
-    // checkbox, or vest-gen lock, since none of those concepts exist for
-    // it. Still the SAME underlying `courts` array/shape either way
-    // (those fields just sit unused on a poomsae court object) — only
-    // the rendered inputs differ, so nothing downstream that reads
-    // `courts` needs to know which mode built them.
+    // Poomsae gets a shorter row — no vest numbers, plexi checkbox, or
+    // vest-gen lock. Still the SAME underlying `courts` array/shape.
     function renderCourtsList() {
         const el = document.getElementById("courtsList");
         if (courts.length === 0) {
@@ -445,13 +434,13 @@
                 <input type="text" value="${escapeAttr(c.label)}" placeholder="Label" onchange="courts[${i}].label = this.value">
                 <input type="text" value="${(c.vestNumbers || []).join(', ')}" placeholder="Vest #s, e.g. 1, 2, 3, 4"
                     onchange="courts[${i}].vestNumbers = this.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))">
-                <input type="number" min="0" value="${c.minGapBetweenSameAthlete}" title="Min fights between same athlete"
+                <input type="number" min="0" value="${c.minGapBetweenSameAthlete}" title="HARD LOCK — minimum fights between two matches of the same athlete"
                     onchange="courts[${i}].minGapBetweenSameAthlete = parseInt(this.value) || 0">
                 <select onchange="courts[${i}].ageOrder = this.value">
                     <option value="oldest_first" ${c.ageOrder === "oldest_first" ? "selected" : ""}>Oldest first</option>
                     <option value="youngest_first" ${c.ageOrder === "youngest_first" ? "selected" : ""}>Youngest first</option>
                 </select>
-                <label class="bb-plexi-check" title="Soft preference — plexi-requiring categories incline toward this court, but the fight-count balance threshold can still send some elsewhere. Actual helmet availability is enforced separately via the helmet count below.">
+                <label class="bb-plexi-check" title="Soft preference — plexi-requiring categories are assigned to this court unless it would get more than the plexi tolerance ahead of a non-plexi court. Actual helmet availability is checked separately via the helmet count.">
                     <input type="checkbox" ${c.plexiCapable ? "checked" : ""} onchange="courts[${i}].plexiCapable = this.checked">
                     Plexi
                 </label>
@@ -472,7 +461,7 @@
 
     // ── PSS size / hit-level: multiple named reference sets, admin picks ──
     // one at generation time (different providers, or the same provider's
-    // chart revised in a later year — see list_pss_hit_level_sets_endpoint).
+    // chart revised in a later year).
     async function loadPssHitLevelSets() {
         try {
             const res = await fetch(`/api/sports/${TOURNAMENT_SPORT}/disciplines/${TOURNAMENT_DISCIPLINE}/pss-hit-level-sets`);
@@ -502,8 +491,8 @@
 
     function onPssSetChange() {
         selectedPssHitLevelSetId = document.getElementById("pssSetSelect").value || null;
-        renderVestList(); // different sets can give a category a different size/hit-level — refresh the preview
-        renderVestInventory(); // available sizes can differ per set
+        renderVestList();
+        renderVestInventory();
     }
 
     function currentPssHitLevels() {
@@ -512,13 +501,9 @@
     }
 
     // requiresPlexiHelmet lives on the SELECTED PSS SET document itself
-    // (keyed by age division code, e.g. "cadets"), not on the tournament's
-    // category schema — it's a competition-rule fact tied to which
-    // hit-level table/provider is in force, so it travels with the set.
-    // Looked up lazily (like currentPssHitLevels) rather than baked onto
-    // each flattened category at load time, since loadPssHitLevelSets and
-    // loadPopulatedCategories run concurrently in init() and there's no
-    // guaranteed order between them.
+    // (keyed by age division code), not on the tournament's category
+    // schema. Looked up lazily since loadPssHitLevelSets and
+    // loadPopulatedCategories run concurrently in init().
     function currentRequiresPlexiHelmetMap() {
         const set = pssHitLevelSets.find(s => s.id === selectedPssHitLevelSetId);
         return set ? (set.requiresPlexiHelmet || {}) : {};
@@ -537,9 +522,7 @@
     }
 
     // Looks up pssSize/hitLevel for one leaf category by its weightIndex
-    // (position within its age|gender weight-bracket list) — the chosen
-    // set's array is index-parallel with that list, one entry per
-    // bracket including the open-top one.
+    // — the chosen set's array is index-parallel with the weight list.
     function vestInfoFor(cat) {
         const rows = currentPssHitLevels()[`${cat.ageCode}|${cat.genderCode}`];
         if (!rows || cat.weightIndex == null) return null;
@@ -564,9 +547,7 @@
         }
 
         // Mode is decided ENTIRELY by whether this discipline's schema
-        // has a "weight" dimension — see the isPoomsaeMode declaration
-        // above for why this is a schema signal, not a discipline-name
-        // check.
+        // has a "weight" dimension.
         isPoomsaeMode = !dimensions.some(d => d.key === "weight");
 
         const flat = flattenCategories(dimensions);
@@ -585,20 +566,9 @@
     }
 
     // Same flattening logic as category_manager.html/tournament.html,
-    // plus weightIndex — this category's position within its age|gender
-    // weight-bracket list, which is what vestInfoFor() uses to look up
-    // the matching pssHitLevels row (that array is index-parallel with
-    // this one). weightIndex is meaningless for poomsae (no weight
-    // dimension to index into) and simply goes unused there.
-    //
-    // CHANGE: mirrors tournament.html's parseCategories / category_
-    // manager.html's flattenCategories — each entry_type option can
-    // override age_options/gender_options, and can declare
-    // belt_class_options (Individual/Pairs/Teams Poomsae's Class
-    // D/C/B/A). This MUST stay in lockstep with those two files' same
-    // code-composition rule, or a category code built here won't match
-    // a real registration's code and its roster will silently show as
-    // empty.
+    // plus weightIndex. This MUST stay in lockstep with those two files'
+    // code-composition rule, or a category code built here won't match a
+    // real registration's code and its roster will silently show as empty.
     function flattenCategories(schema) {
         const entryDim = schema.find(d => d.key === "entry_type");
         const ageDim = schema.find(d => d.key === "age");
@@ -640,11 +610,7 @@
                                 code: `${entryOpt.code}_${c.code}`,
                                 ageCode: ageOpt.code, beltClassCode: beltOpt.code || null, genderCode: genderOpt.code, entryTypeCode: entryOpt.code,
                                 ageMin: ageOpt.min, ageMax: ageOpt.max, weightIndex,
-                                // Cross-sport meta on the age division itself, not
-                                // kyorugi-specific — round/break length legitimately
-                                // varies by age (cadets don't fight 2-minute rounds).
-                                // Falls back to a sane default so an older schema
-                                // doc that predates these fields doesn't break.
+                                // Round/break length varies by age division.
                                 roundTime: ageOpt.roundTime || "02:00",
                                 breakTime: ageOpt.breakTime || "01:00",
                                 groupLabel: entryOpt.label,
@@ -658,22 +624,16 @@
         return flat;
     }
 
-    // Read-only — PSS size/hit-level are derived automatically, not
-    // assigned per tournament, so this panel is for visibility, not
-    // data entry.
+    // Read-only — PSS size/hit-level are derived automatically.
     function renderVestList() {
-        if (isPoomsaeMode) return; // pane is hidden entirely — nothing to render
+        if (isPoomsaeMode) return;
         const el = document.getElementById("vestList");
         if (flatCategories.length === 0) {
             el.innerHTML = `<p class="text-muted" style="padding: 0.5rem 0;">No populated categories yet — register some athletes first.</p>`;
             return;
         }
-        // If the SELECTED PSS set has no requiresPlexiHelmet map at all
-        // (an older uploaded document, from before this field existed),
-        // every category silently resolves to "doesn't need plexi" —
-        // categories that actually do need one can then land on any
-        // court, including non-plexi ones, with no warning anywhere else
-        // in the UI. This is exactly that failure mode made visible.
+        // An older PSS set without a requiresPlexiHelmet map silently
+        // resolves every category to "doesn't need plexi" — surface that.
         const plexiMapMissing = Object.keys(currentRequiresPlexiHelmetMap()).length === 0;
         const warning = plexiMapMissing
             ? `<p style="color:#b91c1c; font-size:0.82rem; padding:0.4rem 0; border-bottom:1px solid #fecaca; margin-bottom:0.5rem;">
@@ -699,14 +659,8 @@
 
     // ══════════════════════════════════════════════════════════════════
     // EQUIPMENT: vest inventory (by size+gen), vest gen policy, plexi
-    // helmets. Session-local, same lifecycle as `courts` — see the state
-    // block at the top of this script. KYORUGI ONLY — every function in
-    // this block is simply never called when isPoomsaeMode is true.
+    // helmets. Session-local. KYORUGI ONLY.
     // ══════════════════════════════════════════════════════════════════
-
-    // Auto-derives the size list from whichever PSS set is selected —
-    // same pattern as renderVestList — so admins only fill in COUNTS,
-    // not sizes.
     function allPssSizesInCurrentSet() {
         const sizes = new Set();
         Object.values(currentPssHitLevels()).forEach(rows => rows.forEach(r => sizes.add(r.pssSize)));
@@ -740,9 +694,6 @@
         `).join("");
     }
 
-    // One dropdown per age division actually present among this
-    // tournament's populated categories — no point listing age groups
-    // nobody registered for.
     function renderVestGenPolicyList() {
         if (isPoomsaeMode) return;
         const el = document.getElementById("vestGenPolicyList");
@@ -773,11 +724,9 @@
         return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : 120;
     }
 
-    // Rough duration for EQUIPMENT interval purposes only — never used
-    // for the athlete rest-gap check (that stays position-based,
-    // unchanged from before). Real fights rarely go the full assumed
-    // round count, so this deliberately overestimates a little: better
-    // to hold a vest slightly too long than to double-book it.
+    // Rough duration for EQUIPMENT interval purposes only. Deliberately
+    // overestimates a little: better to hold a vest slightly too long
+    // than to double-book it.
     function estimateMatchDurationSeconds(cat) {
         if (!cat) return 180;
         const round = parseMinSec(cat.roundTime);
@@ -785,40 +734,23 @@
         return round * assumedRoundsPerMatch + brk * (assumedRoundsPerMatch - 1) + 60; // +60s callout/prep buffer
     }
 
-    // Count-based (not serial-number-based) interval tracker: tracks how
-    // many UNITS of a resource key are in simultaneous use, not which
-    // physical vest — enough to answer "is one free", without needing
-    // to route specific physical items between courts.
+    // Count-based interval tracker: how many UNITS of a resource key are
+    // in simultaneous use, not which physical vest.
     function makeEquipmentTracker() {
         return { intervals: {}, plexiIntervals: [] };
     }
 
     // excludeCourtId: a court reusing its OWN previously-used vest never
-    // needs to wait out the transfer buffer — the vest never left that
-    // court, so there's nothing to "transfer." The buffer only matters
-    // when a DIFFERENT court wants the same size/gen. Without this
-    // exclusion, every court's own very next match of the same size
-    // would falsely collide with its own prior match's buffer tail —
-    // that was the actual bug behind conflicts showing up with no other
-    // court fighting at the same time.
+    // needs to wait out the transfer buffer — the buffer only matters
+    // when a DIFFERENT court wants the same size/gen.
     function overlapCount(list, start, end, excludeCourtId) {
         return list.filter(iv => start < iv.end && end > iv.start && iv.courtId !== excludeCourtId).length;
     }
 
-    // Returns { ok, resolvedGen, reason }. Tries gen3 first when policy
-    // is "either" (prefer showcasing newer sensors when there's room),
-    // then gen2. unitsNeeded=2 because both corners in a kyorugi match
-    // wear a vest of the same size.
-    // allowedGens: the COURT's own hard lock (see the court row's "Vest
-    // gen" dropdown) — e.g. a court locked to "gen2" can never resolve
-    // gen3 for a match, even if gen3 inventory is sitting free elsewhere
-    // and the category's own genPolicy would otherwise allow it. This is
-    // intersected with genPolicy's own candidate list; if the two don't
-    // overlap at all (e.g. a "gen3 only" category on a "gen2 only"
-    // court), this court was never a legal home for that category in
-    // the first place — see courtSupportsGenPolicy, which is what keeps
-    // such a court out of eligibleCourtIds before scheduling even
-    // reaches this check.
+    // Returns { ok, resolvedGen, reason }. Tries gen3 first when policy is
+    // "either", then gen2. Two units needed (both corners wear one).
+    // allowedGens is the COURT's own hard vest-gen lock, intersected with
+    // the category's genPolicy.
     function checkVestAvailability(tracker, pssSize, genPolicy, allowedGens, start, end, courtId) {
         const policyCandidates = genPolicy === "either" ? ["gen3", "gen2"] : [genPolicy];
         const candidates = policyCandidates.filter(g => allowedGens.includes(g));
@@ -828,7 +760,7 @@
         for (const gen of candidates) {
             const key = vestKey(pssSize, gen);
             const capacity = vestInventory[key] || 0;
-            if (capacity < 2) continue; // never enough units to cover one match
+            if (capacity < 2) continue;
             const used = overlapCount(tracker.intervals[key] || [], start, end, courtId);
             if (capacity - used >= 2) return { ok: true, resolvedGen: gen };
         }
@@ -836,11 +768,7 @@
     }
 
     // A court whose allowedVestGen is "any" supports every genPolicy.
-    // Otherwise the court's single locked gen must actually be usable by
-    // the category: exact match for a "gen2"/"gen3"-only category, or
-    // simply present as ONE of the two options for an "either" category
-    // (that category can still be scheduled there — checkVestAvailability
-    // above will just never try the other gen on this particular court).
+    // Otherwise the court's single locked gen must be usable by the category.
     function courtSupportsGenPolicy(court, genPolicy) {
         if (!court.allowedVestGen || court.allowedVestGen === "any") return true;
         if (genPolicy === "either") return true;
@@ -862,48 +790,34 @@
         tracker.plexiIntervals.push({ start, end, courtId });
     }
 
-    // Same duration estimate as estimateMatchDurationSeconds, but reads
-    // straight off an already-generated MATCH's own stamped roundTime/
-    // breakTime instead of a flatCategory — used by the revalidator
-    // below, which runs after generation/dragging when we no longer have
-    // (or want to re-derive) the category object.
+    // Same estimate as estimateMatchDurationSeconds, read off a match's
+    // own stamped roundTime/breakTime.
     function estimateMatchDurationSecondsFromMatch(m) {
         const round = parseMinSec(m.roundTime);
         const brk = parseMinSec(m.breakTime);
         return round * assumedRoundsPerMatch + brk * (assumedRoundsPerMatch - 1) + 60;
     }
 
-    // Re-checks vest/plexi availability against the CURRENT courtId +
-    // queuePosition layout of every match — called after initial
-    // generation (to flag anything the guard-limit "relaxed constraints"
-    // overflow path skipped) AND after every manual drag-and-drop (which
-    // can move a match onto a different court/time slot that no longer
-    // has an equipment pairing that was valid before). This is purely
-    // diagnostic: it flags conflicts via m.equipmentConflict without
-    // reassigning courts or bumping anyone — staff fix it by hand.
-    // KYORUGI ONLY — poomsae has no equipment to revalidate.
-    //
-    // Each court's matches are processed in that court's own local
-    // queuePosition order (which is all that's guaranteed meaningful
-    // after a drag — see onColumnDrop, which renumbers 0..N PER COURT,
-    // not globally). To interleave equipment checks across courts in
-    // real time order, this simulates all courts running in parallel: a
-    // priority-queue-style loop that always advances whichever court's
-    // own clock is currently earliest, one match at a time — the
-    // correct way to reconstruct "what's actually happening at once"
-    // once cross-court queuePosition values can no longer be compared
-    // directly against each other.
+    // Re-checks vest/plexi availability against the CURRENT court +
+    // queuePosition layout — after generation and after every drag.
+    // Purely diagnostic: flags m.equipmentConflict, never moves anything.
+    // Simulates all courts in parallel, always advancing whichever court's
+    // clock is earliest. HOLD-AWARE: an empty slot in a court's timeline
+    // (see generateCourtOrdering) is counted as idle court time.
+    // KYORUGI ONLY.
     function revalidateEquipmentAfterManualEdit() {
         if (isPoomsaeMode) return;
         const tracker = makeEquipmentTracker();
         const courtClockSeconds = {};
         const queues = {};
         const pointer = {};
+        const lastSlot = {};
         courts.forEach(c => {
             courtClockSeconds[c.id] = 0;
             pointer[c.id] = 0;
+            lastSlot[c.id] = -1;
             queues[c.id] = generatedMatches
-                .filter(m => m.status !== "walkover" && m.courtId === c.id)
+                .filter(m => m.status !== "walkover" && m.courtId === c.id && m.queuePosition != null)
                 .sort((a, b) => a.queuePosition - b.queuePosition);
         });
 
@@ -916,14 +830,16 @@
                 if (pointer[c.id] >= queues[c.id].length) return;
                 if (bestCourt === null || courtClockSeconds[c.id] < courtClockSeconds[bestCourt.id]) bestCourt = c;
             });
-            if (!bestCourt) break; // safety — shouldn't happen given the remaining count above
+            if (!bestCourt) break;
 
             const m = queues[bestCourt.id][pointer[bestCourt.id]];
             pointer[bestCourt.id]++;
             remaining--;
 
-            const start = courtClockSeconds[bestCourt.id];
             const duration = estimateMatchDurationSecondsFromMatch(m);
+            const holdSlots = Math.max(0, m.queuePosition - lastSlot[bestCourt.id] - 1);
+            lastSlot[bestCourt.id] = m.queuePosition;
+            const start = courtClockSeconds[bestCourt.id] + holdSlots * duration; // a hold is idle court time
             const end = start + duration + transferBufferSeconds;
 
             let conflict = null;
@@ -934,10 +850,7 @@
             }
             if (m.pssSize != null) {
                 // Re-check the SAME generation that was already resolved
-                // (falling back to "either" if none) rather than letting
-                // it float freely — silently reassigning an athlete's
-                // vest generation after the fact would be confusing on
-                // the equipment handout sheet.
+                // (falling back to "either" if none).
                 const allowedGens = (!bestCourt.allowedVestGen || bestCourt.allowedVestGen === "any") ? ["gen2", "gen3"] : [bestCourt.allowedVestGen];
                 const vestCheck = checkVestAvailability(tracker, m.pssSize, m.resolvedVestGen || "either", allowedGens, start, end, bestCourt.id);
                 if (!vestCheck.ok) {
@@ -962,7 +875,6 @@
 
     // ══════════════════════════════════════════════════════════════════
     // PLACEMENT STRATEGIES — seed 1..N -> bracket slot positions.
-    // Registry: add more here (e.g. "points").
     // ══════════════════════════════════════════════════════════════════
 
     // Textbook seeding table via recursive halving: seed 1 & 2 land in
@@ -985,82 +897,205 @@
         return slots;
     }
 
-    // Starts from standard placement, then runs a greedy local-swap pass
-    // trying to separate same-club/same-country entries that landed in
-    // the same round-1 pair. This is a best-effort optimization, not a
-    // guarantee — with enough entries from one club, some proximity can
-    // be mathematically unavoidable. conflictCount on the return value
-    // reports how many round-1 pairs still clash after swapping.
+    // ══════════════════════════════════════════════════════════════════
+    // HARD LOCK #2 — no same-club pairing in round 1 unless unavoidable.
     //
-    // FIX: the swap search now tries all four possible one-for-one
-    // swaps between the clashing pair (a, b) and a candidate pair
-    // (c, d) — a<->c, a<->d, b<->c, b<->d — instead of only ever trying
-    // b<->c. The old version gave up on a candidate pair entirely the
-    // moment that one specific swap didn't work, even when a different
-    // swap against the SAME candidate pair would have cleanly resolved
-    // both sides (e.g. c clashes with a, but d doesn't — the old code
-    // never tried b<->d or a<->d). `null` (a bye slot) never clashes
-    // with anything, so it's also now treated as a valid swap partner
-    // instead of being skipped outright.
-    function placeClubCountrySpread(seededEntries, bracketSize) {
-        let slots = placeStandard(seededEntries, bracketSize);
+    // Solves the round-1 pairing EXACTLY (branch-and-bound over perfect
+    // matchings, most-constrained entry first) and proves the minimum:
+    //   primary cost   = same-club pairs (weight 1000) — the hard lock
+    //   secondary cost = same-country pairs (weight 1) — only a tie-break,
+    //                    so a national event where everyone shares one
+    //                    country still gets a club-clean draw.
+    // Phase 1 keeps byes on the top seeds (normal seeding). Only if a
+    // same-club pair is still left does phase 2 let byes move to whoever
+    // needs one to break the clash (the lock beats seeding).
+    // Pairs are then laid into the standard seed positions by their best
+    // seed, so seed 1 and 2 still land in opposite halves.
+    // ══════════════════════════════════════════════════════════════════
+    function sameClub(a, b) {
+        return !!(a && b && a.clubId && b.clubId && a.clubId === b.clubId);
+    }
+    function sameCountry(a, b) {
+        return !!(a && b && a.country && b.country && a.country === b.country);
+    }
+    const CLUB_CLASH_COST = 1000;
+    const COUNTRY_CLASH_COST = 1;
+    const SEEDING_NODE_LIMIT = 40000; // search budget per phase; result is still the best found if hit
 
-        function pairClash(a, b) {
-            if (!a || !b) return false;
-            return (a.clubId && a.clubId === b.clubId) || (a.country && a.country === b.country);
+    // items: [{ entry, byeCost? } | { bye: true }] — two byes may never pair.
+    function solveMinClashPairing(items, nodeLimit) {
+        const n = items.length;
+        if (n === 0) return { cost: 0, pairs: [], proven: true };
+
+        const C = [];
+        for (let i = 0; i < n; i++) {
+            const row = new Array(n);
+            for (let j = 0; j < n; j++) {
+                const a = items[i], b = items[j];
+                if (i === j || (a.bye && b.bye)) row[j] = Infinity;
+                else if (a.bye) row[j] = b.byeCost || 0;
+                else if (b.bye) row[j] = a.byeCost || 0;
+                else row[j] = (sameClub(a.entry, b.entry) ? CLUB_CLASH_COST : 0)
+                    + (sameCountry(a.entry, b.entry) ? COUNTRY_CLASH_COST : 0);
+            }
+            C.push(row);
         }
 
-        let improved = true, iterations = 0;
-        while (improved && iterations < 200) {
-            improved = false;
-            iterations++;
-            for (let i = 0; i < slots.length; i += 2) {
-                const a = slots[i], b = slots[i + 1];
-                if (!pairClash(a, b)) continue;
+        const used = new Array(n).fill(false);
+        let freeByes = items.filter(x => x.bye).length;
+        let freeReals = n - freeByes;
+        const cur = [];
+        let best = Infinity, bestPairs = null, nodes = 0, exhausted = true;
 
-                let swapped = false;
-                for (let j = 0; j < slots.length && !swapped; j += 2) {
-                    if (j === i) continue;
-                    const c = slots[j], d = slots[j + 1];
+        function dfs(acc) {
+            if (++nodes > nodeLimit) { exhausted = false; return; }
 
-                    // Try every one-for-one swap between {a, b} and
-                    // {c, d} that would clear BOTH pairs at once. Order
-                    // matters only for readability here — the first one
-                    // that works is taken, same "greedy, first fit"
-                    // spirit as before.
-                    if (!pairClash(a, c) && !pairClash(b, d)) {
-                        slots[i + 1] = c; slots[j] = b;
-                        swapped = true;
-                    } else if (!pairClash(a, d) && !pairClash(b, c)) {
-                        slots[i + 1] = d; slots[j + 1] = b;
-                        swapped = true;
-                    } else if (!pairClash(b, c) && !pairClash(a, d)) {
-                        slots[i] = c; slots[j] = a;
-                        swapped = true;
-                    } else if (!pairClash(b, d) && !pairClash(a, c)) {
-                        slots[i] = d; slots[j + 1] = a;
-                        swapped = true;
-                    }
+            // Most-constrained unpaired item + admissible lower bound in
+            // one pass: every pair costs at least the mean of its two
+            // members' cheapest remaining options.
+            let pick = -1, pickMin = -1, pickCount = Infinity, lbSum = 0;
+            for (let i = 0; i < n; i++) {
+                if (used[i]) continue;
+                let min = Infinity, count = 0;
+                for (let j = 0; j < n; j++) {
+                    if (used[j] || j === i) continue;
+                    const c = C[i][j];
+                    if (c < min) { min = c; count = 1; } else if (c === min) count++;
                 }
-                if (swapped) { improved = true; break; }
+                if (min === Infinity) return;
+                lbSum += min;
+                if (min > pickMin || (min === pickMin && count < pickCount)) { pick = i; pickMin = min; pickCount = count; }
+            }
+            if (pick === -1) {
+                if (acc < best) { best = acc; bestPairs = cur.slice(); }
+                return;
+            }
+            if (acc + lbSum / 2 >= best) return;
+
+            const partners = [];
+            for (let j = 0; j < n; j++) if (!used[j] && j !== pick && C[pick][j] !== Infinity) partners.push(j);
+            partners.sort((x, y) => C[pick][x] - C[pick][y]);
+
+            used[pick] = true;
+            for (const j of partners) {
+                if (acc + C[pick][j] >= best) break;
+                const bothReal = !items[pick].bye && !items[j].bye;
+                if (bothReal && freeByes > freeReals - 2) continue; // would strand a bye with no real partner
+                used[j] = true; cur.push([pick, j]);
+                if (bothReal) freeReals -= 2; else { freeReals -= 1; freeByes -= 1; }
+                dfs(acc + C[pick][j]);
+                if (bothReal) freeReals += 2; else { freeReals += 1; freeByes += 1; }
+                cur.pop(); used[j] = false;
+                if (!exhausted) break;
+            }
+            used[pick] = false;
+        }
+        dfs(0);
+
+        return {
+            cost: best,
+            pairs: bestPairs ? bestPairs.map(([i, j]) => [items[i], items[j]]) : null,
+            proven: exhausted && bestPairs !== null,
+        };
+    }
+
+    // -> { pairs: [[entry, entry|null]], clubClashes, proven, byesMoved }
+    function bestRound1Pairing(seededEntries, bracketSize) {
+        const byeCount = bracketSize - seededEntries.length;
+        const clubCount = cost => Math.floor((cost + 1e-6) / CLUB_CLASH_COST);
+
+        const byeHolders = seededEntries.slice(0, byeCount);
+        const phase1 = solveMinClashPairing(seededEntries.slice(byeCount).map(e => ({ entry: e })), SEEDING_NODE_LIMIT);
+        let best = {
+            pairs: [...byeHolders.map(e => [e, null]), ...(phase1.pairs || []).map(([a, b]) => [a.entry, b.entry])],
+            clubClashes: clubCount(phase1.cost),
+            proven: clubCount(phase1.cost) === 0 || (byeCount === 0 && phase1.proven),
+            byesMoved: false,
+        };
+
+        if (byeCount > 0 && best.clubClashes > 0) {
+            // Tiny seed-index cost keeps byes on top seeds among equally good options.
+            const items = seededEntries.map((e, idx) => ({ entry: e, byeCost: idx * 1e-4 }));
+            for (let k = 0; k < byeCount; k++) items.push({ bye: true });
+            const phase2 = solveMinClashPairing(items, SEEDING_NODE_LIMIT);
+            if (phase2.pairs && clubCount(phase2.cost) < best.clubClashes) {
+                best = {
+                    pairs: phase2.pairs.map(([a, b]) => a.bye ? [b.entry, null] : b.bye ? [a.entry, null] : [a.entry, b.entry]),
+                    clubClashes: clubCount(phase2.cost),
+                    proven: phase2.proven,
+                    byesMoved: true,
+                };
+            } else {
+                best.proven = phase2.proven; // full search, nothing better exists
             }
         }
 
-        let conflictCount = 0;
-        for (let i = 0; i < slots.length; i += 2) if (pairClash(slots[i], slots[i + 1])) conflictCount++;
-        slots.conflictCount = conflictCount;
+        // Counting lower bound: a club with k entrants needs k partners
+        // from outside it (other clubs or byes), so at least
+        // ceil((k - others - byes) / 2) same-club pairs are forced.
+        // If the search already hit that bound, the result is proven.
+        if (!best.proven) {
+            const perClub = {};
+            seededEntries.forEach(e => { if (e.clubId) perClub[e.clubId] = (perClub[e.clubId] || 0) + 1; });
+            const forced = Object.values(perClub).reduce((mx, k) =>
+                Math.max(mx, Math.ceil(Math.max(0, k - (seededEntries.length - k) - byeCount) / 2)), 0);
+            if (best.clubClashes <= forced) best.proven = true;
+        }
+        return best;
+    }
+
+    function placePairsIntoBracket(pairs, bracketSize) {
+        const order = standardSeedSlotOrder(bracketSize);
+        const positions = [];
+        for (let p = 0; p < bracketSize / 2; p++) positions.push({ p, key: Math.min(order[2 * p], order[2 * p + 1]) });
+        positions.sort((a, b) => a.key - b.key);
+
+        const seedOf = e => (e ? e.seed : Infinity);
+        const normalized = pairs
+            .map(([a, b]) => (seedOf(a) <= seedOf(b) ? [a, b] : [b, a]))
+            .sort((x, y) => seedOf(x[0]) - seedOf(y[0]));
+
+        const slots = new Array(bracketSize).fill(null);
+        normalized.forEach((pair, k) => {
+            const p = positions[k].p;
+            slots[2 * p] = pair[0];
+            slots[2 * p + 1] = pair[1];
+        });
         return slots;
     }
 
+    function annotateRound1(slots, pairing) {
+        let club = 0, country = 0;
+        for (let i = 0; i < slots.length; i += 2) {
+            if (sameClub(slots[i], slots[i + 1])) club++;
+            if (sameCountry(slots[i], slots[i + 1])) country++;
+        }
+        slots.conflictCount = club;
+        slots.countryConflictCount = country;
+        slots.minClubClashes = pairing.clubClashes;
+        slots.minClashProven = pairing.proven;
+        slots.byesMoved = pairing.byesMoved;
+        return slots;
+    }
+
+    function placeClubSpread(seededEntries, bracketSize) {
+        const pairing = bestRound1Pairing(seededEntries, bracketSize);
+        return annotateRound1(placePairsIntoBracket(pairing.pairs, bracketSize), pairing);
+    }
+
+    // "Standard" still places by seed only, but also computes the true
+    // minimum so the checker can flag avoidable same-club pairs.
+    function placeStandardChecked(seededEntries, bracketSize) {
+        return annotateRound1(placeStandard(seededEntries, bracketSize), bestRound1Pairing(seededEntries, bracketSize));
+    }
+
     const PLACEMENT_STRATEGIES = {
-        standard: placeStandard,
-        club_country_spread: placeClubCountrySpread,
+        standard: placeStandardChecked,
+        club_country_spread: placeClubSpread,
     };
 
-    // Builds a corner object from a roster entry the same way every
-    // bracket system needs to — pulled out to a shared top-level
-    // function so the new poomsae systems (cut_off / round_robin) don't
-    // have to duplicate generateSingleElimination's own private copy.
+    // Builds a corner object from a roster entry — shared by every
+    // bracket system.
     function cornerFromEntry(e) {
         return e
             ? { entryId: e.entryId, athleteIds: e.athleteIds, name: e.name, country: e.country, clubId: e.clubId }
@@ -1068,7 +1103,7 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // BRACKET SYSTEMS — Registry: add round_robin / cut_off here later.
+    // BRACKET SYSTEMS
     // ══════════════════════════════════════════════════════════════════
     function nextPowerOfTwo(n) {
         let p = 1;
@@ -1082,12 +1117,8 @@
         const conflictCount = slots.conflictCount || 0;
 
         // slotIndex per entry — the STRUCTURAL position each entry starts
-        // at, independent of match outcomes. This is what lets the club
-        // sheet (see computeEntryFights) list every fight an entry COULD
-        // have across the whole bracket, not just ones already resolved:
-        // the round-by-round match index + corner an entry lands in is a
-        // pure function of this starting slot, walked forward via
-        // floor(index/2) each round — nothing about who actually wins.
+        // at, used by the club sheet (computeEntryFightsByPhase) to list
+        // every fight an entry COULD have across the whole bracket.
         const entrySlotIndex = {};
         slots.forEach((entry, idx) => { if (entry) entrySlotIndex[entry.entryId] = idx; });
 
@@ -1105,38 +1136,20 @@
             for (let i = 0; i < numMatches; i++) {
                 const matchId = `${categoryCode}_r${roundNum}_m${i + 1}`;
                 let blue, red, status, winnerEntryId = null;
-                // The walkover winner's ENTIRE corner object, copied
-                // wholesale into whatever match is next for them — no id,
-                // no lookup, nothing to reconstruct. This is a plain
-                // JS object assignment, done once, right here, before
-                // this walkover match is even finished being built.
+                // The walkover winner's ENTIRE corner object, copied into
+                // whatever match is next for them.
                 let winnerCorner = null;
-
-                // Denormalizes name/country/clubId straight onto the
-                // corner at the moment an entry is known — so every
-                // consumer downstream (bracket sheet, court queue,
-                // TkStrikeServer) reads a fight's who-is-fighting info
-                // directly off the match doc, no separate athlete lookup.
-                function cornerFrom(slotEntry) {
-                    return slotEntry
-                        ? { entryId: slotEntry.entryId, athleteIds: slotEntry.athleteIds, name: slotEntry.name, country: slotEntry.country, clubId: slotEntry.clubId }
-                        : { entryId: null, source: null };
-                }
 
                 if (roundNum === 1) {
                     const p1 = slots[i * 2], p2 = slots[i * 2 + 1];
-                    blue = cornerFrom(p1);
-                    red = cornerFrom(p2);
-                    // winnerCorner is set RIGHT HERE, not in a later pass —
-                    // the next round is built later in this SAME function
-                    // call and pastes this exact object into its own
-                    // blue/red directly.
+                    blue = cornerFromEntry(p1);
+                    red = cornerFromEntry(p2);
                     if (p1 && !p2) {
                         status = "walkover";
-                        winnerCorner = { entryId: p1.entryId, athleteIds: p1.athleteIds, name: p1.name, country: p1.country, clubId: p1.clubId };
+                        winnerCorner = cornerFromEntry(p1);
                     } else if (p2 && !p1) {
                         status = "walkover";
-                        winnerCorner = { entryId: p2.entryId, athleteIds: p2.athleteIds, name: p2.name, country: p2.country, clubId: p2.clubId };
+                        winnerCorner = cornerFromEntry(p2);
                     } else if (p1 && p2) {
                         status = "ready";
                     } else {
@@ -1144,11 +1157,8 @@
                     }
                 } else {
                     const m1 = prevRoundMatches[i * 2], m2 = prevRoundMatches[i * 2 + 1];
-                    // Straight paste of the walkover match's winnerCorner —
-                    // same object shape as any known entry. A real,
-                    // not-yet-fought feeder gets a source pointer instead,
-                    // resolved later by the cloud function once that fight
-                    // actually happens.
+                    // Straight paste of a walkover's winnerCorner; a real,
+                    // not-yet-fought feeder gets a source pointer instead.
                     blue = m1.status === "walkover"
                         ? m1.winnerCorner
                         : { entryId: null, source: { matchId: m1.matchId, slot: "winner" } };
@@ -1163,7 +1173,7 @@
                     matchId, categoryCode, round: roundNum, matchNumber: i + 1,
                     roundPhase: roundPhaseCode(playersEnteringRound),
                     blue, red, status, winnerEntryId,
-                    winnerCorner, // internal use only, for pasting into the next round — never sent to Firestore (walkovers are filtered out entirely before push, see pushToFirebase)
+                    winnerCorner, // internal only — walkovers are never pushed (see pushToFirebase)
                     courtId: null, queuePosition: null,
                 });
             }
@@ -1174,38 +1184,26 @@
             roundNum++;
         }
 
-        return { rounds, conflictCount, bracketSize, entrySlotIndex };
+        return {
+            rounds, conflictCount, bracketSize, entrySlotIndex,
+            minClubClashes: slots.minClubClashes ?? null,
+            minClashProven: slots.minClashProven ?? null,
+            byesMoved: !!slots.byesMoved,
+        };
     }
 
     // ── POOMSAE: cut-off (solo, judged) ─────────────────────────────────
-    // Every entrant performs once, alone — there IS no opponent, not just
-    // an unfilled one. `red` is genuinely absent (undefined) on every
-    // match here, not an empty object, so the UI and push payload both
-    // have to treat "no red" as a real, valid state rather than an
-    // incomplete one.
+    // Every entrant performs once, alone — `red` is genuinely null.
     //
     // STRUCTURE, when `structure` is "auto":
-    //   20+ entrants -> Preliminary Round (PR, everyone) -> ceil(N/2)
-    //                    advance -> Semi-Final (SF) -> 8 advance -> Final (F)
-    //   9-19 entrants -> Semi-Final (SF, everyone) -> 8 advance -> Final (F)
-    //   <=8 entrants  -> Final (F, everyone) — nothing to cut, one round
-    // When `structure` is "final_only": always exactly one Final round,
-    // everyone included, regardless of count.
+    //   20+ entrants -> Preliminary Round (PR) -> ceil(N/2) -> Semi-Final (SF) -> 8 -> Final (F)
+    //   9-19 entrants -> Semi-Final (SF) -> 8 -> Final (F)
+    //   <=8 entrants  -> Final (F)
+    // "final_only": always exactly one Final round.
     //
-    // PRE-CREATED PLACEHOLDERS: only Round 1's matches have a real
-    // performer in `blue`. Every match in a LATER round is generated as
-    // a PLACEHOLDER — blue is `{ entryId: null, pendingAdvancement: true,
-    // fromRoundIndex: r }`, status "pending" (same status kyorugi's own
-    // elimination already uses for "a match will happen here, opponent
-    // not known yet"). Deciding WHO fills each placeholder is explicitly
-    // NOT this page's job — the slot count and stage structure are fully
-    // determined by the entrant count alone, so matchId, matchNumber,
-    // and (via generatePoomsaeCourtOrdering) courtId/queuePosition/
-    // displayNumber are all fixed at generation time regardless of who
-    // ends up in them. An external process (e.g. a cloud function once
-    // scores are recorded) writes the winning entryId directly onto the
-    // already-existing Firestore doc for that pre-created match — it
-    // never needs to create a new doc or invent a number.
+    // Later rounds are pre-created PLACEHOLDERS (blue.pendingAdvancement)
+    // with fixed matchId / number / court / position. An external process
+    // writes the advancing entryId onto the existing doc later.
     function generateCutOff(categoryCode, entries, structure) {
         const n = entries.length;
         let stageCodes;
@@ -1219,14 +1217,9 @@
             stageCodes = ["F"];
         }
 
-        // How many advance OUT of each stage (i.e. how many slots the
-        // NEXT stage needs). PR cuts to half (rounded up); anything
-        // feeding directly into F always cuts to exactly 8 — unless
-        // fewer than 8 are entering that stage to begin with, in which
-        // case everyone who's left simply goes straight to the Final.
         function slotsForNextStage(fromCount, fromStageCode) {
             if (fromStageCode === "PR") return Math.ceil(fromCount / 2);
-            return Math.min(8, fromCount); // SF -> F (or, in the 2-stage case, the implicit "everyone already in SF" -> F)
+            return Math.min(8, fromCount);
         }
 
         const rounds = [];
@@ -1250,12 +1243,6 @@
                         format: "solo",
                     });
                 } else {
-                    // Placeholder — genuinely nobody assigned yet.
-                    // matchId, matchNumber, and (once
-                    // generatePoomsaeCourtOrdering runs) courtId/
-                    // queuePosition/displayNumber are all still fixed
-                    // regardless — only `blue.entryId` is left for an
-                    // external process to fill in later.
                     roundMatches.push({
                         matchId: `${categoryCode}_${stageCode}_perf${i + 1}`,
                         categoryCode, round: stageIdx + 1, matchNumber: matchCounter++,
@@ -1275,11 +1262,8 @@
     }
 
     // ── POOMSAE: round robin (head-to-head) ─────────────────────────────
-    // Standard circle method: fix entry 0, rotate everyone else through
-    // N-1 rounds so every pair meets exactly once and nobody fights
-    // twice in the same round. An odd entry count gets a null "bye" slot
-    // added — whoever draws it simply sits that round out (no match
-    // generated, not a walkover; round robin has no concept of one).
+    // Circle method: fix entry 0, rotate the rest through N-1 rounds. An
+    // odd entry count gets a null "bye" seat — whoever draws it sits out.
     function generateRoundRobin(categoryCode, entries) {
         const list = entries.slice();
         if (list.length % 2 === 1) list.push(null);
@@ -1306,7 +1290,7 @@
                 }
             }
             if (roundMatches.length > 0) rounds.push(roundMatches);
-            arr = [arr[0], arr[n - 1], ...arr.slice(1, n - 1)]; // rotate all but the fixed first seat
+            arr = [arr[0], arr[n - 1], ...arr.slice(1, n - 1)];
         }
 
         return { rounds, bracketSize: n, entrySlotIndex: {}, conflictCount: 0 };
@@ -1319,328 +1303,487 @@
     };
 
     // ══════════════════════════════════════════════════════════════════
-    // COURT ORDERING — schedules the WHOLE tournament, every round of
-    // every category, not just the immediately-playable round 1.
+    // COURT ORDERING (KYORUGI) — HARD LOCKS #1 and #3
     //
-    // The global position index (shared across all courts, since they
-    // run in parallel) still drives the rest-gap constraint exactly as
-    // before, but now also encodes DEPENDENCY: a round-N match can't be
-    // scheduled before both of its own feeder matches (whichever
-    // position they land at, on whatever court) — that's a structural
-    // fact even when we don't yet know WHO will actually play it.
+    // Timeline: every court runs "slots" 0,1,2,... at the same pace, so
+    // slot t on court A happens roughly together with slot t on court B.
+    // queuePosition IS the slot. A slot with no match is a HOLD — the
+    // court waits one fight's worth of time. Holds are what make lock #1
+    // always satisfiable: if nothing on a court can legally go next, the
+    // court idles instead of breaking the rest gap.
     //
-    // Rounds are processed layer by layer across every bracket together
-    // (all of round 1, everywhere, before any round 2 starts) rather
-    // than finer-grained interleaving by real dependency-readiness. This
-    // is a deliberate simplification: since round 1 always vastly
-    // outnumbers later rounds, per-court pacing already roughly aligns
-    // rounds in practice, and the alternative buys little for real
-    // added complexity in an already-heuristic scheduler.
+    // Lock #3: each category is assigned to exactly one court up front
+    // (fight-count balancing, LPT) and its matches are only ever
+    // scheduled there. Plexi / vestNumbers are soft preferences inside
+    // that assignment; the vest-gen court lock stays a hard filter.
     //
-    // Matches with unknown participants (status "pending") skip the
-    // athlete-specific gap check entirely — there's no athlete ID to
-    // check yet — and instead just respect their dependency-derived
-    // earliest position plus the court's own minGap as a buffer, on the
-    // reasonable assumption that whoever the eventual winner is will
-    // still want roughly that much rest before playing again.
+    // Lock #1: two matches that CAN contain the same athlete must be at
+    // least `need` slots apart (need = max minGap of both courts). "Can
+    // contain" uses the set of every athlete who could reach a match
+    // (feeder subtree), so it also covers not-yet-known winners and
+    // athletes entered in several categories on different courts.
     //
-    // EQUIPMENT: plexi-helmet categories can ONLY use plexi-capable
-    // courts — a hard eligibility filter, same shape the old vestNumbers
-    // filter used to be. Vest SIZE is no longer a hard filter though:
-    // court.vestNumbers is now a soft preference (tie-break only) used
-    // to minimize how often a vest actually has to be physically carried
-    // between courts, while the REAL vest-size/generation constraint is
-    // enforced precisely via a count-based interval tracker keyed on
-    // each court's own estimated running clock (see estimateMatchDurationSeconds
-    // / checkVestAvailability / checkPlexiAvailability). This is what
-    // makes cross-court vest borrowing safe: a candidate is only placed
-    // if enough units of its size+gen (or plexi helmets) are free for
-    // the whole estimated duration of the match plus a transfer buffer.
-    //
-    // KYORUGI ONLY — see generatePoomsaeCourtOrdering below for the
-    // much simpler poomsae equivalent.
+    // Equipment stays soft: a court waits up to 2 slots for a free vest /
+    // helmet, then places anyway with scheduledWithRelaxedConstraints
+    // (equipment only — hard locks still hold) and the revalidator flags it.
     // ══════════════════════════════════════════════════════════════════
-    function generateCourtOrdering(brackets) {
-        const activeCourts = courts;
-        const feederLookup = {};
-        brackets.forEach(b => b.rounds.forEach(round => round.forEach(m => { feederLookup[m.matchId] = m; })));
+    function courtById(id) { return courts.find(c => c.id === id) || null; }
 
-        const categoryMeta = {};
+    function courtGap(courtId) {
+        const c = courtById(courtId);
+        return c ? Math.max(0, parseInt(c.minGapBetweenSameAthlete) || 0) : 0;
+    }
+
+    function feederMatchesOf(m, lookup) {
+        return [m.blue, m.red]
+            .filter(p => p && p.source && p.source.matchId)
+            .map(p => lookup[p.source.matchId])
+            .filter(f => f && f.status !== "walkover");
+    }
+
+    // m._possibleAthletes: every athleteId that could appear in m. Internal
+    // only — pushToFirebase maps explicit fields, so it is never sent.
+    function computePossibleAthletes(brackets) {
+        const lookup = {};
+        brackets.forEach(b => b.rounds.forEach(r => r.forEach(m => { lookup[m.matchId] = m; })));
+        brackets.forEach(b => b.rounds.forEach(round => round.forEach(m => {
+            const set = new Set();
+            [m.blue, m.red].forEach(p => {
+                if (!p) return;
+                if (p.athleteIds && p.athleteIds.length > 0) p.athleteIds.forEach(id => set.add(id));
+                else if (p.source && lookup[p.source.matchId] && lookup[p.source.matchId]._possibleAthletes) {
+                    lookup[p.source.matchId]._possibleAthletes.forEach(id => set.add(id));
+                }
+            });
+            m._possibleAthletes = set;
+        })));
+    }
+
+    function restGapViolation(match, courtId, slot, appearancesByAthlete) {
+        const ids = match._possibleAthletes;
+        if (!ids || ids.size === 0) return null;
+        const ownGap = courtGap(courtId);
+        for (const id of ids) {
+            const list = appearancesByAthlete[id];
+            if (!list) continue;
+            for (const a of list) {
+                if (a.matchId === match.matchId) continue;
+                const need = Math.max(ownGap, courtGap(a.courtId));
+                const between = Math.abs(slot - a.slot) - 1;
+                if (between < need) return { athleteId: id, otherMatchId: a.matchId, between, need };
+            }
+        }
+        return null;
+    }
+
+    function recordAppearance(match, courtId, slot, appearancesByAthlete) {
+        (match._possibleAthletes || new Set()).forEach(id => {
+            (appearancesByAthlete[id] = appearancesByAthlete[id] || []).push({ matchId: match.matchId, courtId, slot });
+        });
+    }
+
+    function buildCategoryMeta(brackets) {
+        const meta = {};
         brackets.forEach(b => {
             const cat = flatCategories.find(c => c.code === b.categoryCode);
             const info = cat ? vestInfoFor(cat) : null;
-            const requiresPlexiHelmet = categoryRequiresPlexiHelmet(cat);
             const genPolicy = info ? info.vestGenPolicy : "either";
-            // eligibleCourtIds only enforces the HARD vest-gen lock now —
-            // that's a genuine physical impossibility (a gen2-only court
-            // can never produce a gen3 vest). Plexi is NOT filtered here
-            // anymore: checkPlexiAvailability (helmet count + transfer
-            // buffer, further down) already enforces the real physical
-            // constraint on ITS OWN, independent of which court hosts the
-            // match — a helmet can be carried over just like a vest can.
-            // The Plexi checkbox on a court is now a SOFT preference (see
-            // the candidate sort below): plexi categories incline toward
-            // plexi-marked courts, but the hard fight-count threshold can
-            // still send some to a non-plexi court to keep courts
-            // balanced, same as any other category.
-            const eligibleCourts = activeCourts.filter(c => info == null || courtSupportsGenPolicy(c, genPolicy));
-            categoryMeta[b.categoryCode] = {
-                eligibleCourtIds: eligibleCourts.map(c => c.id),
+            meta[b.categoryCode] = {
+                eligibleCourtIds: courts.filter(c => info == null || courtSupportsGenPolicy(c, genPolicy)).map(c => c.id),
                 avgBirthYear: cat ? (cat.ageMin + cat.ageMax) / 2 : 0,
                 pssSize: info ? info.pssSize : null,
                 genPolicy,
-                requiresPlexiHelmet,
+                requiresPlexiHelmet: categoryRequiresPlexiHelmet(cat),
                 durationSeconds: estimateMatchDurationSeconds(cat),
                 homeCourtId: null,
             };
         });
+        return meta;
+    }
+
+    // LOCK #3: one court per category. Pinned categories (dragged to a
+    // court by staff) go first; the rest by LPT on fight count.
+    function assignCategoriesToCourts(brackets, categoryMeta) {
+        const load = {};
+        courts.forEach(c => { load[c.id] = 0; });
+        const unassignable = [];
+
+        const items = brackets.map(b => ({
+            b, meta: categoryMeta[b.categoryCode],
+            count: b.rounds.reduce((s, r) => s + r.filter(m => m.status !== "walkover").length, 0),
+        })).filter(x => x.count > 0);
+
+        const place = (x, court) => { x.meta.homeCourtId = court.id; x.b.courtId = court.id; load[court.id] += x.count; };
+
+        const free = [];
+        items.forEach(x => {
+            const pinId = categoryCourtPins[x.b.categoryCode];
+            const pinned = pinId && x.meta.eligibleCourtIds.includes(pinId) ? courtById(pinId) : null;
+            if (pinned) place(x, pinned); else free.push(x);
+        });
+
+        free.sort((a, b) => b.count - a.count);
+        free.forEach(x => {
+            const eligible = courts.filter(c => x.meta.eligibleCourtIds.includes(c.id));
+            if (eligible.length === 0) { x.b.courtId = null; unassignable.push(x.b); return; }
+            let best = null, bestScore = Infinity;
+            eligible.forEach(c => {
+                let score = load[c.id];
+                if (x.meta.requiresPlexiHelmet && !c.plexiCapable) score += courtBalanceThreshold;
+                const vn = c.vestNumbers || [];
+                if (x.meta.pssSize != null && vn.length > 0 && !vn.includes(x.meta.pssSize)) score += 0.5;
+                if (score < bestScore) { best = c; bestScore = score; }
+            });
+            place(x, best);
+        });
+        return { load, unassignable };
+    }
+
+    function checkEquipmentFor(meta, court, tracker, start) {
+        const end = start + meta.durationSeconds + transferBufferSeconds;
+        if (meta.requiresPlexiHelmet) {
+            const p = checkPlexiAvailability(tracker, start, end, court.id);
+            if (!p.ok) return { ok: false, reason: p.reason };
+        }
+        let resolvedGen = null;
+        if (meta.pssSize != null) {
+            const allowedGens = (!court.allowedVestGen || court.allowedVestGen === "any") ? ["gen2", "gen3"] : [court.allowedVestGen];
+            const v = checkVestAvailability(tracker, meta.pssSize, meta.genPolicy, allowedGens, start, end, court.id);
+            if (!v.ok) return { ok: false, reason: v.reason };
+            resolvedGen = v.resolvedGen;
+        }
+        return { ok: true, start, end, resolvedGen };
+    }
+
+    function generateCourtOrdering(brackets) {
+        const lookup = {};
+        brackets.forEach(b => b.rounds.forEach(r => r.forEach(m => { lookup[m.matchId] = m; })));
+        computePossibleAthletes(brackets);
+
+        // Re-runnable (moveCategoryToCourt calls this again) — start clean.
+        brackets.forEach(b => b.rounds.forEach(r => r.forEach(m => {
+            m.courtId = null; m.queuePosition = null;
+            delete m.scheduledWithRelaxedConstraints; delete m.unassignedReason;
+            delete m.resolvedVestGen; delete m.equipmentConflict;
+        })));
+
+        const categoryMeta = buildCategoryMeta(brackets);
+        const { load, unassignable } = assignCategoriesToCourts(brackets, categoryMeta);
 
         const unassigned = [];
-        const placed = []; // {position, athleteIds} across the WHOLE tournament so far — feeds the athlete rest-gap check
+        unassignable.forEach(b => b.rounds.forEach(r => r.forEach(m => {
+            if (m.status === "walkover") return;
+            m.unassignedReason = "no court supports this category's required vest generation";
+            unassigned.push(m);
+        })));
+
+        const pending = {};
+        courts.forEach(c => { pending[c.id] = []; });
+        brackets.forEach(b => {
+            const meta = categoryMeta[b.categoryCode];
+            if (!meta.homeCourtId || !pending[meta.homeCourtId]) return;
+            b.rounds.forEach((round, roundIdx) => round.forEach(m => {
+                if (m.status !== "walkover") pending[meta.homeCourtId].push({ match: m, meta, roundIdx });
+            }));
+        });
+        // Round first (interleaves this court's categories, which is what
+        // gives athletes their rest), then the court's age order.
+        courts.forEach(c => pending[c.id].sort((a, b) => {
+            if (a.roundIdx !== b.roundIdx) return a.roundIdx - b.roundIdx;
+            const age = c.ageOrder === "youngest_first"
+                ? b.meta.avgBirthYear - a.meta.avgBirthYear
+                : a.meta.avgBirthYear - b.meta.avgBirthYear;
+            if (age !== 0) return age;
+            if (a.match.categoryCode !== b.match.categoryCode) return a.match.categoryCode < b.match.categoryCode ? -1 : 1;
+            return a.match.matchNumber - b.match.matchNumber;
+        }));
+
         const tracker = makeEquipmentTracker();
-        const courtClockSeconds = {}; // per-court estimated running time — drives ONLY the equipment interval checks now, not court ordering
-        const courtMatchCount = {};   // per-court count of matches actually scheduled so far — THIS is the hard-balanced quantity, per fight count not estimated time
-        activeCourts.forEach(c => { courtClockSeconds[c.id] = 0; courtMatchCount[c.id] = 0; });
+        const appearances = {};
+        const clock = {}, equipWait = {}, holdSlots = {}, avgDuration = {};
+        courts.forEach(c => {
+            const list = pending[c.id];
+            clock[c.id] = 0; equipWait[c.id] = 0; holdSlots[c.id] = 0;
+            avgDuration[c.id] = list.length ? list.reduce((s, p) => s + p.meta.durationSeconds, 0) / list.length : 180;
+        });
 
-        function minMatchCount() {
-            return activeCourts.reduce((min, c) => Math.min(min, courtMatchCount[c.id]), Infinity);
-        }
+        let remaining = courts.reduce((n, c) => n + pending[c.id].length, 0);
+        const maxGap = courts.reduce((g, c) => Math.max(g, courtGap(c.id)), 0);
+        const MAX_EQUIPMENT_WAIT = 2;
+        const maxTicks = remaining * (maxGap + MAX_EQUIPMENT_WAIT + 2) + 100;
+        let placedCount = 0;
 
-        let globalPosition = 0;
-        let totalScheduled = 0;
-        const maxRounds = brackets.reduce((max, b) => Math.max(max, b.rounds.length), 0);
+        for (let t = 0; remaining > 0 && t < maxTicks; t++) {
+            for (const court of courts) {
+                const list = pending[court.id];
+                if (list.length === 0) continue;
 
-        for (let roundIdx = 0; roundIdx < maxRounds; roundIdx++) {
-            const roundPool = [];
-            brackets.forEach(b => {
-                const round = b.rounds[roundIdx];
-                if (!round) return;
-                round.forEach(m => {
-                    if (m.status === "walkover") return; // resolves instantly — never needs a court slot
-                    const meta = categoryMeta[b.categoryCode];
-                    if (meta.eligibleCourtIds.length === 0) {
-                        m.unassignedReason = "no court supports this category's required vest generation";
-                        unassigned.push(m);
-                        return;
-                    }
+                let firstValid = -1, equipPick = -1, equipResult = null;
+                for (let i = 0; i < list.length; i++) {
+                    const cand = list[i];
+                    // Structure: feeders must already be on the timeline, earlier.
+                    const feedersDone = feederMatchesOf(cand.match, lookup)
+                        .every(f => f.queuePosition != null && f.queuePosition < t);
+                    if (!feedersDone) continue;
+                    // HARD LOCK #1
+                    if (restGapViolation(cand.match, court.id, t, appearances)) continue;
 
-                    // Earliest position this match may be scheduled at:
-                    // one slot after whichever of its feeder matches
-                    // lands latest, wherever that ends up. Round 1 has
-                    // no feeders, so it's always 0.
-                    let earliestPosition = 0;
-                    [m.blue, m.red].forEach(p => {
-                        if (p.source && feederLookup[p.source.matchId]) {
-                            const feeder = feederLookup[p.source.matchId];
-                            if (feeder.queuePosition != null) earliestPosition = Math.max(earliestPosition, feeder.queuePosition + 1);
-                        }
-                    });
-
-                    const knownAthleteIds = m.status === "ready" ? [...(m.blue.athleteIds || []), ...(m.red.athleteIds || [])] : null;
-                    roundPool.push({ match: m, meta, athleteIds: knownAthleteIds, earliestPosition });
-                });
-            });
-            if (roundPool.length === 0) continue;
-
-            const remainingByCourtId = {};
-            activeCourts.forEach(c => {
-                const candidates = roundPool.filter(p => p.meta.eligibleCourtIds.includes(c.id));
-                candidates.sort((a, b) => {
-                    // 1) SOFT home-court affinity — a category already
-                    // anchored to THIS court sorts first, an unclaimed
-                    // category is next, a category anchored to a
-                    // DIFFERENT court sorts last (only picked up here as
-                    // a last resort, when nothing better fits this
-                    // slot). This is a preference only — the hard fight-
-                    // count threshold below is what can actually force a
-                    // category to spread across courts when needed.
-                    const aHome = a.meta.homeCourtId === c.id ? 0 : a.meta.homeCourtId ? 2 : 1;
-                    const bHome = b.meta.homeCourtId === c.id ? 0 : b.meta.homeCourtId ? 2 : 1;
-                    if (aHome !== bHome) return aHome - bHome;
-
-                    // 2) SOFT plexi preference — a category that needs a
-                    // plexi helmet inclines toward courts checked "Plexi"
-                    // (mainly matters here on ROUND 1, before any home
-                    // court exists yet; tier 1 above then keeps it there
-                    // for later rounds). NOT a hard filter — the real
-                    // physical constraint is checkPlexiAvailability
-                    // (helmet count + transfer buffer) further down,
-                    // which doesn't care which court the checkbox is on.
-                    // The hard fight-count threshold can still push some
-                    // plexi matches onto a non-plexi court once the
-                    // preferred court is running too far ahead — that's
-                    // the "majority there, a few elsewhere for balance"
-                    // behavior this is meant to produce.
-                    const aPlexiPref = a.meta.requiresPlexiHelmet ? (c.plexiCapable ? 0 : 1) : 0;
-                    const bPlexiPref = b.meta.requiresPlexiHelmet ? (c.plexiCapable ? 0 : 1) : 0;
-                    if (aPlexiPref !== bPlexiPref) return aPlexiPref - bPlexiPref;
-
-                    // 3) vestNumbers soft preference (tie-break only).
-                    const aPref = (c.vestNumbers || []).includes(a.meta.pssSize) ? 0 : 1;
-                    const bPref = (c.vestNumbers || []).includes(b.meta.pssSize) ? 0 : 1;
-                    if (aPref !== bPref) return aPref - bPref;
-
-                    // 4) age order, as before.
-                    return c.ageOrder === "youngest_first" ? b.meta.avgBirthYear - a.meta.avgBirthYear : a.meta.avgBirthYear - b.meta.avgBirthYear;
-                });
-                remainingByCourtId[c.id] = candidates;
-            });
-
-            const assignedIds = new Set();
-            let position = globalPosition;
-            let guard = 0;
-
-            while (assignedIds.size < roundPool.length && guard < roundPool.length * 6 + 30) {
-                guard++;
-                let placedThisRow = false;
-                // Courts behind on FIGHT COUNT get first claim on the
-                // next slot each tick — this is what keeps the two
-                // courts' match counts converging instead of drifting.
-                const courtsByCount = activeCourts.slice().sort((a, b) => courtMatchCount[a.id] - courtMatchCount[b.id]);
-                const floorCount = minMatchCount();
-
-                for (const court of courtsByCount) {
-                    const queue = remainingByCourtId[court.id];
-                    let pickIndex = -1;
-                    let pickEquip = null;
-
-                    // HARD THRESHOLD: once this court is already
-                    // courtBalanceThreshold fights ahead of the
-                    // currently least-busy court, it may not take
-                    // another match this tick — UNLESS that specific
-                    // candidate has genuinely nowhere else to go (e.g. a
-                    // plexi/gen-restricted category whose only eligible
-                    // court is this one), in which case forcing it here
-                    // is unavoidable and correctness wins over balance.
-                    const overThreshold = courtMatchCount[court.id] - floorCount >= courtBalanceThreshold;
-
-                    for (let i = 0; i < queue.length; i++) {
-                        const cand = queue[i];
-                        if (assignedIds.has(cand.match.matchId)) continue;
-                        if (position < cand.earliestPosition) continue; // its feeder(s) haven't happened by this point yet
-
-                        if (overThreshold) {
-                            const hasAlternative = cand.meta.eligibleCourtIds.some(id => id !== court.id);
-                            if (hasAlternative) continue; // let the lagging court(s) catch up first
-                        }
-
-                        if (cand.athleteIds) {
-                            const violates = placed.some(p =>
-                                Math.abs(p.position - position) < court.minGapBetweenSameAthlete &&
-                                p.athleteIds.some(id => cand.athleteIds.includes(id))
-                            );
-                            if (violates) continue;
-                        }
-
-                        // Equipment check, using this court's own
-                        // estimated running clock as the candidate
-                        // window's start.
-                        const start = courtClockSeconds[court.id];
-                        const end = start + cand.meta.durationSeconds + transferBufferSeconds;
-
-                        if (cand.meta.requiresPlexiHelmet) {
-                            const plexiCheck = checkPlexiAvailability(tracker, start, end, court.id);
-                            if (!plexiCheck.ok) { cand.match.unassignedReason = plexiCheck.reason; continue; }
-                        }
-                        let vestCheck = { ok: true, resolvedGen: null };
-                        if (cand.meta.pssSize != null) {
-                            const allowedGens = (!court.allowedVestGen || court.allowedVestGen === "any") ? ["gen2", "gen3"] : [court.allowedVestGen];
-                            vestCheck = checkVestAvailability(tracker, cand.meta.pssSize, cand.meta.genPolicy, allowedGens, start, end, court.id);
-                            if (!vestCheck.ok) { cand.match.unassignedReason = vestCheck.reason; continue; }
-                        }
-
-                        pickIndex = i;
-                        pickEquip = { start, end, vestCheck, requiresPlexiHelmet: cand.meta.requiresPlexiHelmet };
-                        break;
-                    }
-                    if (pickIndex === -1) continue;
-
-                    const chosen = queue[pickIndex];
-                    chosen.match.courtId = court.id;
-                    chosen.match.queuePosition = position;
-                    delete chosen.match.unassignedReason;
-                    if (!chosen.meta.homeCourtId) chosen.meta.homeCourtId = court.id; // soft preference, anchored on first placement
-
-                    // Commit position-based (rest-gap) and time-based
-                    // (equipment) bookkeeping together, only once a
-                    // candidate has passed every check.
-                    placed.push({ position, athleteIds: chosen.athleteIds || [] });
-                    if (pickEquip.requiresPlexiHelmet) reservePlexi(tracker, pickEquip.start, pickEquip.end, court.id);
-                    if (pickEquip.vestCheck.resolvedGen) {
-                        reserveVest(tracker, chosen.meta.pssSize, pickEquip.vestCheck.resolvedGen, pickEquip.start, pickEquip.end, court.id);
-                        chosen.match.resolvedVestGen = pickEquip.vestCheck.resolvedGen; // stamped for the live queue / club sheets
-                    }
-                    // Next match on this court starts when THIS one ends
-                    // — the transfer buffer only matters for equipment
-                    // reused on a DIFFERENT court, not this court's own
-                    // next match.
-                    courtClockSeconds[court.id] = pickEquip.end - transferBufferSeconds;
-                    courtMatchCount[court.id]++;
-
-                    assignedIds.add(chosen.match.matchId);
-                    totalScheduled++;
-                    placedThisRow = true;
+                    if (firstValid === -1) firstValid = i;
+                    const eq = checkEquipmentFor(cand.meta, court, tracker, clock[court.id]);
+                    if (eq.ok) { equipPick = i; equipResult = eq; break; }
                 }
-                position++;
-                if (!placedThisRow) position++;
+
+                let pickIdx = -1, relaxed = false;
+                if (equipPick !== -1) {
+                    pickIdx = equipPick;
+                } else if (firstValid !== -1) {
+                    if (equipWait[court.id] < MAX_EQUIPMENT_WAIT) equipWait[court.id]++; // wait a slot for equipment
+                    else { pickIdx = firstValid; relaxed = true; }
+                }
+
+                if (pickIdx === -1) { // HOLD
+                    clock[court.id] += avgDuration[court.id];
+                    holdSlots[court.id]++;
+                    continue;
+                }
+
+                const cand = list.splice(pickIdx, 1)[0];
+                const m = cand.match;
+                m.courtId = court.id;
+                m.queuePosition = t;
+                recordAppearance(m, court.id, t, appearances);
+
+                const start = clock[court.id];
+                if (relaxed) {
+                    m.scheduledWithRelaxedConstraints = true;
+                } else {
+                    if (cand.meta.requiresPlexiHelmet) reservePlexi(tracker, equipResult.start, equipResult.end, court.id);
+                    if (equipResult.resolvedGen) {
+                        reserveVest(tracker, cand.meta.pssSize, equipResult.resolvedGen, equipResult.start, equipResult.end, court.id);
+                        m.resolvedVestGen = equipResult.resolvedGen;
+                    }
+                }
+                clock[court.id] = start + cand.meta.durationSeconds;
+                equipWait[court.id] = 0;
+                remaining--;
+                placedCount++;
             }
-
-            // Anything left after the guard limit (genuinely unsatisfiable
-            // within this round — often the fight-count threshold itself
-            // stalling every court at once) gets appended right after:
-            // dependency respected, gap/age-order/equipment/threshold all
-            // ignored — scheduled late beats not scheduled. Prefers the
-            // category's home court when it's eligible, otherwise the
-            // currently least-busy eligible court. Flagged so the UI can
-            // warn staff this one wasn't fully constraint-checked.
-            roundPool.forEach(p => {
-                if (assignedIds.has(p.match.matchId)) return;
-                const eligible = activeCourts.filter(c => p.meta.eligibleCourtIds.includes(c.id));
-                let court = p.meta.homeCourtId ? eligible.find(c => c.id === p.meta.homeCourtId) : null;
-                if (!court) court = eligible.slice().sort((a, b) => courtMatchCount[a.id] - courtMatchCount[b.id])[0];
-                if (!court) { unassigned.push(p.match); return; }
-                const pos = Math.max(position, p.earliestPosition);
-                p.match.courtId = court.id;
-                p.match.queuePosition = pos;
-                p.match.unassignedReason = null;
-                p.match.scheduledWithRelaxedConstraints = true;
-                if (!p.meta.homeCourtId) p.meta.homeCourtId = court.id;
-                placed.push({ position: pos, athleteIds: p.athleteIds || [] });
-                courtClockSeconds[court.id] += p.meta.durationSeconds;
-                courtMatchCount[court.id]++;
-                totalScheduled++;
-                position = pos + 1;
-            });
-
-            globalPosition = position;
         }
 
-        return { placedCount: totalScheduled, unassigned };
+        // Only reachable if the tick budget ran out — never silently place a violator.
+        courts.forEach(c => pending[c.id].forEach(p => {
+            p.match.unassignedReason = "hard locks could not be satisfied within the scheduling limit";
+            unassigned.push(p.match);
+        }));
+
+        return { placedCount, unassigned, courtLoad: load, holdSlots };
+    }
+
+    // After a manual reorder: keep each court's ORDER, re-lay it on the
+    // shared timeline, inserting the minimum holds so lock #1 still holds.
+    // Returns false only if the order itself breaks a feeder dependency
+    // (onColumnDrop rejects those before calling this).
+    function resolveCourtTimelines() {
+        computePossibleAthletes(generatedBrackets);
+        const queues = {}, ptr = {}, newSlot = {};
+        courts.forEach(c => {
+            queues[c.id] = generatedMatches
+                .filter(m => m.status !== "walkover" && m.courtId === c.id && m.queuePosition != null)
+                .sort((a, b) => a.queuePosition - b.queuePosition);
+            ptr[c.id] = 0;
+        });
+
+        let remaining = courts.reduce((n, c) => n + queues[c.id].length, 0);
+        const maxGap = courts.reduce((g, c) => Math.max(g, courtGap(c.id)), 0);
+        const maxTicks = remaining * (maxGap + 2) + 100;
+        const appearances = {};
+
+        for (let t = 0; remaining > 0 && t < maxTicks; t++) {
+            courts.forEach(c => {
+                const q = queues[c.id];
+                if (ptr[c.id] >= q.length) return;
+                const m = q[ptr[c.id]];
+                const feedersDone = feederMatchesOf(m, matchById)
+                    .every(f => f.courtId == null || (newSlot[f.matchId] != null && newSlot[f.matchId] < t));
+                if (!feedersDone) return;
+                if (restGapViolation(m, c.id, t, appearances)) return; // hold this slot
+                newSlot[m.matchId] = t;
+                recordAppearance(m, c.id, t, appearances);
+                ptr[c.id]++;
+                remaining--;
+            });
+        }
+
+        courts.forEach(c => {
+            let last = -1;
+            queues[c.id].forEach(m => {
+                m.queuePosition = newSlot[m.matchId] != null ? newSlot[m.matchId] : last + 1;
+                last = m.queuePosition;
+            });
+        });
+        return remaining === 0;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // HARD-LOCK CHECKER — independent of how the schedule was produced
+    // (generator, drag, or future code). Push is blocked unless report.ok.
+    // ══════════════════════════════════════════════════════════════════
+    function validateHardLocks() {
+        const report = { restGap: [], firstRound: [], categoryCourt: [], dependency: [], notes: [], ok: true };
+        if (generatedBrackets.length === 0) return report;
+
+        const labelOf = {};
+        generatedBrackets.forEach(b => { labelOf[b.categoryCode] = b.categoryLabel; });
+        const courtLabel = id => (courtById(id) || {}).label || id;
+
+        // LOCK #3 — one court per category, every real match on a court
+        generatedBrackets.forEach(b => {
+            const real = b.rounds.flat().filter(m => m.status !== "walkover");
+            if (real.length === 0) return;
+            const ids = [...new Set(real.filter(m => m.courtId).map(m => m.courtId))];
+            if (ids.length > 1) report.categoryCourt.push(`${b.categoryLabel}: split across ${ids.map(courtLabel).join(", ")}`);
+            const off = real.filter(m => !m.courtId);
+            if (off.length > 0) {
+                report.categoryCourt.push(`${b.categoryLabel}: ${off.length} match(es) not on any court${off[0].unassignedReason ? ` (${off[0].unassignedReason})` : ""}`);
+            }
+        });
+
+        if (!isPoomsaeMode) {
+            const scheduled = generatedMatches.filter(m => m.status !== "walkover" && m.courtId && m.queuePosition != null);
+
+            // Structure — feeder before dependent, same court
+            scheduled.forEach(m => {
+                feederMatchesOf(m, matchById).forEach(f => {
+                    if (!f.courtId) return;
+                    if (f.courtId !== m.courtId || f.queuePosition >= m.queuePosition) {
+                        report.dependency.push(`${formatMatchNumber(m)} (${labelOf[m.categoryCode]}) runs before its feeder ${formatMatchNumber(f)}`);
+                    }
+                });
+            });
+
+            // LOCK #1 — consecutive appearances per athlete are enough to check
+            computePossibleAthletes(generatedBrackets);
+            const byAthlete = {};
+            scheduled.forEach(m => (m._possibleAthletes || new Set()).forEach(id => {
+                (byAthlete[id] = byAthlete[id] || []).push(m);
+            }));
+            const seen = new Set();
+            Object.values(byAthlete).forEach(list => {
+                list.sort((a, b) => a.queuePosition - b.queuePosition);
+                for (let i = 1; i < list.length; i++) {
+                    const a = list[i - 1], b = list[i];
+                    const between = b.queuePosition - a.queuePosition - 1;
+                    const need = Math.max(courtGap(a.courtId), courtGap(b.courtId));
+                    const key = `${a.matchId}|${b.matchId}`;
+                    if (between < need && !seen.has(key)) {
+                        seen.add(key);
+                        report.restGap.push(`${formatMatchNumber(a)} → ${formatMatchNumber(b)}: ${Math.max(0, between)} fight(s) between, needs ${need}`);
+                    }
+                }
+            });
+        }
+
+        // LOCK #2 — same-club round-1 pairs vs. the proven minimum
+        generatedBrackets.filter(b => b.system === "single_elimination").forEach(b => {
+            const clashes = b.rounds[0].filter(m => m.status !== "walkover" && sameClub(m.blue, m.red));
+            const min = b.minClubClashes ?? 0;
+            if (clashes.length > min) {
+                report.firstRound.push(`${b.categoryLabel}: ${clashes.length} same-club first-round pair(s), only ${min} unavoidable — use "Club spread" placement`);
+            } else if (clashes.length > 0) {
+                report.notes.push(`${b.categoryLabel}: ${clashes.length} same-club first-round pair(s), mathematically unavoidable${b.minClashProven ? "" : " (best found — search limit reached)"}`);
+            }
+        });
+
+        report.ok = [report.restGap, report.firstRound, report.categoryCourt, report.dependency].every(l => l.length === 0);
+        return report;
+    }
+
+    function renderHardLockReport(report) {
+        const el = document.getElementById("hardLockReport");
+        if (!el) return;
+        if (generatedBrackets.length === 0) { el.classList.add("hidden"); return; }
+        el.classList.remove("hidden");
+
+        const row = (title, items, applies) => {
+            if (applies === false) {
+                return `<div class="bb-lock-row bb-lock-row--na"><span>–</span><strong>${title}</strong><span class="text-muted">not applicable</span></div>`;
+            }
+            const ok = items.length === 0;
+            const list = ok ? "" : `<ul>${items.slice(0, 6).map(t => `<li>${escapeHtml(t)}</li>`).join("")}${items.length > 6 ? `<li class="text-muted">+${items.length - 6} more</li>` : ""}</ul>`;
+            return `<div class="bb-lock-row ${ok ? "bb-lock-row--ok" : "bb-lock-row--bad"}">
+                <span>${ok ? "✓" : "⛔"}</span><strong>${title}</strong><span>${ok ? "OK" : `${items.length} violation(s)`}</span>${list}
+            </div>`;
+        };
+        const anyElim = generatedBrackets.some(b => b.system === "single_elimination");
+        const notes = report.notes.length
+            ? `<div class="bb-lock-notes">${report.notes.slice(0, 6).map(n => `<div>ℹ ${escapeHtml(n)}</div>`).join("")}${report.notes.length > 6 ? `<div class="text-muted">+${report.notes.length - 6} more</div>` : ""}</div>`
+            : "";
+
+        el.innerHTML = `
+            <div class="bb-pane-header">
+                <h2 class="panel-title" style="font-size:1.05rem;">Hard-lock check</h2>
+                <span class="badge ${report.ok ? "badge-green" : ""}" style="${report.ok ? "" : "background:#fee2e2; color:#b91c1c;"}">${report.ok ? "All locks hold — ready to push" : "Push blocked"}</span>
+            </div>
+            ${row("Rest gap — min fights between the same athlete's matches", report.restGap, !isPoomsaeMode)}
+            ${row("First round — no same-club pair when avoidable", report.firstRound, anyElim)}
+            ${row("One category → one court", report.categoryCourt, true)}
+            ${row("Bracket order — every match after its feeders", report.dependency, !isPoomsaeMode)}
+            ${notes}
+        `;
+    }
+
+    function refreshHardLockReport() {
+        const report = validateHardLocks();
+        renderHardLockReport(report);
+        return report;
+    }
+
+    // Dragging a match to ANOTHER court moves its whole category there
+    // (lock #3) and re-runs the scheduler with that category pinned.
+    function moveCategoryToCourt(categoryCode, courtId) {
+        const bracket = generatedBrackets.find(b => b.categoryCode === categoryCode);
+        const court = courtById(courtId);
+        if (!bracket || !court) { renderCourtColumns(); return; }
+
+        const cat = flatCategories.find(c => c.code === categoryCode);
+        const info = cat ? vestInfoFor(cat) : null;
+        if (info && !courtSupportsGenPolicy(court, info.vestGenPolicy)) {
+            showFlash(`${court.label} is locked to a vest generation ${bracket.categoryLabel} can't use.`, true);
+            renderCourtColumns();
+            return;
+        }
+        if (!confirm(`A category runs on one court only. Move ALL of "${bracket.categoryLabel}" to ${court.label}?\n\nCourt order will be recomputed — manual reordering is lost.`)) {
+            renderCourtColumns();
+            return;
+        }
+        categoryCourtPins[categoryCode] = courtId;
+        lastOrderingResult = generateCourtOrdering(generatedBrackets);
+        computeMatchNumbers();
+        revalidateEquipmentAfterManualEdit();
+        rebuildMatchById();
+        refreshHardLockReport();
+        renderCourtColumns();
+        renderBracketsPreview();
+    }
+
+    function dependencyOrderViolation(orderedCourtMatches) {
+        const idx = {};
+        orderedCourtMatches.forEach((m, i) => { idx[m.matchId] = i; });
+        for (const m of orderedCourtMatches) {
+            for (const f of feederMatchesOf(m, matchById)) {
+                if (idx[f.matchId] != null && idx[f.matchId] > idx[m.matchId]) {
+                    return `Match ${formatMatchNumber(m)} can't run before its feeder ${formatMatchNumber(f)}.`;
+                }
+            }
+        }
+        return null;
     }
 
     // ── POOMSAE: simple court balancer ──────────────────────────────────
-    // No vests, no plexi, no rest-gap solver — "similar total length per
-    // court" is the entire goal. CHANGE: a whole CATEGORY is now the
-    // unit that gets assigned to a court, not each individual match —
-    // a real poomsae "Area" runs one continuous list of categories, one
-    // at a time, not several categories' performances interleaved on
-    // the same mat. Splitting one category across courts would also
-    // make "Area: N" meaningless on the printed running sheet.
-    //
-    // Categories are placed using the classic LPT (Longest Processing
-    // Time first) bin-packing heuristic: sort by total estimated
-    // duration descending, always drop the next one onto whichever
-    // court currently has the least accumulated time. EVERY match slot
-    // counts toward a category's duration and gets a court/position —
-    // including a cut-off's still-undetermined later-stage placeholders
-    // (see generateCutOff): the STRUCTURE (how many slots exist, in
-    // which stage) is fully fixed by the entrant count alone, so there's
-    // nothing to wait on to schedule them. Only WHO fills a placeholder
-    // is unknown, and that's resolved entirely outside this page.
-    //
-    // Within a court, its assigned categories run youngest-to-oldest —
-    // your ordering request now governs the WITHIN-court order, while
-    // cross-court placement is decided by the balance heuristic.
+    // No vests, no plexi, no rest-gap solver. A whole CATEGORY is the unit
+    // assigned to a court (lock #3 holds by construction). LPT bin-packing
+    // by total estimated duration; within a court, youngest-to-oldest.
+    // Every slot counts, including cut-off placeholders.
     function generatePoomsaeCourtOrdering(brackets) {
         if (courts.length === 0) return { placedCount: 0, unassigned: [] };
 
@@ -1650,10 +1793,10 @@
 
         const sized = brackets.map(b => {
             const perMatch = b.durationSeconds || poomsaeSecondsPerPerformance;
-            const matchCount = b.rounds.reduce((s, r) => s + r.length, 0); // every slot, resolved or not
+            const matchCount = b.rounds.reduce((s, r) => s + r.length, 0);
             return { bracket: b, totalSeconds: matchCount * perMatch };
         });
-        sized.sort((a, b) => b.totalSeconds - a.totalSeconds); // LPT: biggest first for better balance
+        sized.sort((a, b) => b.totalSeconds - a.totalSeconds);
 
         sized.forEach(({ bracket: b, totalSeconds }) => {
             let best = courts[0];
@@ -1670,10 +1813,6 @@
             ordered.forEach(b => {
                 b.rounds.forEach(round => {
                     round.forEach(m => {
-                        // Scheduled regardless of whether blue is a real
-                        // performer or still a pendingAdvancement
-                        // placeholder — see the function's own doc
-                        // comment above for why that's safe.
                         m.courtId = c.id;
                         m.queuePosition = pos++;
                         placedCount++;
@@ -1685,36 +1824,20 @@
         return { placedCount, unassigned: [] };
     }
 
-    // Derives each match's display fight number ("101", "315") from its
-    // FINAL court+position assignment — kyorugi-specific: first digit(s)
-    // = the court's ordinal (1st court, 2nd court...), last two digits =
-    // that match's 1-indexed position within just that court's own
-    // queue (not the global position used for scheduling). Recomputed
-    // any time court/position assignments change (generation, or a
-    // drag-and-drop reorder), since it's a pure function of them.
-    // KYORUGI ONLY — poomsae uses computeMatchNumbersPoomsae below.
+    // KYORUGI fight numbers: court ordinal * 100 + 1-indexed position in
+    // that court's queue (holds don't consume a number).
     function computeMatchNumbers() {
         courts.forEach((court, courtIdx) => {
             const ordinal = courtIdx + 1;
             const courtMatches = generatedMatches
-                .filter(m => m.courtId === court.id)
+                .filter(m => m.courtId === court.id && m.queuePosition != null)
                 .sort((a, b) => a.queuePosition - b.queuePosition);
             courtMatches.forEach((m, i) => { m.displayNumber = ordinal * 100 + (i + 1); });
         });
     }
 
-    // POOMSAE numbering: one continuous sequence — 001, 002, 003... —
-    // across the WHOLE event, not split by court like kyorugi's
-    // hundreds-per-court scheme. Since every court runs at the same
-    // assumed pace (one flat per-match duration), the correct
-    // chronological interleaving across courts is just "round-robin by
-    // position": whichever match is 1st on each court happens roughly
-    // together, then whichever is 2nd on each court, and so on. Runs
-    // once, right after generatePoomsaeCourtOrdering, and numbers
-    // EVERY scheduled match — including a cut-off's still-undetermined
-    // later-stage placeholders, which already have a court/position by
-    // this point (see that function's own doc comment for why that's
-    // safe to do before knowing who's actually competing).
+    // POOMSAE numbering: one continuous 001, 002... sequence across the
+    // whole event, interleaved round-robin by position across courts.
     function computeMatchNumbersPoomsae() {
         const byCourt = courts.map(c => generatedMatches
             .filter(m => m.courtId === c.id)
@@ -1734,9 +1857,6 @@
         }
     }
 
-    // "1" -> "001" — poomsae's display convention. Kyorugi's own
-    // "101"/"315" numbers are already the right shape and pass through
-    // unchanged.
     function formatMatchNumber(m) {
         if (m.displayNumber == null) return "—";
         return isPoomsaeMode ? String(m.displayNumber).padStart(3, "0") : String(m.displayNumber);
@@ -1762,8 +1882,6 @@
             showFlash("Add and save at least one court first.", true);
             return;
         }
-        // PSS hit-level table only matters for kyorugi (vest size lookup)
-        // — poomsae has no vests to size.
         if (!isPoomsaeMode && !selectedPssHitLevelSetId) {
             showFlash("No PSS hit-level table selected — upload one via upload_pss_hitlevels.py first.", true);
             return;
@@ -1779,9 +1897,7 @@
         let totalConflicts = 0;
         let skippedSingleEntryCount = 0;
 
-        // Poomsae processes categories youngest-first, per your request —
-        // kyorugi's own processing order is untouched (whatever order
-        // flatCategories came back in from the schema/roster fetch).
+        // Poomsae processes categories youngest-first; kyorugi keeps schema order.
         const categoryOrder = isPoomsaeMode
             ? flatCategories.slice().sort((a, b) => (a.ageMin ?? 0) - (b.ageMin ?? 0))
             : flatCategories;
@@ -1811,10 +1927,7 @@
             });
             if (entries.length === 0) continue;
 
-            // A cut-off performance needs no opponent — even a single
-            // entrant has a real (if trivial) bracket. Every other
-            // system (single elimination, round robin, and kyorugi's
-            // own) genuinely needs at least 2 to have anything to build.
+            // A cut-off performance needs no opponent — every other system needs 2+.
             if (systemKey !== "cut_off" && entries.length < 2) {
                 skippedSingleEntryCount++;
                 continue;
@@ -1831,18 +1944,14 @@
                 const structureEl = document.getElementById("cutOffStructureSelect");
                 built = bracketFn(cat.code, seeded, structureEl ? structureEl.value : "auto");
             } else {
-                built = bracketFn(cat.code, seeded); // round_robin — no placement strategy or structure to apply
+                built = bracketFn(cat.code, seeded);
             }
 
-            // Vest size / hit-level / plexi are kyorugi-only concepts —
-            // poomsae matches simply never get them set.
             const vestInfo = isPoomsaeMode ? null : vestInfoFor(cat);
             built.rounds.forEach(roundMatches => roundMatches.forEach(m => {
                 m.pssSize = vestInfo ? vestInfo.pssSize : null;
                 m.hitLevel = vestInfo ? vestInfo.hitLevel : null;
                 m.pssHitLevelSetId = isPoomsaeMode ? null : selectedPssHitLevelSetId;
-                // Same idea for round/break length — a property of the
-                // AGE DIVISION (see flattenCategories), not the match.
                 m.roundTime = cat.roundTime;
                 m.breakTime = cat.breakTime;
                 m.requiresPlexiHelmet = isPoomsaeMode ? false : categoryRequiresPlexiHelmet(cat);
@@ -1859,40 +1968,44 @@
                 rounds: built.rounds,
                 bracketSize: built.bracketSize,
                 entrySlotIndex: built.entrySlotIndex,
-                ageMin: cat.ageMin, // used by generatePoomsaeCourtOrdering to order categories youngest-first within each court
+                minClubClashes: built.minClubClashes ?? null,
+                minClashProven: built.minClashProven ?? null,
+                ageMin: cat.ageMin,
                 durationSeconds: isPoomsaeMode ? poomsaeSecondsPerPerformance : null,
             });
             built.rounds.forEach(roundMatches => roundMatches.forEach(m => generatedMatches.push(m)));
         }
 
-        // Schedules every round of every category in one pass. Poomsae
-        // uses the simple time-balancer; kyorugi keeps its full
-        // equipment/rest-gap constraint solver, completely untouched.
         const orderingResult = isPoomsaeMode
             ? generatePoomsaeCourtOrdering(generatedBrackets)
             : generateCourtOrdering(generatedBrackets);
         if (isPoomsaeMode) computeMatchNumbersPoomsae(); else computeMatchNumbers();
-        if (!isPoomsaeMode) revalidateEquipmentAfterManualEdit(); // flags conflicts left by the guard-limit overflow path — kyorugi only, poomsae has no equipment
+        if (!isPoomsaeMode) revalidateEquipmentAfterManualEdit();
         rebuildMatchById();
+        lastOrderingResult = orderingResult;
+        const lockReport = refreshHardLockReport();
 
+        const loads = orderingResult.courtLoad
+            ? courts.map(c => `${escapeHtml(c.label)}: ${orderingResult.courtLoad[c.id] || 0}`).join(", ")
+            : "";
         document.getElementById("generateSummary").innerHTML = `
             ${generatedBrackets.length} bracket(s) generated ·
             ${orderingResult.placedCount} match(es) scheduled onto courts ·
+            ${loads ? `fights per court — ${loads} · ` : ""}
             ${skippedSingleEntryCount > 0 ? `<span style="color:#b45309;">${skippedSingleEntryCount} categor${skippedSingleEntryCount === 1 ? "y" : "ies"} skipped (only 1 entrant, nothing to bracket)</span> · ` : ""}
-            ${totalConflicts > 0 ? `<span style="color:#b45309;">${totalConflicts} unavoidable club/country pairing(s)</span> · ` : ""}
-            ${orderingResult.unassigned.length > 0 ? `<span style="color:#b91c1c;">${orderingResult.unassigned.length} match(es) have no eligible court (check vest numbers)</span>` : ""}
+            ${totalConflicts > 0 ? `<span style="color:#b45309;">${totalConflicts} unavoidable same-club first-round pair(s)</span> · ` : ""}
+            ${orderingResult.unassigned.length > 0 ? `<span style="color:#b91c1c;">${orderingResult.unassigned.length} match(es) not scheduled (check vest-gen court locks)</span> · ` : ""}
+            <strong style="color:${lockReport.ok ? "#16a34a" : "#b91c1c"};">${lockReport.ok ? "hard locks OK" : "hard-lock violations — see report"}</strong>
         `;
 
         renderBracketsPreview();
         renderCourtColumns();
         document.getElementById("resultsSection").classList.remove("hidden");
         document.getElementById("pushBtn").disabled = false;
+        document.getElementById("pushBtn").textContent = "Push to Firebase";
     }
 
     // ── Rendering: bracket preview (round-by-round list) ────────────────
-    // matchById is rebuilt whenever matches are (re)generated — used to
-    // resolve a participant's feeder match into a "101 Winner" label
-    // instead of a generic BYE/TBD.
     let matchById = {};
     function rebuildMatchById() {
         matchById = {};
@@ -1902,12 +2015,6 @@
     function renderBracketsPreview() {
         const el = document.getElementById("bracketsPreview");
         el.innerHTML = generatedBrackets.map(b => {
-            // The visual draw-sheet Preview/download makes sense for an
-            // elimination bracket (buildBracketSVG, the tree shape) and
-            // for a cut-off (buildCutOffSheetSVG, the WT-style running
-            // sheet — see its own doc comment). Round-robin's pairing
-            // schedule has no equivalent sheet to draw, so that button
-            // is simply left off there.
             const previewBtn = (b.system === "single_elimination" || b.system === "cut_off")
                 ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openBracketPreview('${b.categoryCode}')">Preview</button>`
                 : "";
@@ -1928,11 +2035,6 @@
         }).join("");
     }
 
-    // Round header text varies by system: elimination counts down to a
-    // real Final, cut-off uses its actual WT stage name (Preliminary
-    // Round / Semi-Final / Final — driven by the roundPhase code every
-    // match in that round was stamped with at generation time, see
-    // generateCutOff), round-robin numbers its legs plainly.
     const CUT_OFF_STAGE_NAMES = { PR: "Preliminary Round", SF: "Semi-Final", F: "Final" };
     function roundGroupLabel(bracket, roundIndex) {
         if (bracket.system === "single_elimination") {
@@ -1945,8 +2047,7 @@
         return `Round ${roundIndex + 1}`;
     }
 
-    // Name plus country code, e.g. "Peter Parker (SVK)" — country is
-    // omitted when the entry doesn't have one on file.
+    // Name plus country code, e.g. "Peter Parker (SVK)".
     function entryNameForMatch(entries, entryId) {
         const e = entries.find(x => x.entryId === entryId);
         const name = e ? e.name : entryId;
@@ -1954,15 +2055,9 @@
         return `${name}${country}`;
     }
 
-    // A participant slot with no entryId yet is one of three things:
-    //   - a genuine permanent bye (no source, not pendingAdvancement —
-    //     that slot will never have an opponent, shown as plain "BYE")
-    //   - fed by an earlier match that hasn't resolved yet (has a
-    //     source — shown as "101 Winner" using that feeder's own
-    //     scheduled fight number, once it's been assigned one)
-    //   - a poomsae cut-off round awaiting advancement (see
-    //     generateCutOff) — shown as "TBD" rather than "BYE", since this
-    //     slot WILL be filled once an external process resolves it.
+    // A participant slot with no entryId yet is a permanent bye ("BYE"),
+    // fed by an unresolved match ("101 Winner"), or a poomsae cut-off
+    // placeholder awaiting advancement ("TBD").
     function participantLabel(entries, participant) {
         if (!participant) return "";
         if (participant.entryId) return entryNameForMatch(entries, participant.entryId);
@@ -1975,10 +2070,7 @@
         return "BYE";
     }
 
-    // CHANGE: a poomsae cut-off match has NO red corner at all — not an
-    // empty placeholder, genuinely absent (m.red is null). Every caller
-    // of this function has to treat that as "solo performance", not as
-    // a bracket slot waiting to be filled.
+    // A poomsae cut-off match has NO red corner at all (m.red is null).
     function renderMatchLine(m, bracket) {
         const n1 = participantLabel(bracket.entries, m.blue);
         const numPrefix = m.displayNumber != null ? `${formatMatchNumber(m)}. ` : "";
@@ -1987,37 +2079,21 @@
             return `<div class="bb-match-line">${numPrefix}${escapeHtml(n1)} <span class="text-muted">— performs solo</span> ${badge}</div>`;
         }
         const n2 = participantLabel(bracket.entries, m.red);
+        const clubClash = bracket.system === "single_elimination" && m.round === 1 && m.status !== "walkover" && sameClub(m.blue, m.red)
+            ? `<span class="badge" style="background:#fef3c7; color:#b45309;" title="Same club in round 1">same club</span>` : "";
         const badge = m.status === "walkover" ? `<span class="badge badge-grey">walkover</span>` : m.status === "pending" ? `<span class="badge badge-grey">pending</span>` : "";
-        return `<div class="bb-match-line">${numPrefix}${escapeHtml(n1)} <span class="text-muted">vs</span> ${escapeHtml(n2)} ${badge}</div>`;
+        return `<div class="bb-match-line">${numPrefix}${escapeHtml(n1)} <span class="text-muted">vs</span> ${escapeHtml(n2)} ${badge} ${clubClash}</div>`;
     }
 
     // ══════════════════════════════════════════════════════════════════
     // BRACKET SHEET — an SVG replica of the standard WT-style draw sheet
     // (mirrored left/right halves converging on a center Final, round
     // labels across the top, numbered connector boxes, classification +
-    // legend blocks at the bottom). This mirrors the LAYOUT of the
-    // reference sheet; it's generated fresh from this app's own data
-    // (names, seeds, match numbers), not a pixel clone of any specific
-    // export — fonts/exact spacing won't match a particular PDF template
-    // byte-for-byte, but the structure and information will.
+    // legend blocks at the bottom). ELIMINATION-SHAPED ONLY.
     //
-    // ELIMINATION-SHAPED ONLY: every function below assumes the
-    // recursive-halving bracket tree single_elimination produces (a
-    // fixed bracketSize, exactly one match per round per pairing,
-    // rounds converging to one Final). It is never called for cut_off
-    // or round_robin brackets — see renderBracketsPreview (Preview
-    // button omitted) and downloadAllBracketsPDF /
-    // buildClubSheetsDoc's entrySlotIndex guard below.
-    //
-    // GEOMETRY: round-1 matches are evenly spaced vertically; every
-    // later round's Y is the average of its two feeder matches' Y —
-    // the standard recursive bracket-tree layout, which is what
-    // naturally produces the "elbow connector" look. The draw is split
-    // at every round (not just round 1) into a left half (first half of
-    // that round's matches) and right half (second half) — since our
-    // seed placement already puts opposite seed halves on opposite
-    // sides of the bracket, this split lines up with the mirrored
-    // layout for free.
+    // GEOMETRY: round-1 matches are evenly spaced vertically; every later
+    // round's Y is the average of its two feeders' Y. The draw is split
+    // at every round into a left half and right half.
     // ══════════════════════════════════════════════════════════════════
     function roundLabelText(playersEntering) {
         if (playersEntering === 2) return "Final";
@@ -2026,10 +2102,7 @@
         return `Round of ${playersEntering}`;
     }
 
-    // Short-code form of the same thing (R32, R16, QF, SF, F) — stored on
-    // each match doc as `roundPhase` for anything that wants a compact
-    // label instead of the full "Quarterfinals" text (scoreboards, court
-    // queue cards, external consoles).
+    // Short-code form (R32, R16, QF, SF, F) stored on each match as `roundPhase`.
     function roundPhaseCode(playersEntering) {
         if (playersEntering === 2) return "F";
         if (playersEntering === 4) return "SF";
@@ -2047,26 +2120,16 @@
         return participantLabel(bracket.entries, participant);
     }
 
-    // Club name for a resolved participant, or "" for BYE / "Winner of"
-    // placeholders — those have no known club yet. Looked up from the
-    // bracket's own entries list, so it's always in sync with whatever
-    // clubName the entry carries (see generateEverything, which pulls it
-    // from the roster's first member).
+    // Club name for a resolved participant, or "" for BYE / "Winner of" placeholders.
     function participantClubName(bracket, participant) {
         if (!participant || !participant.entryId) return "";
         const e = bracket.entries.find(x => x.entryId === participant.entryId);
         return e && e.clubName ? e.clubName : "";
     }
 
-    // A4 landscape @ 96dpi: 297mm x 210mm -> 1123 x 794px. Fixed
-    // regardless of bracket size — spacing (MATCH_H, ROUND_W) is derived
-    // FROM this fixed canvas and the bracket's own structure (how many
-    // rounds, how many round-1 matches per side) instead of the other
-    // way around, so a small bracket gets generously spaced rows filling
-    // the page and a large one compresses gracefully — same tradeoff a
-    // real printed A4 draw sheet has.
+    // A4 landscape @ 96dpi: 297mm x 210mm -> 1123 x 794px.
     const PAGE_W = 1123, PAGE_H = 794;
-    const BOX_HALF_W = 15; // half-width of the match-number badge rect — connector lines stop here, not at its center
+    const BOX_HALF_W = 15; // half-width of the match-number badge rect
 
     function buildBracketSVG(bracket) {
         const HEADER_H = 92, FOOTER_H = 150, MARGIN_X = 16, NAME_W = 190, FINAL_GAP = 70;
@@ -2086,64 +2149,32 @@
             svgParts.push(`<rect x="${(x - BOX_HALF_W).toFixed(1)}" y="${(y - 8).toFixed(1)}" width="${BOX_HALF_W * 2}" height="16" fill="#fff" stroke="#1e293b" stroke-width="1"/>`);
             text(x, y + 3.5, "middle", str, { size: 8.5 });
         }
-        // No live DOM element renders this text (it's built as a plain
-        // string), so a real width still needs measuring some other
-        // way. Canvas 2D's measureText() is the right tool for that: it
-        // measures in actual CSS px at the exact font-family/size given,
-        // matching this SVG's own font-family ("Arial, sans-serif") and
-        // px-based coordinate system with no unit conversion at all —
-        // unlike routing through jsPDF's point-sized font model, which
-        // needs a px<->pt conversion that's easy to get wrong (and did,
-        // in an earlier version of this function: both the connector-
-        // line start AND the club-name left-alignment depend on this
-        // value, which is why a bad width broke both at once for
-        // whichever names it happened to be most wrong on). measureText
-        // always returns a real finite number, even for weird input, so
-        // there's no risk of a NaN silently producing an invisible line.
+        // Canvas 2D measureText() in real CSS px at this SVG's own font.
         function estimateTextWidth(str, fontSize) {
             if (!__measureCanvasCtx) {
                 try { __measureCanvasCtx = document.createElement("canvas").getContext("2d"); } catch (err) { __measureCanvasCtx = null; }
             }
-            if (!__measureCanvasCtx) return String(str ?? "").length * fontSize * 0.55; // canvas unavailable — fall back
+            if (!__measureCanvasCtx) return String(str ?? "").length * fontSize * 0.55;
             __measureCanvasCtx.font = `${fontSize}px Arial, sans-serif`;
             return __measureCanvasCtx.measureText(String(str ?? "")).width;
         }
-        // Draws the two feed lines straight into the badge's own x
-        // position (xOutCenter) — no separate elbow-then-travel segment.
-        // The badge is drawn centered on the resulting vertical bridge,
-        // so the fight number sits exactly where the two fighters' lines
-        // meet, instead of floating further along a trailing connector.
-        // xFeed1/xFeed2 don't need to be equal — a bye's feed naturally
-        // starts closer to xOutCenter than a real feeder's does, and it
-        // just travels a shorter distance to reach the same point.
+        // Two feed lines straight into the badge's x, joined by a vertical bridge.
         function drawMerge(xFeed1, y1, xFeed2, y2, xOutCenter) {
             line(xFeed1, y1, xOutCenter, y1);
             line(xFeed2, y2, xOutCenter, y2);
             line(xOutCenter, y1, xOutCenter, y2);
         }
-        // Single-line elbow (used for the Final, where each side's own
-        // exit point — already correct for both the real-badge and bye
-        // cases, see exitX below — feeds in independently rather than
-        // two feeders merging).
+        // Single-line elbow (used for the Final).
         function drawElbowInto(xFeedEdge, yFeed, xOutCenter, yOut) {
             line(xFeedEdge, yFeed, xOutCenter, yFeed);
             if (yFeed !== yOut) line(xOutCenter, yFeed, xOutCenter, yOut);
         }
 
-        // Trivial case: a 2-entry bracket is just the Final — laid out
-        // the same way as a real round-1 pair (see the general path
-        // below): one fighter on the left margin, one on the right,
-        // each with its own line running in toward the center match
-        // badge. Previously both names were stacked directly on top of
-        // each other in the middle of the page with no lines at all,
-        // which didn't read as a bracket.
+        // Trivial case: a 2-entry bracket is just the Final.
         if (bracketSize <= 2) {
             const finalMatch = bracket.rounds[0][0];
             const cx = totalWidth / 2, cy = HEADER_H + (totalHeight - HEADER_H - FOOTER_H) / 2;
 
-            // Same header strip the multi-round path uses, just a single
-            // "Final" cell — keeps a 2-entrant category looking like a
-            // normal bracket sheet instead of a bare two-line list.
             const headerY = 70, headerH = 18;
             svgParts.push(`<rect x="10" y="${headerY}" width="${totalWidth - 20}" height="${headerH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
             text(cx, 82, "middle", "Final", { bold: true, size: 9 });
@@ -2154,9 +2185,6 @@
             const redClub = participantClubName(bracket, finalMatch.red);
             const nameFontSize = 11, clubFontSize = 10;
 
-            // Blue on the left margin (name right-growing from MARGIN_X),
-            // Red on the right margin (name growing left from the right
-            // edge) — mirrored exactly like round 1 of a real bracket.
             text(MARGIN_X, cy - 1.5, "start", blueName, { size: nameFontSize });
             const blueW = estimateTextWidth(blueName, nameFontSize);
             if (blueClub) text(MARGIN_X, cy + clubFontSize + 0.5, "start", blueClub, { size: clubFontSize, color: "#64748b" });
@@ -2177,12 +2205,6 @@
         const halfCount = bracket.rounds[0].length / 2; // round-1 matches per side
         const centerX = totalWidth / 2;
 
-        // Spacing derived from the fixed page + this bracket's own shape,
-        // not fixed constants — a small bracket (few round-1 matches)
-        // gets a tall MATCH_H filling the available height; a large one
-        // compresses to fit rather than overflowing the page. ROW_H and
-        // the two font sizes are a bit larger than a single-line sheet
-        // needs, since each fighter now gets two lines (name + club).
         const bodyHeight = totalHeight - HEADER_H - FOOTER_H;
         const MATCH_H = bodyHeight / halfCount;
         const ROW_H = Math.min(26, MATCH_H * 0.5);
@@ -2213,14 +2235,8 @@
         }
 
         // ── Round 0: names + connector into the round-1 badge ────────────
-        // A BYE (status "walkover") gets no badge at all — nothing
-        // fought. Each entry's own correct exit x (whether that's a real
-        // badge's edge, or — for a bye — the bare pass-through point
-        // with no offset) is stored directly on its descriptor object as
-        // `.exitX`, so every later stage (the round-2+ merge loop, and
-        // the Final) reads the right value instead of re-deriving it —
-        // that re-derivation is what used to leave a visible gap in a
-        // bye's line before it reached the Final.
+        // A BYE (walkover) gets no badge. Each entry's own exit x is stored
+        // as `.exitX` so later stages read the right value.
         [
             { side: leftRounds[0], nameX: MARGIN_X, anchor: "start", boxX: xRoundLeft(0), dir: 1 },
             { side: rightRounds[0], nameX: totalWidth - MARGIN_X, anchor: "end", boxX: xRoundRight(0), dir: -1 },
@@ -2228,14 +2244,6 @@
             side.forEach((entry) => {
                 const { match, y } = entry;
                 if (match.status === "walkover") {
-                    // Bye: just the one real fighter's name + club,
-                    // centered in the slot — no "BYE" row, no badge
-                    // (nothing fought), straight line through to the
-                    // next real box. Club name is always left-aligned,
-                    // starting at the same x where the NAME text itself
-                    // starts — on the mirrored right side that's not a
-                    // fixed x (the name is right-aligned, so its own
-                    // left edge shifts with how long the name is).
                     const winnerStr = participantDisplay(bracket, match.winnerCorner);
                     const winnerClub = participantClubName(bracket, match.winnerCorner);
                     text(nameX, y - 1.5, anchor, winnerStr, { size: nameFontSize });
@@ -2244,7 +2252,7 @@
                     if (winnerClub) text(nameStartX, y + clubFontSize + 0.5, "start", winnerClub, { size: clubFontSize, color: "#64748b" });
                     const winnerFeedX = dir === 1 ? nameX + nameW + 4 : nameX - nameW - 4;
                     line(winnerFeedX, y, boxX, y);
-                    entry.exitX = boxX; // no badge -> exit edge is the bare box position itself, not offset
+                    entry.exitX = boxX;
                     return;
                 }
 
@@ -2257,12 +2265,6 @@
                 text(nameX, topY - 1.5, anchor, topStr, { size: nameFontSize });
                 text(nameX, botY - 1.5, anchor, botStr, { size: nameFontSize });
 
-                // Line starts right where each fighter's own NAME text
-                // ends. Club text always starts at that same left edge
-                // (dir === 1: that edge is just nameX itself; dir === -1:
-                // the name is right-aligned, so its left edge is nameX
-                // minus its own width) rather than mirroring outward
-                // like the name does.
                 const topW = estimateTextWidth(topStr, nameFontSize);
                 const botW = estimateTextWidth(botStr, nameFontSize);
                 const topStartX = dir === 1 ? nameX : nameX - topW;
@@ -2307,24 +2309,12 @@
         drawElbowInto(lastRight.exitX, lastRight.y, centerX, yFinal);
         badge(centerX, yFinal, formatMatchNumber(finalMatch));
 
-        // ── Round header row: ONE wide bordered strip, dividers between
-        // labels, instead of separate touching-but-distinct boxes ────────
+        // ── Round header row: one wide bordered strip ─────────────────────
         const roundLabels = [];
         for (let r = 0; r < numRounds; r++) roundLabels.push(roundLabelText(bracketSize / Math.pow(2, r)));
 
-        const headerLeftEdge = xRoundLeft(0) - ROUND_W / 2;
-        const headerRightEdge = xRoundRight(0) + ROUND_W / 2;
         const headerY = 70, headerH = 18;
         svgParts.push(`<rect x="${10}" y="${headerY}" width="${totalWidth - 2 * 10}" height="${headerH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
-
-        // const cellCenters = [];
-        // for (let r = 0; r < numRounds - 1; r++) cellCenters.push(xRoundLeft(r));
-        // cellCenters.push(centerX);
-        // for (let r = numRounds - 2; r >= 0; r--) cellCenters.push(xRoundRight(r));
-        // for (let i = 1; i < cellCenters.length; i++) {
-        //     const edgeX = (cellCenters[i - 1] + cellCenters[i]) / 2;
-        //     line(edgeX, headerY, edgeX, headerY + headerH);
-        // }
 
         for (let r = 0; r < numRounds - 1; r++) {
             text(xRoundLeft(r), 82, "middle", roundLabels[r], { bold: true, size: 9 });
@@ -2336,8 +2326,7 @@
     }
 
     // Wraps the connector/name SVG fragments with header text,
-    // classification box, and legend — shared by both the trivial
-    // (2-entry) and general bracket paths.
+    // classification box, and legend.
     function wrapSVG(totalWidth, totalHeight, bodyParts, bracket, centerX, footerTop) {
         footerTop = footerTop || (totalHeight - 150);
         const parts = [];
@@ -2359,7 +2348,7 @@
         parts.push(...bodyParts);
 
         // Classification box
-        const clsX = centerX - 90, clsY = footerTop, clsW = 180, clsH = 92;
+        const clsX = centerX - 90, clsY = footerTop, clsW = 180;
         parts.push(`<rect x="${clsX}" y="${clsY}" width="${clsW}" height="20" fill="none" stroke="#1e293b"/>`);
         parts.push(`<text x="${centerX}" y="${clsY + 14}" text-anchor="middle" font-size="10" font-weight="700">Classification</text>`);
         ["1", "2", "3", "3"].forEach((label, i) => {
@@ -2368,10 +2357,7 @@
             parts.push(`<text x="${clsX + 8}" y="${rowY + 13}" font-size="9">${label}</text>`);
         });
 
-        // Legend — one row, spaced by each item's own text width plus a
-        // fixed gap (not fixed-width grid cells, which either crowd long
-        // entries or leave short ones swimming in space) and no internal
-        // divider lines, just a single outer border around the row.
+        // Legend — one row, spaced by each item's own text width plus a fixed gap.
         const legendY = footerTop + 110;
         const legendMargin = 16;
         const legendW = totalWidth - 2 * legendMargin;
@@ -2397,29 +2383,12 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // CUT-OFF RUNNING SHEET — a table-based SVG sheet, one section per
-    // stage (Preliminary Round / Semi-Final / Final), modeled directly
-    // on a real WT-style scoring sheet: No / Match No / Competitor /
-    // Organization / Poomsae 1 / Poomsae 2 / Total score / Place
-    // columns, scores left blank for judges to fill by hand (this app
-    // has no scoring integration). "Match No" is the match's own
-    // pre-assigned number (see computeMatchNumbersPoomsae) — every row
-    // has one, including a not-yet-determined later-stage row, since
-    // the slot itself is fixed at generation time regardless of who
-    // ends up performing in it.
-    //
-    // PORTRAIT — a real, fixed A4 portrait canvas (794 x 1123 @ 96dpi),
-    // same as an actual printed page, NOT sized to content: an earlier
-    // version computed height from the row count, which produced a
-    // page WIDER than tall (landscape-shaped) for any small category —
-    // exactly the opposite of what portrait mode means. Content that
-    // genuinely overflows a single page (a very large Preliminary
-    // Round) will run past the bottom of this fixed canvas — real
-    // pagination for that case isn't implemented; flagging it as a
-    // known limitation rather than silently cropping or shrinking text.
+    // CUT-OFF RUNNING SHEET — table-based SVG, one section per stage.
+    // Fixed A4 portrait canvas (794 x 1123 @ 96dpi). Very large
+    // Preliminary Rounds can overflow the page (pagination not implemented).
     // ══════════════════════════════════════════════════════════════════
-    const CUTOFF_SHEET_W = 794;  // A4 portrait @ 96dpi
-    const CUTOFF_SHEET_H = 1123; // A4 portrait @ 96dpi
+    const CUTOFF_SHEET_W = 794;
+    const CUTOFF_SHEET_H = 1123;
 
     function buildCutOffSheetSVG(bracket) {
         const MARGIN = 32;
@@ -2444,9 +2413,6 @@
 
         parts.push(`<rect x="0" y="0" width="${totalWidth}" height="${totalHeight}" fill="#ffffff"/>`);
 
-        // ── Header: logos, title (wrapped to 2 lines if long — narrower
-        // page than the elimination sheet, so it wraps sooner), subtitle
-        // (location + date), category line. No stats box — removed.
         if (leftLogoDataUrl) parts.push(`<image href="${leftLogoDataUrl}" x="${MARGIN - 16}" y="4" width="56" height="48" preserveAspectRatio="xMidYMid meet"/>`);
         if (rightLogoDataUrl) parts.push(`<image href="${rightLogoDataUrl}" x="${totalWidth - MARGIN - 48}" y="4" width="64" height="48" preserveAspectRatio="xMidYMid meet"/>`);
 
@@ -2470,8 +2436,6 @@
         text(centerX, 52, "middle", locationLine, { size: 10 });
         text(centerX, 68, "middle", bracket.categoryLabel, { size: 9.5, color: "#334155" });
 
-        // ── One table per stage, real names (Preliminary Round / Semi-
-        // Final / Final) via roundGroupLabel — never "Stage N". ─────────
         const tableX = (totalWidth - tableWidth) / 2;
         let y = HEADER_H;
         const columns = [
@@ -2483,7 +2447,6 @@
             text(centerX, y + STAGE_TITLE_H - 6, "middle", roundGroupLabel(bracket, ri), { bold: true, size: 12 });
             y += STAGE_TITLE_H;
 
-            // Table header row
             rect(tableX, y, tableWidth, TABLE_HEAD_H, { fill: "#f8fafc" });
             let cx = tableX;
             columns.forEach(col => {
@@ -2500,8 +2463,6 @@
                 const org = entry && entry.clubName ? entry.clubName : "";
 
                 cx = tableX;
-                // matchNo is pre-assigned for every row, resolved or not
-                // — see this function's own doc comment.
                 const values = { no: String(i + 1), matchNo: formatMatchNumber(m), competitor, org, p1: "", p2: "", total: "", place: "" };
                 columns.forEach(col => {
                     rect(cx, y, colWidths[col.key], ROW_H);
@@ -2543,37 +2504,9 @@
         document.getElementById("bracketPreviewOverlay").classList.add("hidden");
     }
 
-    // ── Download all brackets as one PDF, one bracket per page ─────────
-    // Rendered via canvas rather than jsPDF's native SVG support (patchy
-    // browser-to-browser) — each bracket's SVG is rasterized to an image
-    // at `scale`x resolution first, then dropped onto a page sized to
-    // match the SVG's own A4-landscape canvas (PAGE_W x PAGE_H) so
-    // there's no stretching. CHANGE: only single_elimination brackets go
-    // through buildBracketSVG (see its own doc comment) — cut_off/
-    // round_robin brackets are skipped here rather than fed into a
-    // renderer built for a different shape, and the summary flash says
-    // so explicitly.
-    //
-    // FIX (file-size bug): the rasterized page used to be embedded as a
-    // PNG via doc.addImage(url, "PNG", ...). jsPDF's PNG path doesn't
-    // just copy the PNG's own compressed bytes into the PDF — it decodes
-    // the PNG back to a raw pixel buffer and re-encodes it with its own
-    // encoder, AND — since every canvas.toDataURL("image/png") always
-    // carries an alpha channel — writes that alpha out as a SEPARATE
-    // full-resolution SMask image stream layered on top of the color
-    // data, even though the canvas is always fully opaque (a plain
-    // white background is filled in before anything is drawn — see
-    // svgStringToPngDataUrl). That doubling, multiplied by one page per
-    // category, is what turned a tournament's worth of draw sheets into
-    // a 700MB+ file. Switching to JPEG fixes this: JPEG has no alpha
-    // channel to duplicate, and jsPDF's JPEG path embeds the JPEG's own
-    // DCT-compressed byte stream directly with no re-encoding at all —
-    // exactly the same "let the browser's own image codec do the
-    // compression" approach live_queue.html already uses when it prints
-    // these same sheets (there, the browser's native PDF-from-print
-    // pipeline does the equivalent job). The function name below still
-    // says "Png" for minimal diff/history noise, but it now returns a
-    // JPEG data URL.
+    // Rasterizes an SVG to a JPEG data URL. JPEG (not PNG) because jsPDF
+    // re-encodes PNGs and adds a full-resolution alpha SMask per page —
+    // that is what produced 700MB+ PDFs. JPEG streams are embedded as-is.
     function svgStringToPngDataUrl(svgString, width, height, scale) {
         return new Promise((resolve, reject) => {
             const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
@@ -2588,12 +2521,6 @@
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 URL.revokeObjectURL(url);
-                // JPEG, not PNG — see this function's own doc comment
-                // above for why this one change is what actually fixes
-                // the 700MB PDF. Sheets are white-background line art
-                // and small text, so 0.92 quality keeps them crisp while
-                // still compressing far better than jsPDF's PNG+SMask
-                // path ever did.
                 resolve(canvas.toDataURL("image/jpeg", 0.92));
             };
             img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
@@ -2602,9 +2529,6 @@
     }
 
     async function downloadAllBracketsPDF() {
-        // Both elimination brackets (fixed A4-landscape page) and cut-off
-        // running sheets (dynamic height — see buildCutOffSheetSVG) get a
-        // page here; only round-robin has no sheet builder at all.
         const eligible = generatedBrackets.filter(b => b.system === "single_elimination" || b.system === "cut_off");
         if (eligible.length === 0) {
             showFlash(
@@ -2625,14 +2549,8 @@
 
         try {
             const { jsPDF } = window.jspdf;
-            const scale = 2; // rasterize at 2x for crisper text/lines in the PDF
+            const scale = 2;
 
-            // Each bracket resolves its own {svg, width, height} — the
-            // elimination sheet is always the fixed PAGE_W x PAGE_H
-            // landscape, but a cut-off running sheet is now portrait
-            // (narrower than tall) with a height that depends on how
-            // many stages and rows it has — so both the page size AND
-            // orientation can differ page to page here.
             const pages = eligible.map(bracket =>
                 bracket.system === "cut_off" ? buildCutOffSheetSVG(bracket) : buildBracketSVG(bracket)
             );
@@ -2644,12 +2562,6 @@
                 const { svg, width, height } = pages[i];
                 const jpgUrl = await svgStringToPngDataUrl(svg, width, height, scale);
                 if (i > 0) doc.addPage([width, height], orientationOf(pages[i]));
-                // "JPEG" here, matching the data URL svgStringToPngDataUrl
-                // now actually produces — see that function's own doc
-                // comment for why this single change is the fix for the
-                // 700MB-PDF bug (jsPDF embeds a JPEG's own compressed
-                // stream as-is, instead of decoding+re-encoding a PNG
-                // plus a redundant full-resolution alpha mask).
                 doc.addImage(jpgUrl, "JPEG", 0, 0, width, height);
             }
 
@@ -2667,59 +2579,14 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // CLUB SHEETS — one PDF page per club: every one of that club's
-    // fighters, which category they're entered in, and EVERY fight they
-    // could structurally have across the whole bracket — not just fights
-    // already resolved to a known opponent. Since the whole tournament
-    // is scheduled up front (see generateCourtOrdering), every real round
-    // already has its own fight number even when the opponent is still
-    // "winner of an earlier match" — so a fighter's full path to the
-    // Final can be listed today.
-    //
-    // Layout: rather than one "Fights" column with a comma-joined list
-    // (which wrapped unpredictably and got messy for anyone with 3+
-    // fights), each possible round gets its OWN fixed column — R32, R16,
-    // QF, SF, F — so every row lines up the same way regardless of how
-    // far that fighter's bracket goes. A category that doesn't reach a
-    // given round just leaves that cell blank. Standard taekwondo
-    // corner format inside each cell: "<corner letter> <fight number>",
-    // e.g. "B 308" / "R 312" — see computeEntryFightsByPhase.
-    //
-    // CHANGE: computeEntryFightsByPhase is elimination-shaped (walks
-    // entrySlotIndex, which cut_off/round_robin brackets leave as {} —
-    // see their own generators above), so it correctly returns an empty
-    // phase map for those rather than crashing. This means poomsae's
-    // cut_off/round_robin entries currently get every phase column
-    // blank on the club sheet — flagged, not fixed, since a solo
-    // performance or round-robin leg genuinely doesn't map onto R32/R16/
-    // QF/SF/F columns the way an elimination fight does; that would need
-    // its own column shape (performance order / round-robin leg number)
-    // to be useful, which is a separate follow-up.
-    //
-    // NOTE: this doc is built with autoTable's own text drawing, not
-    // embedded rasterized images, so it was never part of the PDF
-    // file-size bug above and needs no change here.
+    // CLUB SHEETS — one PDF page per club: every fighter, their category,
+    // and every fight they could structurally have, one fixed column per
+    // round phase (R32, R16, QF, SF, F), "B 308" / "R 312" format.
+    // Elimination-shaped: cut_off / round_robin entries get blank phases.
     // ══════════════════════════════════════════════════════════════════
-    const CLUB_SHEET_MARGIN = 14; // mm, both sides — A4 width is 210mm
+    const CLUB_SHEET_MARGIN = 14; // mm
     const ROUND_PHASE_COLUMNS = ["R32", "R16", "QF", "SF", "F"];
 
-    // Every fight an entry could structurally have across the WHOLE
-    // bracket, keyed by round phase ("R32"/"R16"/"QF"/"SF"/"F") instead
-    // of a flat list. The round-by-round match index + corner an entry
-    // lands in is a pure function of its starting slot (see
-    // entrySlotIndex on generateSingleElimination) — walked forward one
-    // round at a time via floor(index/2), the same recursion the bracket
-    // tree itself is built from, so this works whether or not the
-    // opponent at any given round is known yet.
-    //
-    // A round is skipped entirely when it resolves to a walkover for
-    // this entry (a bye — nothing to fight), matching the reference
-    // sheet, which only lists rounds from wherever an entry's first real
-    // opponent-slot appears through to the Final. A match that IS real
-    // but has no displayNumber yet (no eligible court was found for its
-    // category — see generateCourtOrdering's `unassigned`) is also left
-    // out rather than printed as some placeholder: a fight number a
-    // coach can't act on isn't useful on this sheet.
     function computeEntryFightsByPhase(bracket, entryId) {
         const slotIndex = bracket.entrySlotIndex ? bracket.entrySlotIndex[entryId] : undefined;
         const byPhase = {};
@@ -2744,10 +2611,6 @@
         return byPhase;
     }
 
-    // clubId (or "__none__" for entries with no club on file) -> { clubName, rows }
-    // rows: one per (fighter, category) pair — the same athlete can be
-    // entered in more than one category, and each entry gets its own row
-    // so the category and fight list stay unambiguous.
     function collectClubSheetRows() {
         const byClub = {};
         generatedBrackets.forEach(b => {
@@ -2771,11 +2634,8 @@
         const byClub = collectClubSheetRows();
         const clubKeys = Object.keys(byClub).filter(k => k !== "__none__")
             .sort((a, b) => (byClub[a].clubName || "").localeCompare(byClub[b].clubName || ""));
-        if (byClub["__none__"]) clubKeys.push("__none__"); // no club on file — trailing, unlabeled page
+        if (byClub["__none__"]) clubKeys.push("__none__");
 
-        // No. / Participant (name + category merged, drawn manually
-        // below since autoTable can't mix two font styles in one cell) /
-        // one fixed column per round phase.
         const columnWidths = { id: 8, participant: 60, phase: (182 - 8 - 60) / ROUND_PHASE_COLUMNS.length };
         const PARTICIPANT_COL_INDEX = 1;
 
@@ -2791,9 +2651,6 @@
             doc.setFontSize(13);
             doc.text(club.clubName || "No Club", CLUB_SHEET_MARGIN, 26);
 
-            // Participant cell's own text is left blank — didDrawCell
-            // below draws the name + category label manually — this is
-            // just a placeholder so autoTable still allocates the cell.
             const body = club.rows.map((r, i) => [
                 String(i + 1), "",
                 ...ROUND_PHASE_COLUMNS.map(phase => r.phases[phase] || ""),
@@ -2869,20 +2726,27 @@
 
     function renderCourtColumns() {
         if (isPoomsaeMode) { renderPoomsaeCourtColumns(); return; }
-
-        const activeCourts = courts;
         const el = document.getElementById("courtColumns");
 
-        el.innerHTML = activeCourts.map(court => {
+        el.innerHTML = courts.map(court => {
             const matches = generatedMatches
-                .filter(m => m.courtId === court.id)
+                .filter(m => m.courtId === court.id && m.queuePosition != null)
                 .sort((a, b) => a.queuePosition - b.queuePosition);
+            let prev = -1;
+            const body = matches.map(m => {
+                const hold = m.queuePosition - prev - 1;
+                prev = m.queuePosition;
+                const holdHtml = hold > 0
+                    ? `<div class="bb-rest-hold" title="Court idles so the rest-gap / equipment lock holds">⏸ hold ~${hold} fight${hold === 1 ? "" : "s"}</div>`
+                    : "";
+                return holdHtml + renderCourtMatchCard(m);
+            }).join("");
             return `
                 <div class="bb-court-column" data-court-id="${court.id}"
                     ondragover="onColumnDragOver(event, this)" ondragleave="onColumnDragLeave(event, this)" ondrop="onColumnDrop(event, this)">
-                    <div class="bb-court-column-header">${escapeHtml(court.label)}</div>
+                    <div class="bb-court-column-header">${escapeHtml(court.label)} <span class="text-muted" style="font-weight:400;">· ${matches.length} fights</span></div>
                     <div class="bb-court-column-body">
-                        ${matches.map(m => renderCourtMatchCard(m)).join("") || `<p class="text-muted" style="font-size:0.82rem; padding: 0.5rem 0;">No matches assigned.</p>`}
+                        ${body || `<p class="text-muted" style="font-size:0.82rem; padding: 0.5rem 0;">No matches assigned.</p>`}
                     </div>
                 </div>
             `;
@@ -2896,23 +2760,12 @@
             unassignedEl.classList.remove("hidden");
             const reasons = [...new Set(unassignedMatches.map(m => m.unassignedReason || "no eligible court"))];
             unassignedEl.innerHTML = `
-                ${unassignedMatches.length > 0 ? `
-                    <p style="color:#b91c1c; font-size:0.85rem;">
-                        ${unassignedMatches.length} match(es) couldn't be scheduled — ${escapeHtml(reasons.join("; "))}.
-                        Check court vest/plexi setup and equipment counts.
-                    </p>` : ""}
-                ${conflictMatches.length > 0 ? `
-                    <p style="color:#b91c1c; font-size:0.85rem;">
-                        ${conflictMatches.length} match(es) on the board right now have an equipment conflict
-                        (hover the ⚠ badge on the card for details) — usually caused by a drag onto a court/time
-                        where the vest size/gen or plexi helmet isn't actually free. Move the match or free up
-                        equipment nearby to resolve.
-                    </p>` : ""}
-                ${relaxedMatches.length > 0 ? `
-                    <p style="color:#b45309; font-size:0.85rem;">
-                        ${relaxedMatches.length} match(es) were scheduled with relaxed constraints (rest-gap/equipment
-                        timing not guaranteed) — double-check these before printing.
-                    </p>` : ""}
+                ${unassignedMatches.length > 0 ? `<p style="color:#b91c1c; font-size:0.85rem;">
+                    ${unassignedMatches.length} match(es) couldn't be scheduled — ${escapeHtml(reasons.join("; "))}.</p>` : ""}
+                ${conflictMatches.length > 0 ? `<p style="color:#b91c1c; font-size:0.85rem;">
+                    ${conflictMatches.length} match(es) have an equipment conflict (hover the ⚠ badge) — move the match or free up equipment nearby.</p>` : ""}
+                ${relaxedMatches.length > 0 ? `<p style="color:#b45309; font-size:0.85rem;">
+                    ${relaxedMatches.length} match(es) were placed without free equipment — hard locks still hold, vest/helmet timing is not guaranteed.</p>` : ""}
             `;
         } else {
             unassignedEl.classList.add("hidden");
@@ -2920,25 +2773,12 @@
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // POOMSAE COURT VIEW — a whole category is the drag unit, not an
-    // individual match. Every poomsae category already runs as one
-    // uninterrupted block on one court (see generatePoomsaeCourtOrdering
-    // — its matches are always contiguous queuePositions), so there's
-    // nothing meaningful to reorder WITHIN a category: PR always
-    // precedes SF always precedes F, in a fixed glide from first match
-    // to last. Individual match cards are deliberately not rendered at
-    // all here — just a block sized by match count, so staff can
-    // visually judge and balance total time across courts by eye while
-    // dragging, the same way the LPT balancer does automatically.
+    // POOMSAE COURT VIEW — a whole category is the drag unit.
     // ══════════════════════════════════════════════════════════════════
     let draggedCategoryCode = null;
     const CATEGORY_BLOCK_PX_PER_MATCH = 16;
     const CATEGORY_BLOCK_MIN_H = 72;
 
-    // A bracket's own queuePosition isn't stored on the bracket object
-    // itself — it's derived from its (contiguous) matches' own
-    // queuePosition, which is also what keeps this always in sync with
-    // whatever generatePoomsaeCourtOrdering or a prior drag last set.
     function firstQueuePosition(bracket) {
         let min = Infinity;
         bracket.rounds.forEach(r => r.forEach(m => { if (m.queuePosition != null) min = Math.min(min, m.queuePosition); }));
@@ -2948,10 +2788,6 @@
         return generatedBrackets.filter(b => b.courtId === courtId).sort((a, b) => firstQueuePosition(a) - firstQueuePosition(b));
     }
 
-    // Walks an ordered list of categories and lays their matches down as
-    // one continuous, contiguous sequence of queuePositions on courtId —
-    // the only thing that ever needs recomputing after a drag, since
-    // WITHIN a category the match order never changes.
     function renumberCourtCategories(courtId, orderedBrackets) {
         let pos = 0;
         orderedBrackets.forEach(b => {
@@ -2977,11 +2813,6 @@
                 </div>
             `;
         }).join("");
-
-        // Poomsae's balancer always seats every match somewhere — there's
-        // no equipment/rest-gap constraint that could leave one stranded
-        // the way kyorugi's can — so the warning banner never applies
-        // here.
         document.getElementById("unassignedWarning").classList.add("hidden");
     }
 
@@ -3070,21 +2901,18 @@
         targetList.splice(dropIndex, 0, bracket);
         renumberCourtCategories(targetCourtId, targetList);
 
-        // Moving OUT of a court leaves a gap in its remaining categories'
-        // positions — close it up so that court's own queue stays
-        // contiguous from 0, same as the target court's.
         if (sourceCourtId && sourceCourtId !== targetCourtId) {
             renumberCourtCategories(sourceCourtId, categoriesForCourt(sourceCourtId));
         }
 
         draggedCategoryCode = null;
         computeMatchNumbersPoomsae();
+        refreshHardLockReport();
         renderCourtColumns();
         renderBracketsPreview();
     }
 
-    // CHANGE: a solo cut-off match has no red corner — n2 stays null and
-    // the card shows "<name> — solo" instead of "<n1> vs <n2>".
+    // A solo cut-off match has no red corner — the card shows "<name> — solo".
     function renderCourtMatchCard(m) {
         const bracket = generatedBrackets.find(b => b.categoryCode === m.categoryCode);
         const n1 = participantLabel(bracket.entries, m.blue);
@@ -3092,13 +2920,7 @@
         const badge = m.status === "pending" ? `<span class="badge badge-grey">pending</span>` : "";
         const equipBadge = m.resolvedVestGen ? `<span class="badge badge-grey">${escapeHtml(m.resolvedVestGen)}</span>` : "";
         const plexiBadge = m.requiresPlexiHelmet ? `<span class="badge badge-grey">plexi</span>` : "";
-        const relaxedBadge = m.scheduledWithRelaxedConstraints ? `<span class="badge" style="background:#fef3c7; color:#b45309;">relaxed</span>` : "";
-        // Label reflects what's ACTUALLY short — VEST and HELMET are the
-        // words reserveVest/reservePlexi's reason strings use (see
-        // checkVestAvailability/checkPlexiAvailability), so this never
-        // says "equipment" ambiguously when the real problem is one but
-        // not the other (e.g. Pupils categories never need a helmet at
-        // all, so a conflict there is always about vests).
+        const relaxedBadge = m.scheduledWithRelaxedConstraints ? `<span class="badge" style="background:#fef3c7; color:#b45309;" title="Placed without free equipment — hard locks still hold">relaxed</span>` : "";
         const conflictBadge = m.equipmentConflict
             ? `<span class="badge" style="background:#fee2e2; color:#b91c1c;" title="${escapeAttr(m.equipmentConflict)}">⚠ ${m.equipmentConflict.toUpperCase().includes("VEST") && m.equipmentConflict.toUpperCase().includes("HELMET") ? "vest+helmet" : m.equipmentConflict.toUpperCase().includes("HELMET") ? "helmet" : "vest"}</span>`
             : "";
@@ -3118,17 +2940,10 @@
     }
     function onMatchDragEnd(event, el) {
         el.classList.remove("bb-court-match--dragging");
-        // Safety net: if the drag was cancelled outside any valid drop
-        // zone (dropped off-window, Escape pressed, etc.), dragend still
-        // fires on the source element even though drop never did — clean
-        // up the indicator so it doesn't linger.
         removeDropIndicator();
         document.querySelectorAll(".bb-court-column--drop-target").forEach(c => c.classList.remove("bb-court-column--drop-target"));
     }
 
-    // Single reusable indicator element, moved to wherever the card would
-    // land rather than recreated every dragover — that would be a lot of
-    // DOM churn on every mouse-move-driven dragover event.
     let dropIndicatorEl = null;
     function ensureDropIndicator() {
         if (!dropIndicatorEl) {
@@ -3141,8 +2956,7 @@
         if (dropIndicatorEl && dropIndicatorEl.parentNode) dropIndicatorEl.parentNode.removeChild(dropIndicatorEl);
     }
 
-    // Shared by both the live dragover preview and the actual drop, so
-    // they can never disagree about where a card would land.
+    // Shared by both the live dragover preview and the actual drop.
     function computeDropIndex(bodyEl, clientY) {
         const cards = [...bodyEl.querySelectorAll(".bb-court-match")];
         let dropIndex = cards.length;
@@ -3174,9 +2988,6 @@
     }
 
     function onColumnDragLeave(event, columnEl) {
-        // Only clear when the pointer actually left the column (not just
-        // moved between two child elements inside it, which also fires
-        // dragleave/dragenter pairs).
         if (!columnEl.contains(event.relatedTarget)) {
             columnEl.classList.remove("bb-court-column--drop-target");
         }
@@ -3188,26 +2999,33 @@
         removeDropIndicator();
         if (!draggedMatchId) return;
         const targetCourtId = columnEl.dataset.courtId;
+        const moved = generatedMatches.find(m => m.matchId === draggedMatchId);
+        draggedMatchId = null;
+        if (!moved) return;
+
+        // LOCK #3: a single match can't leave its category's court.
+        if (moved.courtId !== targetCourtId) {
+            moveCategoryToCourt(moved.categoryCode, targetCourtId);
+            return;
+        }
 
         const bodyEl = columnEl.querySelector(".bb-court-column-body");
         const { dropIndex } = computeDropIndex(bodyEl, event.clientY);
 
-        const moved = generatedMatches.find(m => m.matchId === draggedMatchId);
-        if (!moved) return;
-
-        moved.courtId = targetCourtId;
-
-        // Renumber queuePosition sequentially for the target column,
-        // inserting the moved match at dropIndex.
         const columnMatches = generatedMatches
-            .filter(m => m.courtId === targetCourtId && m.matchId !== draggedMatchId)
+            .filter(m => m.courtId === targetCourtId && m.matchId !== moved.matchId && m.queuePosition != null)
             .sort((a, b) => a.queuePosition - b.queuePosition);
         columnMatches.splice(dropIndex, 0, moved);
-        columnMatches.forEach((m, i) => { m.queuePosition = i; });
 
-        draggedMatchId = null;
-        if (isPoomsaeMode) computeMatchNumbersPoomsae(); else computeMatchNumbers();
-        if (!isPoomsaeMode) revalidateEquipmentAfterManualEdit(); // a drag can move a match onto a court/time slot with a stale equipment pairing — kyorugi only
+        const depError = dependencyOrderViolation(columnMatches);
+        if (depError) { showFlash(depError, true); renderCourtColumns(); return; }
+
+        columnMatches.forEach((m, i) => { m.queuePosition = i; }); // provisional ORDER only
+        resolveCourtTimelines();  // re-lay on the timeline, holds inserted so LOCK #1 holds
+
+        computeMatchNumbers();
+        revalidateEquipmentAfterManualEdit();
+        refreshHardLockReport();
         renderCourtColumns();
         renderBracketsPreview(); // "101 Winner" labels may reference a match whose number just changed
     }
@@ -3216,15 +3034,15 @@
     async function pushToFirebase() {
         if (generatedBrackets.length === 0) return;
 
-        // Walkover (BYE) matches never get scheduled onto a court and are
-        // never referenced as a `source` by a later round (see
-        // generateSingleElimination — a walkover's winner is denormalized
-        // directly onto the next match instead of leaving a source
-        // pointer), so nothing downstream in matches/ ever needs to read
-        // one back. The full record of every bye still lives on the
-        // bracket doc itself (bracket.rounds includes them with status
-        // "walkover"), so pushing them to matches/ too would just be dead
-        // documents for TkStrike / court-side consumers to ignore.
+        const lockReport = refreshHardLockReport();
+        if (!lockReport.ok) {
+            showFlash("Push blocked — fix the hard-lock violations listed in the report first.", true);
+            document.getElementById("hardLockReport").scrollIntoView({ behavior: "smooth", block: "start" });
+            return;
+        }
+
+        // Walkover (BYE) matches never get a court and are never referenced
+        // as a `source`; the bracket doc keeps the full record of them.
         const rankedMatches = generatedMatches.filter(m => m.status !== "walkover");
 
         if (!confirm(`Push ${generatedBrackets.length} bracket(s) and ${rankedMatches.length} match(es) to Firestore? This is the live commit.`)) return;
@@ -3233,13 +3051,6 @@
         btn.disabled = true;
         btn.textContent = "Pushing…";
 
-        // Matches always land under
-        // /sports/{sport}/disciplines/{discipline}/matches — that's the
-        // backend's own commit_brackets_endpoint, keyed off whatever
-        // TOURNAMENT_SPORT/TOURNAMENT_DISCIPLINE this page loaded with
-        // (e.g. /sports/taekwondo/disciplines/poomsae/matches for this
-        // tournament). Nothing here needs to special-case the path —
-        // it's already fully discipline-driven server-side.
         const payload = {
             sport: TOURNAMENT_SPORT,
             discipline: TOURNAMENT_DISCIPLINE,
@@ -3251,30 +3062,16 @@
             matches: rankedMatches.map(m => ({
                 matchId: m.matchId, bracketCategoryCode: m.categoryCode, round: m.round, matchNumber: m.matchNumber,
                 displayNumber: m.displayNumber, roundPhase: m.roundPhase,
-                // m.red is genuinely null for a poomsae cut-off solo
-                // performance — the backend's BracketCommitMatch.red is
-                // Optional specifically to accept that.
                 blue: m.blue, red: m.red || null, status: m.status, winnerEntryId: m.winnerEntryId,
                 courtId: m.courtId, queuePosition: m.queuePosition,
                 pssSize: m.pssSize, hitLevel: m.hitLevel, pssHitLevelSetId: m.pssHitLevelSetId,
                 roundTime: m.roundTime, breakTime: m.breakTime,
-                // NEW — equipment facts this match was actually resolved
-                // with, so live_queue.html can re-check vest/plexi
-                // availability against live court/position state instead
-                // of only ever knowing what was true at generation time.
-                // Always null/false for poomsae — see the block below.
                 resolvedVestGen: m.resolvedVestGen || null,
                 requiresPlexiHelmet: !!m.requiresPlexiHelmet,
                 scheduledWithRelaxedConstraints: !!m.scheduledWithRelaxedConstraints,
             })),
-            // NEW — the full session-local equipment configuration,
-            // written to tournaments/{id}/meta/equipment in the same
-            // commit. This is what lets live_queue.html re-run the SAME
-            // vest/helmet conflict algorithm this page uses, against
-            // live data, without staff having to re-enter court/vest
-            // setup a second time in a different tool. Poomsae has no
-            // vest/plexi/PSS concepts at all, so those fields are simply
-            // left out rather than sent as empty placeholders.
+            // Full session-local equipment configuration, written to
+            // tournaments/{id}/meta/equipment in the same commit.
             equipment: isPoomsaeMode ? {
                 courts: courts.map(c => ({ id: c.id, label: c.label, minGapBetweenSameAthlete: c.minGapBetweenSameAthlete })),
                 secondsPerMatch: poomsaeSecondsPerPerformance,
@@ -3312,20 +3109,15 @@
         }
     }
 
-    // ── Clean / wipe everything this page has ever pushed for this
-    // tournament — brackets, matches, and the equipment meta doc.
-    // Registrations are never touched (see the backend endpoint's own
-    // docstring). Gated behind a TYPE-THE-TITLE confirmation rather than
-    // a plain confirm() dialog, specifically because this is a genuinely
-    // irreversible bulk delete and a single misclick on a plain "OK"
-    // button is exactly the accident this is meant to prevent.
+    // ── Clean / wipe everything this page has pushed for this tournament.
+    // Gated behind a type-the-title confirmation.
     async function cleanPushedData() {
         const typed = prompt(
             `This PERMANENTLY deletes every bracket, match, and equipment setting pushed to Firestore for ` +
             `"${TOURNAMENT_TITLE}". Registrations are NOT affected — only generated bracket/court output.\n\n` +
             `Type the tournament title exactly to confirm:`
         );
-        if (typed === null) return; // cancelled
+        if (typed === null) return;
         if (typed.trim() !== TOURNAMENT_TITLE.trim()) {
             showFlash("Title didn't match — nothing was deleted.", true);
             return;
@@ -3346,12 +3138,9 @@
             const data = await res.json();
             showFlash(`Cleared ${data.deletedBrackets} bracket(s) and ${data.deletedMatches} match(es).`);
 
-            // Local generated state is now stale relative to Firestore —
-            // reset it so the UI doesn't imply the wiped data is still
-            // pushed (pushBtn re-enables again the next time Generate
-            // actually produces something new).
             generatedBrackets = [];
             generatedMatches = [];
+            renderHardLockReport(validateHardLocks());
             document.getElementById("resultsSection").classList.add("hidden");
             document.getElementById("pushBtn").disabled = true;
             document.getElementById("pushBtn").textContent = "Push to Firebase";
@@ -3363,12 +3152,7 @@
         }
     }
 
-    // FastAPI's error body shape varies: a plain string detail (most
-    // handlers, e.g. `raise HTTPException(detail="...")`) vs. a 422
-    // validation error, where `detail` is an ARRAY of {loc, msg, type}
-    // objects. `new Error(body.detail)` on that array silently
-    // stringifies it via Array.toString() — "[object Object],[object
-    // Object]" — which is exactly the unreadable banner this replaces.
+    // FastAPI error bodies: plain string detail, or a 422 array of {loc, msg, type}.
     function extractErrorDetail(body, fallback) {
         const detail = body && body.detail;
         if (typeof detail === "string" && detail) return detail;
@@ -3613,11 +3397,6 @@
         padding: 1.25rem;
     }
 
-    /* Straightforward fixed cap + internal scroll — no longer tries to
-       match Courts pane's height via JS (that approach didn't account
-       for the third Equipment pane, and broke down the moment content
-       got long). Courts itself stays unconstrained since its own row
-       count is naturally small and self-limiting. */
     .bb-pane--vest {
         display: flex;
         flex-direction: column;
@@ -3645,7 +3424,6 @@
         padding: 0.4rem 0;
     }
 
-    /* Poomsae's simplified row — just ID / Label / min-gap / delete. */
     .bb-court-row--poomsae {
         grid-template-columns: 70px 1fr 130px auto;
     }
@@ -3885,9 +3663,6 @@
         opacity: 0.4;
     }
 
-    /* POOMSAE: one block per category, height proportional to its match
-       count (see CATEGORY_BLOCK_PX_PER_MATCH) — the whole block is the
-       drag unit, no per-match rows inside it. */
     .bb-category-block {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -3937,6 +3712,59 @@
         50% {
             opacity: 0.4;
         }
+    }
+
+    /* ── Hard-lock report + rest holds ─────────────────────────────── */
+    .bb-lock-report .bb-lock-row {
+        display: grid;
+        grid-template-columns: 1.5rem 1fr auto;
+        gap: 0.5rem;
+        align-items: center;
+        padding: 0.45rem 0.6rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        margin-bottom: 0.35rem;
+    }
+
+    .bb-lock-row ul {
+        grid-column: 2 / -1;
+        margin: 0.25rem 0 0;
+        padding-left: 1.1rem;
+        font-size: 0.8rem;
+    }
+
+    .bb-lock-row--ok {
+        background: var(--green-bg);
+        color: var(--green);
+    }
+
+    .bb-lock-row--bad {
+        background: #fef2f2;
+        color: #b91c1c;
+    }
+
+    .bb-lock-row--na {
+        background: #f8fafc;
+        color: var(--muted);
+    }
+
+    .bb-lock-notes {
+        font-size: 0.8rem;
+        color: #92400e;
+        margin-top: 0.4rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+    }
+
+    .bb-rest-hold {
+        font-size: 0.72rem;
+        color: #92400e;
+        background: #fffbeb;
+        border: 1px dashed #fcd34d;
+        border-radius: 6px;
+        padding: 0.2rem 0.5rem;
+        text-align: center;
     }
 
     .flash-banner {
