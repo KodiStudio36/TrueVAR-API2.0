@@ -1,0 +1,555 @@
+{% extends "dashboard/base.html" %}
+{# Poomsae draw — poomsae pools per age × rank group, and the round 1 /
+semi-final / final draw. All logic lives in /static/js/poomsae-draw.js
+(never inline JS in a template: editors reformat it as HTML text). #}
+{% block content %}
+
+<div id="flash" class="flash-banner hidden"></div>
+
+<div class="pd-wrapper">
+
+    <div class="pd-topbar">
+        <a href="/dashboard/tournaments/{{ tournament.id }}" class="btn btn-ghost btn-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5" />
+                <path d="M12 19l-7-7 7-7" />
+            </svg>
+            Back to Tournament
+        </a>
+        <div class="pd-topbar-title">
+            <span class="panel-eyebrow">{{ tournament.title }}</span>
+            <h1 class="panel-title" style="font-size:1.5rem;">Poomsae Draw</h1>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="saveBtn" onclick="saveConfig()">Save settings</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="pdfBtn" onclick="downloadDrawPdf()" disabled>Download
+            PDF</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="applyBtn" onclick="applyDrawToMatches()" disabled
+            title="Write the current draw onto matches already pushed from the bracket builder">Apply to pushed
+            matches</button>
+        <button type="button" class="btn btn-primary btn-sm" id="drawBtn" onclick="generateDraw()">Draw poomsae</button>
+    </div>
+
+    <p class="text-muted pd-hint">
+        1) Check the poomsae pools — defaults follow the national rules (Category B and Category A by age).
+        2) Check which pool every age &amp; rank group uses. 3) Draw — every category gets one poomsae for round 1
+        (20+ competitors), one for the semi-final (9–19) and two for the final (1–8), all different. The draw is done
+        on the server and saved with the tournament.
+    </p>
+
+    {# ── POOLS ─────────────────────────────────────────────────────────── #}
+    <div class="card-panel pd-card">
+        <div class="pd-card-header">
+            <div>
+                <h2 class="pd-card-title">Poomsae pools</h2>
+                <p class="text-muted pd-card-sub">Which poomsae may be drawn. A pool needs at least 4.</p>
+            </div>
+            <div class="pd-card-actions">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="resetPoolsToDefault()">Reset to
+                    defaults</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="addPool()">+ Add pool</button>
+            </div>
+        </div>
+        <div id="poolList" class="pd-pool-list"></div>
+    </div>
+
+    {# ── ASSIGNMENTS ───────────────────────────────────────────────────── #}
+    <div class="card-panel pd-card">
+        <div class="pd-card-header">
+            <div>
+                <h2 class="pd-card-title">Pool per age &amp; rank</h2>
+                <p class="text-muted pd-card-sub">Applies to every entry type (individual, pairs, teams) of that age and
+                    rank.
+                    Rows marked <span class="pd-guess-tag">check</span> were guessed — no rule matched them exactly.
+                    Tick <strong>Exclude</strong> to skip every category of a group by default.</p>
+            </div>
+            <div class="pd-card-actions">
+                <select id="bulkPoolSelect"></select>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="assignAll()">Set all</button>
+            </div>
+        </div>
+        <div id="assignmentList" class="pd-assign-list"></div>
+    </div>
+
+    {# ── DRAW ──────────────────────────────────────────────────────────── #}
+    <div class="card-panel pd-card">
+        <div class="pd-card-header">
+            <div>
+                <h2 class="pd-card-title">Draw</h2>
+                <p class="text-muted pd-card-sub" id="drawMeta">Not drawn yet.</p>
+            </div>
+            <p class="text-muted pd-card-sub" style="max-width:420px; text-align:right;">
+                Every category is drawn, with or without entries. Freestyle and para are skipped by default —
+                switch any row between <strong>Draw</strong> and <strong>Skip</strong>.
+            </p>
+        </div>
+        <div class="pd-table-wrap">
+            <table class="pd-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>1. round <span>(20+ competitors)</span></th>
+                        <th>Semifinals <span>(9–19 competitors)</span></th>
+                        <th>Finals <span>(1–8 competitors)</span></th>
+                        <th class="pd-col-actions"></th>
+                    </tr>
+                </thead>
+                <tbody id="drawBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="/static/js/category-schema.js"></script>
+<script src="/static/js/bracket-sheets.js"></script>
+<script>
+    const TOURNAMENT_ID = {{ tournament.id | string | tojson }};
+    const TOURNAMENT_TITLE = {{ tournament.title | default ('', true) | string | tojson }};
+    const TOURNAMENT_SPORT = {{ tournament.sport | default ('', true) | string | lower | tojson }};
+    const TOURNAMENT_DISCIPLINE = {{ tournament.discipline | default ('', true) | string | lower | tojson }};
+    const TOURNAMENT_DATE = {{ (tournament.dateTime.strftime('%d %b %Y') if tournament.dateTime else '') | tojson }};
+    const TOURNAMENT_LOCATION = {{ tournament.location | default ('', true) | string | tojson }};
+</script>
+<script src="/static/js/poomsae-draw.js"></script>
+
+<style>
+    :root {
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --muted: #64748b;
+        --text: #0f172a;
+        --accent: #4f46e5;
+        --green: #16a34a;
+        --green-bg: #dcfce7;
+        --radius: 14px;
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    .text-muted {
+        color: var(--muted) !important;
+    }
+
+    .container {
+        max-width: none !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 1.5rem 2rem !important;
+        box-sizing: border-box !important;
+    }
+
+    body {
+        background: #f1f5f9;
+    }
+
+    .card-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 1px 4px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .04);
+    }
+
+    .panel-eyebrow {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--muted);
+        display: block;
+        margin-bottom: .25rem;
+    }
+
+    .panel-title {
+        margin: 0;
+        font-weight: 700;
+        color: var(--text);
+        line-height: 1.2;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .5rem 1rem;
+        border-radius: 8px;
+        font-size: .875rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        text-decoration: none;
+        transition: all .15s;
+        white-space: nowrap;
+    }
+
+    .btn:disabled {
+        opacity: .55;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #4338ca;
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+        background: #f8fafc;
+        color: var(--text);
+    }
+
+    .btn-sm {
+        font-size: .8rem;
+        padding: .35rem .8rem;
+    }
+
+    .flash-banner {
+        padding: .75rem 1rem;
+        border-radius: 8px;
+        background: var(--green-bg);
+        color: var(--green);
+        font-size: .9rem;
+        margin-bottom: 1rem;
+    }
+
+    .flash-banner--error {
+        background: #fef2f2;
+        color: #b91c1c;
+    }
+
+    .pd-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .pd-topbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: .75rem 1rem;
+    }
+
+    .pd-topbar-title {
+        flex: 1;
+        min-width: 220px;
+    }
+
+    .pd-hint {
+        margin: -.5rem 0 0;
+        font-size: .88rem;
+        max-width: 1100px;
+    }
+
+    .pd-card {
+        padding: 1.25rem;
+    }
+
+    .pd-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: .9rem;
+    }
+
+    .pd-card-title {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+
+    .pd-card-sub {
+        margin: .2rem 0 0;
+        font-size: .82rem;
+    }
+
+    .pd-card-actions {
+        display: flex;
+        gap: .5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .pd-card-actions select,
+    .pd-assign-row select {
+        padding: .4rem .55rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: .85rem;
+        background: #fff;
+        color: var(--text);
+        max-width: 100%;
+    }
+
+    /* pools */
+    .pd-pool-list {
+        display: flex;
+        flex-direction: column;
+        gap: .6rem;
+    }
+
+    .pd-pool {
+        display: grid;
+        grid-template-columns: minmax(180px, 260px) 1fr auto;
+        gap: .75rem;
+        align-items: start;
+        padding: .7rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+    }
+
+    .pd-pool--short {
+        border-color: #fca5a5;
+        background: #fef2f2;
+    }
+
+    .pd-pool-name input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: .45rem .6rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: .88rem;
+        font-weight: 600;
+    }
+
+    .pd-pool-meta {
+        font-size: .75rem;
+        margin-top: .3rem;
+    }
+
+    .pd-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .35rem;
+    }
+
+    .pd-chip {
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--muted);
+        border-radius: 999px;
+        padding: .25rem .65rem;
+        font-size: .78rem;
+        font-weight: 600;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .pd-chip:hover {
+        border-color: var(--muted);
+    }
+
+    .pd-chip--on {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+    }
+
+    .pd-icon-btn {
+        background: none;
+        border: none;
+        color: #b91c1c;
+        cursor: pointer;
+        font-size: 1rem;
+        padding: .2rem .4rem;
+    }
+
+    /* assignments */
+    .pd-assign-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: .5rem 1rem;
+    }
+
+    .pd-assign-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: .75rem;
+        padding: .45rem .6rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: .86rem;
+    }
+
+    .pd-assign-row strong {
+        font-weight: 600;
+    }
+
+    .pd-assign-row select {
+        max-width: 45%;
+    }
+
+    .pd-assign-label {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .pd-exclude {
+        display: inline-flex;
+        align-items: center;
+        gap: .3rem;
+        font-size: .78rem;
+        color: var(--muted, #6b7280);
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .pd-exclude input {
+        margin: 0;
+        cursor: pointer;
+    }
+
+    .pd-assign-row--off {
+        background: rgba(148, 163, 184, .12);
+    }
+
+    .pd-assign-row--off .pd-assign-label {
+        opacity: .5;
+        text-decoration: line-through;
+    }
+
+    .pd-assign-row--off select {
+        opacity: .45;
+    }
+
+    .pd-guess-tag {
+        display: inline-block;
+        background: #fef3c7;
+        color: #b45309;
+        border-radius: 4px;
+        padding: 0 .35rem;
+        font-size: .68rem;
+        font-weight: 700;
+        margin-left: .35rem;
+        text-transform: uppercase;
+    }
+
+    /* draw table */
+    .pd-toggle {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        font-size: .82rem;
+        color: var(--muted);
+        cursor: pointer;
+    }
+
+    .pd-table-wrap {
+        overflow-x: auto;
+    }
+
+    .pd-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: .88rem;
+    }
+
+    .pd-table th {
+        text-align: center;
+        font-size: .78rem;
+        color: var(--text);
+        border: 1px solid #111827;
+        padding: .45rem .5rem;
+        background: #f8fafc;
+    }
+
+    .pd-table th:first-child {
+        text-align: left;
+    }
+
+    .pd-table th span {
+        display: block;
+        font-weight: 500;
+        color: var(--muted);
+        font-size: .7rem;
+    }
+
+    .pd-table td {
+        border: 1px solid #111827;
+        padding: .35rem .55rem;
+        text-align: center;
+        font-weight: 600;
+    }
+
+    .pd-table td:first-child {
+        text-align: left;
+        font-weight: 600;
+    }
+
+    .pd-table td.pd-empty {
+        color: var(--muted);
+        font-weight: 400;
+    }
+
+    .pd-table .pd-col-actions {
+        width: 6.5rem;
+    }
+
+    .pd-table td.pd-actions {
+        white-space: nowrap;
+        text-align: right;
+    }
+
+    .pd-skip {
+        border: 1px solid #16a34a;
+        background: #dcfce7;
+        color: #166534;
+        border-radius: 6px;
+        cursor: pointer;
+        padding: .15rem .5rem;
+        font-size: .72rem;
+        font-weight: 700;
+        margin-right: .3rem;
+    }
+
+    .pd-skip--off {
+        border-color: var(--border);
+        background: #f1f5f9;
+        color: var(--muted);
+    }
+
+    .pd-row-excluded td {
+        background: #f8fafc;
+        color: var(--muted);
+    }
+
+    .pd-row-excluded td:first-child {
+        font-weight: 500;
+    }
+
+    .pd-redraw {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        padding: .15rem .4rem;
+    }
+
+    .pd-redraw:hover {
+        border-color: var(--muted);
+    }
+
+    .pd-row-stale td:not(.pd-actions) {
+        background: #fffbeb;
+    }
+</style>
+{% endblock %}

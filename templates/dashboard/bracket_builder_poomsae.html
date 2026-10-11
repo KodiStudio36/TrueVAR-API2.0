@@ -1,0 +1,110 @@
+{% extends "dashboard/bracket_builder_base.html" %}
+{# Poomsae (forms) bracket builder — cut-off / single elimination / round
+robin, courts balanced by estimated time. No PSS vests, plexi helmets or
+rest-gap solver. Shared layout: bracket_builder_base.html; shared JS:
+/static/js/bracket-builder-common.js. #}
+
+{% block builder_title %}Poomsae Brackets &amp; Court Ordering{% endblock %}
+
+{% block builder_hint %}
+Everything below runs in your browser — nothing is written to Firestore until you hit
+<strong>Push to Firebase</strong>. Pick one bracket system for everything and add exceptions for the
+types, ages or belts that differ; set which courts each age division plays on and the order entry types
+run in. Generate builds every category and spreads them across the allowed courts by running time. Drag
+whole categories between courts to adjust before committing. These settings are remembered in this
+browser for this tournament.
+{% endblock %}
+
+{% block config_row_class %}bb-config-row--two{% endblock %}
+
+{% block courts_help %}
+Pre-filled from this tournament's court count. Session-only — nothing here is saved to Firestore
+until you push, so it resets if you leave the page.
+<strong>The ID field must exactly match that court's own TrueVAR-Core court_id</strong> — a
+mismatch here is why a court-side server would see no matches at all, with no error to point at it.
+{% endblock %}
+
+{% block config_panes %}
+<div id="poomsaeTimingPane" class="card-panel bb-pane">
+    <div class="bb-pane-header">
+        <h2 class="panel-title" style="font-size:1.05rem;">Poomsae Timing</h2>
+    </div>
+    <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+        Poomsae has no PSS vests or plexi helmets to track — courts are balanced by total running time.
+        One estimate covers every match, whether it's a solo cut-off performance or a head-to-head duel
+        (both take about the same time on the floor).
+    </p>
+    <label class="bb-field">
+        <span>Estimated seconds per match</span>
+        <input type="number" min="10" id="poomsaeSecondsInput" value="90" onchange="setSecondsPerMatch(this.value)">
+    </label>
+</div>
+{% endblock %}
+
+
+
+{% block extra_panes %}
+{# ── BRACKET SYSTEM PER CATEGORY ──────────────────────────────────── #}
+<div id="systemRulesPane" class="card-panel bb-pane" style="margin-top: 1rem;">
+    <div class="bb-pane-header">
+        <h2 class="panel-title" style="font-size:1.05rem;">Bracket System per Category</h2>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addSystemRule()">+ Add Exception</button>
+    </div>
+    <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+        One system applies to every category; exceptions override it. "Any" matches everything in that column.
+        When several exceptions fit a category, the most specific one wins (type + age beats type only); on a
+        tie, the lower one in the list wins. Cut-off automatically adds a Preliminary Round (20+ entrants) and
+        Semi-Final (9+) — pick "Final only" to skip them.
+    </p>
+    <div class="bb-rule-default">
+        <strong>All categories</strong>
+        <select id="defaultSystemSelect" onchange="setDefaultSystem(this.value)"></select>
+    </div>
+    <div id="systemRulesList" class="bb-rule-list"></div>
+    <details class="bb-rule-resolved">
+        <summary id="systemResolvedSummary">Result per category</summary>
+        <div id="systemResolvedList" class="bb-rule-resolved-list"></div>
+    </details>
+</div>
+
+{# ── SCHEDULING: running order + courts per age ───────────────────── #}
+<div id="schedulingPane" class="card-panel bb-pane" style="margin-top: 1rem;">
+    <div class="bb-pane-header">
+        <h2 class="panel-title" style="font-size:1.05rem;">Scheduling</h2>
+    </div>
+    <div class="bb-sched-grid">
+        <div>
+            <h3 class="bb-equip-subhead">Running order by type</h3>
+            <p class="text-muted" style="font-size: 0.8rem; margin: 0 0 0.5rem;">
+                Every court runs its categories in this type order, then by age.
+            </p>
+            <div id="typePriorityList"></div>
+            <label class="bb-field" style="margin-top: 0.6rem;">
+                <span>Within a type, age order</span>
+                <select id="ageOrderSelect" onchange="setAgeOrder(this.value)">
+                    <option value="youngest_first">Youngest first</option>
+                    <option value="oldest_first">Oldest first</option>
+                </select>
+            </label>
+        </div>
+        <div>
+            <h3 class="bb-equip-subhead">Courts by age division</h3>
+            <p class="text-muted" style="font-size: 0.8rem; margin: 0 0 0.5rem;">
+                Tick the courts an age division may play on — its categories are spread across those courts
+                only. Nothing ticked means any court.
+            </p>
+            <div id="ageCourtList"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block court_order_hint %}
+Every category runs as one uninterrupted block, first match to last — drag a whole category card
+onto a different court, or reorder it within one. Block height is roughly proportional to how many
+matches it has, so you can balance courts by eye.
+{% endblock %}
+
+{% block builder_script %}
+<script src="/static/js/bracket-builder-poomsae.js"></script>
+{% endblock %}

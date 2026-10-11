@@ -51,9 +51,9 @@ tournaments/{id} and tournaments/{id}.settings respectively). #}
         </div>
     </div>
     <p class="text-muted" style="font-size: 0.95rem; margin-top: -0.3rem; margin-bottom: 1.1rem;">
-        For club owners. Search for an athlete and register them — age, gender, and (where more than
-        one applies) eligible age division are resolved automatically. Only brackets with registered
-        athletes are listed.
+        For club owners. Search for an athlete and register them — age, gender, belt class, para class and
+        (where more than one applies) eligible age division are resolved automatically. Para categories accept
+        only athletes flagged as para athletes. Only brackets with registered athletes are listed.
     </p>
 
     <div id="categoriesContainer">
@@ -84,7 +84,7 @@ tournaments/{id} and tournaments/{id}.settings respectively). #}
             <label class="field-label" for="athleteSearchInput">Search your club roster</label>
             <input type="text" id="athleteSearchInput" placeholder="Type a first or last name…"
                 oninput="onSearchInput()" autocomplete="off" style="margin-bottom: 0.35rem;">
-            <p class="text-muted" style="font-size: 0.82rem; margin-bottom: 1rem;">
+            <p id="searchHint" class="text-muted" style="font-size: 0.82rem; margin-bottom: 1rem;">
                 Every athlete in your club roster is shown — age and gender are matched automatically once you pick one.
             </p>
 
@@ -180,6 +180,18 @@ immediately, with no resize listener or re-render needed.
         flex-shrink: 0;
     }
 
+    .para-chip {
+        display: inline-block;
+        margin-left: 0.4rem;
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 0.05rem 0.45rem;
+        border-radius: 999px;
+        background: var(--blue-bg);
+        color: var(--blue-text);
+        vertical-align: middle;
+    }
+
     @media (max-width: 439px) {
         .roster-club {
             display: none;
@@ -200,6 +212,49 @@ immediately, with no resize listener or re-render needed.
     // editable). Server-side re-checks this on every write; this is
     // purely for hiding a button that would 403 anyway.
     const ADMIN_CLUB_ID = "{{ admin_club_id | default('') }}";
+
+    // ── REGISTRATION DEADLINE ─────────────────────────────────────────
+    // settings.registrationDeadline is stored as an ISO string (UTC when it
+    // has no offset — same rule as _check_registration_window on the
+    // server). After it passes, clubs can still REMOVE their entries but
+    // can no longer register new ones or edit (move) existing ones. The
+    // server enforces the same thing; this only hides the buttons.
+    const REGISTRATION_DEADLINE_RAW = {{ ((tournament.settings.registrationDeadline if (tournament.settings and tournament.settings.registrationDeadline) else '') | string) | tojson }};
+    const REGISTRATION_DEADLINE = parseDeadline(REGISTRATION_DEADLINE_RAW);
+
+    function parseDeadline(raw) {
+        if (!raw) return null;
+        let s = String(raw).trim().replace(" ", "T");
+        if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += "Z";
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    function isRegistrationClosed() {
+        return !!REGISTRATION_DEADLINE && Date.now() > REGISTRATION_DEADLINE.getTime();
+    }
+
+    // ── TOURNAMENT START ──────────────────────────────────────────────
+    // Once the tournament has started (tournaments/{id}.dateTime), clubs
+    // can't remove entries any more either. Enforced on the server too.
+    const TOURNAMENT_START = parseDeadline({{ (tournament.dateTime.isoformat() if tournament.dateTime else '') | tojson }});
+
+    function isTournamentStarted() {
+        return !!TOURNAMENT_START && Date.now() >= TOURNAMENT_START.getTime();
+    }
+
+    // A page left open across the deadline / start time updates itself
+    // (buttons disappear) without a reload. setTimeout caps at ~24.8 days.
+    [REGISTRATION_DEADLINE, TOURNAMENT_START].forEach(moment => {
+        if (!moment) return;
+        const msLeft = moment.getTime() - Date.now();
+        if (msLeft > 0 && msLeft < 2147483647) {
+            setTimeout(() => {
+                if (typeof closeRegisterModal === "function") closeRegisterModal();
+                renderCategories();
+            }, msLeft + 1000);
+        }
+    });
 
     // rank is a numeric index (0-18) into the WT belt/dan system — belt
     // labels ("10. GUP" ... "9. DAN") come from the shared TrueVAR
@@ -296,33 +351,46 @@ immediately, with no resize listener or re-render needed.
 
     // ── PARSER ──────────────────────────────────────────────────────
     // Expands the dimension schema into a tree of
-    //   entry type (individual / pairs / team) → age division → gender → weight bracket
-    // instead of the flat "one register button per division" shape from
-    // before. Only the entry-type level gets a Register button — age,
+    //   entry type → age division → class (belt × para) → gender → weight bracket
+    // Only the entry-type level gets a Register button — age, class,
     // gender, and (when unambiguous) weight are resolved automatically
     // from whichever athlete(s) get selected in the modal.
-    // CHANGE: the age → gender → weight tree is now built PER entry type
-    // instead of once for the whole discipline. Each entry_type option
-    // may supply its own `age_options` and/or `gender_options`, which
-    // override the discipline-level `age`/`gender` dimensions just for
-    // that entry type. This is what lets one discipline (e.g. "poomsae")
-    // hold nine entry types — Individual, Pairs, Teams, and their Para
-    // and Freestyle counterparts — even though Para/Freestyle use
-    // completely different age brackets than the standard ones, and
-    // Pairs/Teams use a single "Mixed" gender bracket while Individual
-    // splits into Male/Female. An entry type with no overrides falls
-    // back to the discipline-level dimensions exactly as before, so
-    // kyorugi (one entry type, no overrides) is unaffected.
-    // CHANGE: inserted an optional BELT CLASS level between age and
-    // gender. An entry type can declare `belt_class_options` (each with
-    // rank bounds `min`/`max` against the athlete's WT rank integer,
-    // 0 = 10th Gup ... 9 = 1st Gup ... 10 = 1st Dan ...). Entry types
-    // that don't declare it (kyorugi, Para/Freestyle Poomsae) get a
-    // single IMPLICIT belt class with an empty code/label, which
-    // contributes nothing to the composed category code or the display
-    // label — so their codes are byte-for-byte identical to before this
-    // feature existed. Only Individual/Pairs/Teams Poomsae, which do
-    // declare belt_class_options, get the extra code/label segment.
+    //
+    // Each entry_type option may supply its own `age_options` and/or
+    // `gender_options`, which override the discipline-level `age`/
+    // `gender` dimensions just for that entry type.
+    //
+    // BELT CLASS: an entry type can declare `belt_class_options` (rank
+    // bounds `min`/`max` against the athlete's WT rank integer).
+    //
+    // PARA CLASS: an entry type can declare `requires_para: true` (only
+    // athletes with isPara may enter) and/or `para_class_options` (each
+    // with a `match_value` equal to the athlete's paraCategory, e.g.
+    // "P11"). Declaring para_class_options implies requires_para.
+    //
+    // Belt and para classes are folded into ONE "class" level as a cross
+    // product (the tree still calls it `beltClasses` so every existing
+    // loop over division.beltClasses → genders → weightCats keeps
+    // working). Entry types that declare neither get a single implicit
+    // class with an empty code/label, so kyorugi and standard poomsae
+    // codes are byte-for-byte identical to before.
+    // Same list as PARA_CATEGORIES in tournament_router.py and the
+    // paraCategory <select> in create_athlete.html.
+    const PARA_CATEGORIES = [
+        "P11", "P12",
+        "P21", "P22", "P23",
+        "P31", "P32", "P33", "P34", "P35",
+        "P41", "P42", "P43", "P44", "P45",
+        "P51", "P52", "P53",
+        "P60",
+        "P72",
+    ];
+    const DEFAULT_PARA_CLASS_OPTIONS = PARA_CATEGORIES.map(c => ({ code: c.toLowerCase(), label: c, match_value: c }));
+
+    function isParaEntryCode(code) {
+        return typeof code === "string" && code.toLowerCase().startsWith("para_");
+    }
+
     function parseCategories(schema) {
         const entryDim = schema.find(d => d.key === "entry_type");
         const ageDim = schema.find(d => d.key === "age");
@@ -338,6 +406,7 @@ immediately, with no resize listener or re-render needed.
 
         const unit = (weightDim && weightDim.unit) || "kg";
         const IMPLICIT_BELT_CLASS = { code: "", label: "", min: null, max: null };
+        const IMPLICIT_PARA_CLASS = { code: "", label: "", match_value: null };
 
         return entryOptions.map(entryOpt => {
             const ageOptions = entryOpt.age_options || (ageDim && ageDim.options) || [];
@@ -345,17 +414,44 @@ immediately, with no resize listener or re-render needed.
             const beltClassOptions = (entryOpt.belt_class_options && entryOpt.belt_class_options.length > 0)
                 ? entryOpt.belt_class_options
                 : [IMPLICIT_BELT_CLASS];
+            // Para rules don't depend on the stored schema being updated:
+            // any entry type whose code starts with "para_" (or that sets
+            // requires_para) is para-only, and gets the full P11…P72 class
+            // list unless the schema supplies its own para_class_options
+            // (an explicit [] means "para-only, no class split").
+            // requires_para: false explicitly opts a "para_" code out.
+            const explicitParaClasses = Array.isArray(entryOpt.para_class_options) ? entryOpt.para_class_options : null;
+            const requiresPara = entryOpt.requires_para !== false && !!(
+                entryOpt.requires_para === true
+                || isParaEntryCode(entryOpt.code)
+                || (explicitParaClasses && explicitParaClasses.length > 0)
+            );
+            const paraSource = !requiresPara ? [] : (explicitParaClasses || DEFAULT_PARA_CLASS_OPTIONS);
+            const paraClassOptions = paraSource.length > 0 ? paraSource : [IMPLICIT_PARA_CLASS];
+
+            // belt × para → one class level. Empty (implicit) parts add
+            // nothing to the composed code or label.
+            const classOptions = [];
+            beltClassOptions.forEach(b => paraClassOptions.forEach(p => classOptions.push({
+                code: [b.code, p.code].filter(Boolean).join("_"),
+                label: [b.label, p.label].filter(Boolean).join(" "),
+                beltCode: b.code || null,
+                paraCode: p.code || null,
+                rankMin: b.min ?? null,
+                rankMax: b.max ?? null,
+                paraMatch: p.match_value ? String(p.match_value).toUpperCase() : null,
+            })));
 
             const divisions = ageOptions.map(ageOpt => {
-                const beltClasses = beltClassOptions.map(beltOpt => {
+                const beltClasses = classOptions.map(cls => {
                     const genders = [];
 
                     genderOptions.forEach(genderOpt => {
                         let weightCats;
                         // Only the non-empty parts go into the code, so an
-                        // entry type with no belt class produces exactly
-                        // the same code shape as before this feature.
-                        const codeBase = [ageOpt.code, beltOpt.code, genderOpt.code].filter(Boolean).join("_");
+                        // entry type with no belt/para class produces exactly
+                        // the same code shape as before these features.
+                        const codeBase = [ageOpt.code, cls.code, genderOpt.code].filter(Boolean).join("_");
 
                         if (weightDim) {
                             const thresholdKey = `${ageOpt.code}|${genderOpt.code}`;
@@ -377,10 +473,10 @@ immediately, with no resize listener or re-render needed.
                             }
                         } else {
                             // No weight dimension (e.g. poomsae) — the
-                            // belt class + gender level IS the terminal
+                            // class + gender level IS the terminal
                             // category. A single implicit bracket with an
                             // empty label auto-selects and skips the
-                            // weight picker, same as before.
+                            // weight picker.
                             weightCats = [{ code: codeBase, label: "", maxWeight: undefined }];
                         }
 
@@ -389,7 +485,7 @@ immediately, with no resize listener or re-render needed.
 
                     if (genders.length === 0) return null;
 
-                    return { code: beltOpt.code, label: beltOpt.label, rankMin: beltOpt.min, rankMax: beltOpt.max, genders };
+                    return { ...cls, genders };
                 }).filter(Boolean);
 
                 if (beltClasses.length === 0) return null;
@@ -407,6 +503,7 @@ immediately, with no resize listener or re-render needed.
                 code: entryOpt.code,
                 label: entryOpt.label,
                 participantCount: entryOpt.participantCount || 1,
+                requiresPara,
                 divisions,
             };
         });
@@ -418,9 +515,6 @@ immediately, with no resize listener or re-render needed.
     //     e.g. a "Mixed" bracket that overlaps both the Male and Female
     //     brackets in the same division
     //   - null/omitted — wildcard, matches everyone
-    // This is what lets a "Mixed" category coexist with "Male"/"Female"
-    // categories in the same division without a special case anywhere
-    // else in the code.
     function genderMatches(genderBracket, athleteGenderCode) {
         const mv = genderBracket.matchValue;
         if (Array.isArray(mv)) return mv.includes(athleteGenderCode);
@@ -428,12 +522,9 @@ immediately, with no resize listener or re-render needed.
         return mv === athleteGenderCode;
     }
 
-    // A belt class bracket with both rankMin and rankMax null is the
-    // IMPLICIT wildcard (entry types with no belt_class_options) and
-    // matches everyone, including an athlete with no rank on file. A
-    // real belt class bracket requires a known rank — an athlete with no
-    // rank recorded simply can't be placed into Individual/Pairs/Teams
-    // Poomsae until their rank is set.
+    // A class with both rankMin and rankMax null has no belt restriction
+    // and matches everyone, including an athlete with no rank on file. A
+    // real belt class requires a known rank.
     function beltClassMatches(beltClass, rank) {
         if (beltClass.rankMin == null && beltClass.rankMax == null) return true;
         if (rank == null) return false;
@@ -442,24 +533,36 @@ immediately, with no resize listener or re-render needed.
         return true;
     }
 
-    // Eligibility isn't a hand-authored list — it falls straight out of
-    // the age ranges, belt class rank bounds, and gender match rules
-    // actually overlapping. If Cadets is 2011-2013 and Juniors is
-    // 2009-2011, someone born in 2011 is legitimately in both ranges at
-    // once; if a division has both a "Male" bracket and a "Mixed"
-    // bracket, a male athlete matches both. Returns every valid
+    // Full class check for one athlete: belt rank bounds, plus — for para
+    // entry types — the athlete must be flagged isPara, and for a class
+    // with a para match_value their paraCategory must equal it exactly.
+    // Para classes never overlap, so a para athlete always resolves to
+    // exactly one class automatically.
+    function classMatches(entryType, cls, athlete) {
+        if (!athlete) return false;
+        if (!beltClassMatches(cls, athlete.rank)) return false;
+        if (entryType.requiresPara && !athlete.isPara) return false;
+        if (cls.paraMatch) {
+            if (!athlete.isPara) return false;
+            if (String(athlete.paraCategory || "").toUpperCase() !== cls.paraMatch) return false;
+        }
+        return true;
+    }
+
+    // Eligibility falls straight out of the age ranges, class bounds, and
+    // gender match rules actually overlapping. Returns every valid
     // {division, beltClass, gender} combination — 1 in the typical case,
     // more when ranges/brackets genuinely overlap.
-    function resolveEligibleCategories(entryType, birthYear, rank, athleteGenderCode) {
-        if (birthYear == null) return [];
+    function resolveEligibleCategories(entryType, athlete) {
+        if (!athlete || athlete.birthYear == null) return [];
         const results = [];
 
         entryType.divisions.forEach(division => {
-            if (birthYear < division.ageMin || birthYear > division.ageMax) return;
+            if (athlete.birthYear < division.ageMin || athlete.birthYear > division.ageMax) return;
             division.beltClasses.forEach(beltClass => {
-                if (!beltClassMatches(beltClass, rank)) return;
+                if (!classMatches(entryType, beltClass, athlete)) return;
                 beltClass.genders.forEach(genderBracket => {
-                    if (genderMatches(genderBracket, athleteGenderCode)) {
+                    if (genderMatches(genderBracket, athlete.gender)) {
                         results.push({ division, beltClass, gender: genderBracket });
                     }
                 });
@@ -469,13 +572,75 @@ immediately, with no resize listener or re-render needed.
         return results;
     }
 
+    // Same filter the modal uses: first athlete drives age/gender, and
+    // every member must fit the class (belt + para).
+    function resolveEligibleForEntry(entryType, athletes) {
+        if (!athletes || athletes.length === 0) return [];
+        return resolveEligibleCategories(entryType, athletes[0])
+            .filter(ec => athletes.every(a => classMatches(entryType, ec.beltClass, a)));
+    }
+
+    // Human-readable reason shown when a para entry type has no match.
+    function ineligibilityReason(entryType, athletes) {
+        if (!entryType.requiresPara) return null;
+        const nonPara = athletes.filter(a => !a.isPara);
+        if (nonPara.length) {
+            return `${nonPara.map(a => a.displayName).join(", ")} ${nonPara.length === 1 ? "is" : "are"} not registered as a para athlete. Only para athletes can enter ${entryType.label}.`;
+        }
+        const hasParaClasses = entryType.divisions.some(d => d.beltClasses.some(bc => bc.paraMatch));
+        if (!hasParaClasses) return null;
+        const missing = athletes.filter(a => !a.paraCategory);
+        if (missing.length) {
+            return `${missing.map(a => a.displayName).join(", ")} ${missing.length === 1 ? "has" : "have"} no para class set on their athlete profile.`;
+        }
+        const classes = [...new Set(athletes.map(a => String(a.paraCategory).toUpperCase()))];
+        if (classes.length > 1) return `All members must share the same para class (got ${classes.join(", ")}).`;
+        return `Para class ${classes[0]} isn't offered for this athlete's age in ${entryType.label}.`;
+    }
+
     // ── RENDER: categories overview ───────────────────────────────────
-    // Three levels: entry type (Individual/Pairs/Team — the only level
-    // with a Register button) → every age division, always listed →
-    // click a division to lazily fetch its real roster from
-    // tournaments/{id}/division_rosters/{ageCode} and show actual
-    // registered athletes/teams, not just a count.
     let divisionRosterCache = {}; // ageCode -> { categoryCode: { entryId: {members, registeredAt} } }, one Firestore doc per key
+
+    // Which age division of this entry type a stored category code belongs
+    // to ("para_individual_poomsae_seniors_men" → "seniors"). Longest
+    // matching division code wins, so "seniors" never swallows
+    // "seniors_under_30". Returns null for codes of other entry types.
+    function divisionCodeForCategory(entryType, fullCode) {
+        const prefix = `${entryType.code}_`;
+        if (typeof fullCode !== "string" || !fullCode.startsWith(prefix)) return null;
+        const rest = fullCode.slice(prefix.length);
+        let best = null;
+        entryType.divisions.forEach(d => {
+            if ((rest === d.code || rest.startsWith(`${d.code}_`)) && (!best || d.code.length > best.length)) {
+                best = d.code;
+            }
+        });
+        return best;
+    }
+
+    // ── OPEN-STATE PRESERVATION ──────────────────────────────────────
+    // renderCategories() rebuilds the whole accordion (counts change after
+    // every register/move/remove). Without this, every rebuild collapsed
+    // everything back to "first entry type open". Now the open state of
+    // every entry-type panel and division is captured before the rebuild
+    // and restored after it, and each open division re-GETs its roster
+    // (only the stale ones hit the network) while keeping its previous
+    // content on screen until the fresh data arrives — no flicker.
+    let hasRenderedCategories = false;
+
+    function captureOpenState(container) {
+        const openEntryTypes = new Set();
+        const openDivisions = new Map(); // "entry|division" -> previous body HTML
+        container.querySelectorAll("details[data-entry-type]").forEach(el => {
+            if (el.open) openEntryTypes.add(el.dataset.entryType);
+        });
+        container.querySelectorAll("details[data-division]").forEach(el => {
+            if (!el.open) return;
+            const body = el.querySelector("[data-division-body]");
+            openDivisions.set(`${el.dataset.entry}|${el.dataset.division}`, body && body.dataset.loaded ? body.innerHTML : null);
+        });
+        return { openEntryTypes, openDivisions };
+    }
 
     function renderCategories() {
         const container = document.getElementById("categoriesContainer");
@@ -491,44 +656,60 @@ immediately, with no resize listener or re-render needed.
             return;
         }
 
-        container.innerHTML = entryTypes.map((entryType, i) => {
-            // Every age division is listed, whether or not anyone's
-            // registered yet — only the roster CONTENTS inside a division
-            // hide empty brackets, not the division itself.
-            const divisionsHtml = entryType.divisions.map(division => {
-                let divisionTotal = 0;
-                division.beltClasses.forEach(bc => bc.genders.forEach(g => g.weightCats.forEach(c => {
-                    divisionTotal += categoryCounts[`${entryType.code}_${c.code}`] || 0;
-                })));
+        const { openEntryTypes, openDivisions } = captureOpenState(container);
+        const firstRender = !hasRenderedCategories;
+        hasRenderedCategories = true;
+        const canRegister = IS_CLUB_ADMIN && !isRegistrationClosed();
 
+        container.innerHTML = entryTypes.map((entryType, i) => {
+            const divisionsHtml = entryType.divisions.map(division => {
+                // Counted from every stored category code that belongs to
+                // this entry type + division — including codes from an older
+                // schema (e.g. a para entry saved before para classes
+                // existed), so nobody silently drops out of the total.
+                let divisionTotal = 0;
+                Object.entries(categoryCounts).forEach(([code, n]) => {
+                    if (typeof n === "number" && divisionCodeForCategory(entryType, code) === division.code) {
+                        divisionTotal += n;
+                    }
+                });
+
+                const key = `${entryType.code}|${division.code}`;
+                const wasOpen = openDivisions.has(key);
+                const previousBody = openDivisions.get(key);
                 const bodyId = `divisionBody_${entryType.code}_${division.code}`;
                 return `
-                    <details style="margin-top: 0.5rem; border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.75rem;"
+                    <details data-entry="${entryType.code}" data-division="${division.code}" ${wasOpen ? "open" : ""}
+                        style="margin-top: 0.5rem; border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.75rem;"
                         ontoggle="if (this.open) loadDivisionRoster('${entryType.code}', '${division.code}')">
                         <summary style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 0.92rem; font-weight: 600; list-style: revert;">
                             <span>${escapeHtml(division.label)}</span>
                             <span class="text-muted" style="font-weight: 400; font-size: 0.82rem;">${divisionTotal} registered</span>
                         </summary>
-                        <div id="${bodyId}" style="margin-top: 0.55rem;">
-                            <p class="text-muted" style="font-size: 0.85rem;">Click to load roster…</p>
+                        <div id="${bodyId}" data-division-body ${previousBody != null ? 'data-loaded="1"' : ""} style="margin-top: 0.55rem;">
+                            ${previousBody != null ? previousBody : `<p class="text-muted" style="font-size: 0.85rem;">Click to load roster…</p>`}
                         </div>
                     </details>
                 `;
             }).join("");
 
-            // ONE register button per entry-type group (e.g. one for all
-            // of "Individual"), not one per age division.
-            const registerButtonHtml = IS_CLUB_ADMIN ? `
+            const registerButtonHtml = canRegister ? `
                 <button type="button" class="btn btn-primary" style="padding: 0.4rem 1.1rem; font-size: 0.85rem;"
                     onclick="event.preventDefault(); event.stopPropagation(); openRegisterModal('${entryType.code}')">
                     Register
                 </button>
             ` : '';
 
+            const paraTag = entryType.requiresPara
+                ? `<span class="para-chip">Para athletes only</span>`
+                : "";
+
+            const panelOpen = firstRender ? i === 0 : openEntryTypes.has(entryType.code);
+
             return `
-                <details class="panel" style="padding: clamp(0.9rem, 3vw, 1.25rem) clamp(1rem, 3.5vw, 1.5rem); margin-bottom: 0.85rem;" ${i === 0 ? "open" : ""}>
+                <details class="panel" data-entry-type="${entryType.code}" style="padding: clamp(0.9rem, 3vw, 1.25rem) clamp(1rem, 3.5vw, 1.5rem); margin-bottom: 0.85rem;" ${panelOpen ? "open" : ""}>
                     <summary style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; list-style: revert; gap: 1rem;">
-                        <span style="font-weight: 700; font-size: 1.05rem;">${entryType.label}</span>
+                        <span style="font-weight: 700; font-size: 1.05rem;">${escapeHtml(entryType.label)}${paraTag}</span>
                         ${registerButtonHtml}
                     </summary>
                     <div style="margin-top: 0.65rem;">
@@ -539,26 +720,71 @@ immediately, with no resize listener or re-render needed.
         }).join("");
 
         countEl.textContent = `${totalRegistered} registered`;
+
+        // Refresh every division that was open before the rebuild. Cached
+        // rosters re-render instantly; invalidated ones re-GET once.
+        openDivisions.forEach((_, key) => {
+            const [entryCode, ageCode] = key.split("|");
+            loadDivisionRoster(entryCode, ageCode);
+        });
     }
 
-    // Fetches tournaments/{id}/division_rosters/{ageCode} the first time
-    // a division is expanded (cached after that — one Firestore read per
-    // division actually opened, not per division that merely exists).
+    // Drops a division's cached roster so the next loadDivisionRoster()
+    // re-fetches it. Also forgets any request still in flight, so a GET
+    // started before the change can't write stale data into the cache.
+    function invalidateRoster(ageCode) {
+        delete divisionRosterCache[ageCode];
+        delete rosterRequests[ageCode];
+    }
+
+    // One GET per division at a time, shared by every caller (the toggle
+    // event of a re-opened <details>, the post-render refresh above, the
+    // clubs overlay) instead of each firing its own request.
+    const rosterRequests = {}; // ageCode -> Promise<roster>
+
+    function fetchDivisionRoster(ageCode) {
+        if (ageCode in divisionRosterCache) return Promise.resolve(divisionRosterCache[ageCode]);
+        if (rosterRequests[ageCode]) return rosterRequests[ageCode];
+
+        const request = (async () => {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/division-rosters/${ageCode}`, { cache: "no-store" });
+            if (!res.ok) throw new Error(`Roster fetch failed: ${res.status}`);
+            const data = await res.json();
+            const athletes = data.athletes || {};
+            // Only store it if this request wasn't invalidated meanwhile.
+            if (rosterRequests[ageCode] === request) {
+                divisionRosterCache[ageCode] = athletes;
+                delete rosterRequests[ageCode];
+            }
+            return athletes;
+        })();
+        request.catch(() => {
+            if (rosterRequests[ageCode] === request) delete rosterRequests[ageCode];
+        });
+        rosterRequests[ageCode] = request;
+        return request;
+    }
+
+    // Fetches tournaments/{id}/division_rosters/{ageCode} when a division
+    // is opened (cached after that). A division that already shows a
+    // roster keeps it on screen while the refresh is in flight.
     async function loadDivisionRoster(entryTypeCode, ageCode) {
         const bodyEl = document.getElementById(`divisionBody_${entryTypeCode}_${ageCode}`);
         const division = entryTypes.find(e => e.code === entryTypeCode)?.divisions.find(d => d.code === ageCode);
         if (!bodyEl || !division) return;
 
         if (!(ageCode in divisionRosterCache)) {
-            bodyEl.innerHTML = `<p class="text-muted" style="font-size: 0.85rem;">Loading roster…</p>`;
+            if (!bodyEl.dataset.loaded) {
+                bodyEl.innerHTML = `<p class="text-muted" style="font-size: 0.85rem;">Loading roster…</p>`;
+            }
             try {
-                const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/division-rosters/${ageCode}`);
-                if (!res.ok) throw new Error(`Roster fetch failed: ${res.status}`);
-                const data = await res.json();
-                divisionRosterCache[ageCode] = data.athletes || {};
+                await fetchDivisionRoster(ageCode);
             } catch (err) {
                 console.error("Failed to load division roster", err);
-                bodyEl.innerHTML = `<p class="text-muted" style="font-size: 0.85rem;">Couldn't load roster — try again.</p>`;
+                const current = document.getElementById(`divisionBody_${entryTypeCode}_${ageCode}`);
+                if (current && !current.dataset.loaded) {
+                    current.innerHTML = `<p class="text-muted" style="font-size: 0.85rem;">Couldn't load roster — try again.</p>`;
+                }
                 return;
             }
         }
@@ -567,96 +793,107 @@ immediately, with no resize listener or re-render needed.
     }
 
     // Renders real registered athletes/teams for one division, grouped by
-    // the full composed category label ("Seniors Male -68kg", never a
-    // bare "-68kg") — pulled from the roster doc's `members` list, not
-    // just a count. Each row also shows a placement badge (1st/2nd/=3rd/
-    // etc.) once the admin panel's "Compute Results" button has written
-    // a "placement" field onto that entry — see
-    // compute_tournament_results_endpoint in tournament_router.py.
-    // In templates/tournament.html
-
-    // 1. Update renderDivisionBody to include the trash icon next to the Edit button
+    // the full composed category label, with placement badges once the
+    // admin panel's "Compute Results" has run.
     function renderDivisionBody(entryTypeCode, division) {
         const bodyEl = document.getElementById(`divisionBody_${entryTypeCode}_${division.code}`);
         if (!bodyEl) return;
 
         const roster = divisionRosterCache[division.code] || {};
+        const entryType = entryTypes.find(e => e.code === entryTypeCode);
         let html = "";
 
+        // 1) Current categories, in schema order.
+        const groups = [];
+        const knownCodes = new Set();
         division.beltClasses.forEach(bc => {
             bc.genders.forEach(g => {
                 g.weightCats.forEach(c => {
                     const fullCode = `${entryTypeCode}_${c.code}`;
+                    knownCodes.add(fullCode);
                     const entries = roster[fullCode];
                     if (!entries || Object.keys(entries).length === 0) return;
-
-                    const fullLabel = [division.label, bc.label, g.label, c.label].filter(Boolean).join(" ");
-
-                    // Entries with a placement sort to the top (1st, then 2nd,
-                    // then joint-3rd, etc.); everyone else keeps roster order.
-                    const sortedEntries = Object.entries(entries).sort(([, a], [, b]) => {
-                        const pa = a.placement ?? Infinity;
-                        const pb = b.placement ?? Infinity;
-                        return pa - pb;
+                    groups.push({
+                        fullCode,
+                        fullLabel: [division.label, bc.label, g.label, c.label].filter(Boolean).join(" "),
+                        entries,
+                        legacy: false,
                     });
+                });
+            });
+        });
 
-                    // How many entries in THIS weight bracket actually share
-                    // each placement value — needed because "=" should only
-                    // appear when a placement is genuinely shared. With a
-                    // full power-of-two bracket every rank below 2nd has at
-                    // least two people in it (both semifinal losers, etc.),
-                    // but an odd-sized bracket (byes) can leave a single
-                    // entry alone at 3rd/5th/etc., and that entry should NOT
-                    // get an "=" prefix.
-                    const placementCounts = {};
-                    Object.values(entries).forEach(e => {
-                        if (e.placement != null) placementCounts[e.placement] = (placementCounts[e.placement] || 0) + 1;
-                    });
+        // 2) Entries still stored under a category code the current schema
+        // no longer produces (e.g. "Seniors Male" saved before para classes
+        // existed). Shown instead of hidden, flagged, so they can be moved
+        // with Edit into the correct class.
+        if (entryType) {
+            Object.entries(roster).forEach(([fullCode, entries]) => {
+                if (knownCodes.has(fullCode)) return;
+                if (!entries || Object.keys(entries).length === 0) return;
+                if (divisionCodeForCategory(entryType, fullCode) !== division.code) return;
+                groups.push({
+                    fullCode,
+                    fullLabel: `${division.label} — old category (${fullCode.slice(entryTypeCode.length + 1)}), use Edit to move to the correct class`,
+                    entries,
+                    legacy: true,
+                });
+            });
+        }
 
-                    const rowsHtml = sortedEntries.map(([entryId, entry]) => {
-                        const members = entry.members || [];
-                        const namesHtml = members.map(m => {
-                            const flag = countryFlagEmoji(m.country);
-                            const rankLabel = formatRank(m.rank);
-                            return `${flag ? flag + " " : ""}${escapeHtml(m.name)}${rankLabel ? ` <span class="text-muted">(${escapeHtml(rankLabel)})</span>` : ""}`;
-                        }).join(" &amp; ");
-                        const club = members[0] ? members[0].club : "";
-                        const entryClubId = members[0] ? members[0].clubId : null;
-                        const athleteIdsCsv = members.map(m => m.athleteId).join(",");
-                        const canEdit = IS_CLUB_ADMIN && ADMIN_CLUB_ID && entryClubId === ADMIN_CLUB_ID;
+        groups.forEach(({ fullCode, fullLabel, entries, legacy }) => {
+            const sortedEntries = Object.entries(entries).sort(([, a], [, b]) => {
+                const pa = a.placement ?? Infinity;
+                const pb = b.placement ?? Infinity;
+                return pa - pb;
+            });
 
-                        const placement = entry.placement;
-                        const isSharedPlacement = placement != null && (placementCounts[placement] || 0) > 1;
-                        const placementLabel = placement == null ? "" : (
-                            isSharedPlacement ? `=${ordinalLabel(placement)}` : ordinalLabel(placement)
-                        );
-                        const placementColors = placement === 1
-                            ? { bg: "#fef3c7", fg: "#b45309" }
-                            : placement === 2
-                                ? { bg: "#e2e8f0", fg: "#475569" }
-                                : { bg: "#ffedd5", fg: "#c2410c" };
-                        // roster-place-badge gives every REAL badge the SAME
-                        // fixed width (see the <style> block above) regardless
-                        // of whether the text is "1st" or "=3rd", so names
-                        // below it line up instead of stair-stepping by label
-                        // length. When there's no placement yet, nothing is
-                        // rendered at all — an empty placeholder span still
-                        // carries min-width: 44px, which reserves that gap on
-                        // every row even before any results exist.
-                        const placementBadge = placementLabel ? `
+            const placementCounts = {};
+            Object.values(entries).forEach(e => {
+                if (e.placement != null) placementCounts[e.placement] = (placementCounts[e.placement] || 0) + 1;
+            });
+
+            const rowsHtml = sortedEntries.map(([entryId, entry]) => {
+                const members = entry.members || [];
+                const namesHtml = members.map(m => {
+                    const flag = countryFlagEmoji(m.country);
+                    const rankLabel = formatRank(m.rank);
+                    return `${flag ? flag + " " : ""}${escapeHtml(m.name)}${rankLabel ? ` <span class="text-muted">(${escapeHtml(rankLabel)})</span>` : ""}`;
+                }).join(" &amp; ");
+                const club = members[0] ? members[0].club : "";
+                const entryClubId = members[0] ? members[0].clubId : null;
+                const athleteIdsCsv = members.map(m => m.athleteId).join(",");
+                // Own-club entries: editable until the registration
+                // deadline, removable until the tournament starts.
+                const ownEntry = IS_CLUB_ADMIN && ADMIN_CLUB_ID && entryClubId === ADMIN_CLUB_ID;
+                const canEdit = ownEntry && !isRegistrationClosed();
+                const canRemove = ownEntry && !isTournamentStarted();
+                const canManage = canEdit || canRemove;
+
+                const placement = entry.placement;
+                const isSharedPlacement = placement != null && (placementCounts[placement] || 0) > 1;
+                const placementLabel = placement == null ? "" : (
+                    isSharedPlacement ? `=${ordinalLabel(placement)}` : ordinalLabel(placement)
+                );
+                const placementColors = placement === 1
+                    ? { bg: "#fef3c7", fg: "#b45309" }
+                    : placement === 2
+                        ? { bg: "#e2e8f0", fg: "#475569" }
+                        : { bg: "#ffedd5", fg: "#c2410c" };
+                const placementBadge = placementLabel ? `
                         <span class="roster-place-badge" style="font-weight: 700; font-size: 0.78rem; background: ${placementColors.bg}; color: ${placementColors.fg};">
                             ${escapeHtml(placementLabel)}
                         </span>
                     ` : "";
 
-                        const actionBtns = canEdit ? `
+                const actionBtns = canManage ? `
                     <div style="display: flex; gap: 0.35rem; align-items: center;">
-                        <button type="button"
+                        ${canEdit ? `<button type="button"
                             onclick="openEditRegistration('${entryTypeCode}', '${division.code}', '${fullCode}', '${athleteIdsCsv}')"
                             style="background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.15rem 0.6rem; font-size: 0.78rem; cursor: pointer;">
                             Edit
-                        </button>
-                        <button type="button"
+                        </button>` : ""}
+                        ${canRemove ? `<button type="button"
                             title="Remove registration"
                             onclick="removeRegistration('${entryTypeCode}', '${division.code}', '${fullCode}', '${entryId}')"
                             style="background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.15rem 0.45rem; font-size: 0.78rem; cursor: pointer; color: #dc2626; display: inline-flex; align-items: center; justify-content: center;">
@@ -666,11 +903,11 @@ immediately, with no resize listener or re-render needed.
                                 <line x1="10" y1="11" x2="10" y2="17"></line>
                                 <line x1="14" y1="11" x2="14" y2="17"></line>
                             </svg>
-                        </button>
+                        </button>` : ""}
                     </div>
                 ` : "";
 
-                        return `
+                return `
                     <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.3rem 0; font-size: 0.88rem;">
                         <span style="display: flex; align-items: center; gap: 0.5rem;">
                             ${placementBadge}
@@ -679,24 +916,26 @@ immediately, with no resize listener or re-render needed.
                         ${actionBtns}
                     </div>
                 `;
-                    }).join("");
+            }).join("");
 
-                    html += `
+            html += `
                 <div style="margin-top: 0.75rem;">
-                    <div style="font-weight: 600; font-size: 0.88rem;">${escapeHtml(fullLabel)}</div>
+                    <div style="font-weight: 600; font-size: 0.88rem;${legacy ? " color: #b45309;" : ""}">${escapeHtml(fullLabel)}</div>
                     <div style="margin-left: 0.5rem;">${rowsHtml}</div>
                 </div>
             `;
-                });
-            });
         });
 
         bodyEl.innerHTML = html || `<p class="text-muted" style="font-size: 0.85rem;">No athletes registered in this division yet.</p>`;
+        bodyEl.dataset.loaded = "1";
     }
 
-    // 2. Add function to handle registration removal
     async function removeRegistration(entryTypeCode, ageCode, categoryCode, entryId) {
         if (!IS_CLUB_ADMIN) return;
+        if (isTournamentStarted()) {
+            renderCategories();
+            return;
+        }
 
         if (!confirm("Are you sure you want to remove this athlete from registration?")) {
             return;
@@ -712,12 +951,10 @@ immediately, with no resize listener or re-render needed.
                 throw new Error(body.detail || `Remove failed (${res.status})`);
             }
 
-            // Optimistically update counts and totals
             categoryCounts[categoryCode] = Math.max(0, (categoryCounts[categoryCode] || 1) - 1);
             totalRegistered = Math.max(0, totalRegistered - 1);
 
-            // Invalidate division roster cache and re-render
-            delete divisionRosterCache[ageCode];
+            invalidateRoster(ageCode);
             renderCategories();
             await loadDivisionRoster(entryTypeCode, ageCode);
         } catch (err) {
@@ -728,27 +965,28 @@ immediately, with no resize listener or re-render needed.
 
     // ── REGISTRATION MODAL ─────────────────────────────────────────
     // Flow: click Register on an entry-type group → search the admin's
-    // own club roster (debounced, unrestricted — age is resolved AFTER
-    // picking, not filtered before) → pick athlete(s) (participantCount
-    // of them) → age division / weight bracket auto-resolve, with a
-    // picker shown only when more than one option genuinely applies →
-    // confirm.
+    // own club roster → pick athlete(s) (participantCount of them) →
+    // age division / class / weight bracket auto-resolve, with a picker
+    // shown only when more than one option genuinely applies → confirm.
+    // For para entry types, non-para athletes are shown disabled in the
+    // search and the para class is resolved from the athlete profile.
     let pendingEntryType = null;
-    let selectedAthletes = [];       // up to pendingEntryType.participantCount
-    let eligibleCategories = [];   // array of {division, gender} pairs the selected athlete(s) qualify for
-    let chosenCategory = null;     // the {division, gender} pair, once resolved or picked
+    let selectedAthletes = [];
+    let eligibleCategories = [];
+    let chosenCategory = null;
     let chosenBracket = null;
     let resolvedCategory = null;
-    // Set only when editing an existing entry (via the roster's Edit
-    // button) instead of registering a brand-new one. When set,
-    // confirmRegistration() calls the move endpoint instead of create.
     let editingRegistration = null; // { athleteIds, oldCategoryCode, oldAgeCode }
 
     let searchDebounceTimer = null;
     let lastSearchResults = [];
 
     function openRegisterModal(entryTypeCode) {
-        if (!IS_CLUB_ADMIN) return; // client-side guard; server enforces this too
+        if (!IS_CLUB_ADMIN) return;
+        if (isRegistrationClosed()) {
+            renderCategories();
+            return;
+        }
 
         pendingEntryType = entryTypes.find(e => e.code === entryTypeCode) || null;
         if (!pendingEntryType) return;
@@ -765,6 +1003,10 @@ immediately, with no resize listener or re-render needed.
             ? `Registering a ${pendingEntryType.label} entry — pick ${pendingEntryType.participantCount} athletes`
             : `Registering into: ${pendingEntryType.label}`;
 
+        document.getElementById("searchHint").textContent = pendingEntryType.requiresPara
+            ? "Only para athletes can be registered here — their para class is matched automatically from their profile."
+            : "Every athlete in your club roster is shown — age and gender are matched automatically once you pick one.";
+
         document.getElementById("athleteSearchInput").value = "";
         document.getElementById("searchResults").innerHTML = "";
         document.getElementById("searchResults").classList.add("hidden");
@@ -776,14 +1018,13 @@ immediately, with no resize listener or re-render needed.
         document.getElementById("athleteSearchInput").focus();
     }
 
-    // Reopens the SAME modal in edit mode for an existing entry: skips
-    // the search step entirely (the athlete(s) are already known from
-    // the roster), re-fetches their birthYear/gender (not carried on the
-    // lean roster — see get_athlete_endpoint), and re-runs eligibility
-    // resolution so the admin can move them to a different bracket or
-    // (if eligible for more than one) division.
+    // Reopens the SAME modal in edit mode for an existing entry.
     async function openEditRegistration(entryTypeCode, oldAgeCode, oldCategoryCode, athleteIdsCsv) {
         if (!IS_CLUB_ADMIN) return;
+        if (isRegistrationClosed()) {
+            renderCategories();
+            return;
+        }
 
         pendingEntryType = entryTypes.find(e => e.code === entryTypeCode) || null;
         if (!pendingEntryType) return;
@@ -817,7 +1058,7 @@ immediately, with no resize listener or re-render needed.
             return;
         }
 
-        eligibleCategories = resolveEligibleCategories(pendingEntryType, selectedAthletes[0].birthYear, selectedAthletes[0].rank, selectedAthletes[0].gender);
+        eligibleCategories = resolveEligibleForEntry(pendingEntryType, selectedAthletes);
         renderResolutionStep();
     }
 
@@ -835,16 +1076,9 @@ immediately, with no resize listener or re-render needed.
 
     function backToSearch() {
         if (editingRegistration) {
-            // Editing doesn't come from a search — there's nothing to go
-            // back TO, so just close.
             closeRegisterModal();
             return;
         }
-        // Full reset, not just the resolution state: without clearing
-        // selectedAthletes, picking a different athlete after Back
-        // APPENDS to the old selection instead of replacing it — for
-        // Individual (participantCount 1) that silently submits two
-        // athletes on one entry once you've been Back once.
         selectedAthletes = [];
         eligibleCategories = [];
         chosenCategory = null;
@@ -868,13 +1102,11 @@ immediately, with no resize listener or re-render needed.
         bar.classList.remove("hidden");
         bar.innerHTML = selectedAthletes.map(a => `
             <span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.7rem; background: var(--blue-bg); color: var(--blue-text); border-radius: 999px; font-size: 0.82rem;">
-                ${escapeHtml(a.displayName)}
+                ${escapeHtml(a.displayName)}${a.isPara && a.paraCategory ? ` · ${escapeHtml(a.paraCategory)}` : ""}
             </span>
         `).join("");
     }
 
-    // Debounced so every keystroke doesn't fire a Firestore query — waits
-    // for a short pause in typing before searching.
     function onSearchInput() {
         clearTimeout(searchDebounceTimer);
         const q = document.getElementById("athleteSearchInput").value.trim();
@@ -882,7 +1114,7 @@ immediately, with no resize listener or re-render needed.
 
         if (q.length < 2) {
             resultsEl.innerHTML = "";
-            resultsEl.classList.add("hidden"); // no query yet — collapse the box instead of showing an empty bordered gap
+            resultsEl.classList.add("hidden");
             return;
         }
 
@@ -895,9 +1127,6 @@ immediately, with no resize listener or re-render needed.
         resultsEl.innerHTML = `<p class="text-muted" style="font-size: 0.85rem; padding: 0.75rem;">Searching…</p>`;
 
         try {
-            // No age scoping here on purpose — every athlete in the club
-            // shows up, and age/gender get matched automatically once one
-            // is picked (see resolveEligibleCategories).
             const params = new URLSearchParams({ q, limit: "8" });
             const res = await fetch(`/api/athletes/search?${params.toString()}`);
             if (!res.ok) throw new Error(`Search failed: ${res.status}`);
@@ -913,6 +1142,10 @@ immediately, with no resize listener or re-render needed.
         }
     }
 
+    function isBlockedForEntry(athlete) {
+        return !!(pendingEntryType && pendingEntryType.requiresPara && !athlete.isPara);
+    }
+
     function renderSearchResults() {
         const resultsEl = document.getElementById("searchResults");
 
@@ -921,30 +1154,35 @@ immediately, with no resize listener or re-render needed.
             return;
         }
 
-        resultsEl.innerHTML = lastSearchResults.map((a, i) => `
-            <div onclick="selectAthleteByIndex(${i})"
-                style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--border); cursor: pointer;">
+        resultsEl.innerHTML = lastSearchResults.map((a, i) => {
+            const blocked = isBlockedForEntry(a);
+            const paraChip = a.isPara
+                ? `<span class="para-chip">${escapeHtml(a.paraCategory || "Para")}</span>`
+                : "";
+            return `
+            <div ${blocked ? `title="Not a para athlete"` : `onclick="selectAthleteByIndex(${i})"`}
+                style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--border); cursor: ${blocked ? "not-allowed" : "pointer"}; ${blocked ? "opacity: 0.45;" : ""}">
                 <div>
-                    <div style="font-weight: 600;">${escapeHtml(a.displayName)}</div>
-                    <div class="text-muted" style="font-size: 0.82rem;">${escapeHtml(a.club || "")}</div>
+                    <div style="font-weight: 600;">${escapeHtml(a.displayName)}${paraChip}</div>
+                    <div class="text-muted" style="font-size: 0.82rem;">${blocked ? "Not a para athlete" : escapeHtml(a.club || "")}</div>
                 </div>
                 <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">
-                    ${a.gender || "?"}${a.birthYear != null ? " · " + a.birthYear : ""}
+                    ${escapeHtml(a.gender || "?")}${a.birthYear != null ? " · " + a.birthYear : ""}
                 </span>
             </div>
-        `).join("");
+        `;
+        }).join("");
     }
 
     function selectAthleteByIndex(i) {
         const athlete = lastSearchResults[i];
         if (!athlete || !pendingEntryType) return;
+        if (isBlockedForEntry(athlete)) return;
         if (selectedAthletes.some(a => a.id === athlete.id)) return;
 
         selectedAthletes.push(athlete);
 
         if (selectedAthletes.length < pendingEntryType.participantCount) {
-            // Still need more members for this entry (pairs/team) — keep
-            // the search step open so the admin can pick the next one.
             document.getElementById("athleteSearchInput").value = "";
             document.getElementById("searchResults").innerHTML = "";
             document.getElementById("searchResults").classList.add("hidden");
@@ -952,15 +1190,9 @@ immediately, with no resize listener or re-render needed.
             return;
         }
 
-        // Roster for this entry is complete — resolve the category.
-        // Age/gender eligibility still uses the first selected athlete
-        // as the basis (unchanged behavior for pairs/teams). Belt class
-        // is stricter: real WT rules require every member of a Pairs/
-        // Teams entry to actually qualify for the SAME class, so the
-        // eligible list is filtered down to classes every selected
-        // athlete's rank falls into, not just the first athlete's.
-        eligibleCategories = resolveEligibleCategories(pendingEntryType, selectedAthletes[0].birthYear, selectedAthletes[0].rank, selectedAthletes[0].gender)
-            .filter(ec => selectedAthletes.every(a => beltClassMatches(ec.beltClass, a.rank)));
+        // Age/gender use the first athlete; class (belt + para) must fit
+        // EVERY selected athlete.
+        eligibleCategories = resolveEligibleForEntry(pendingEntryType, selectedAthletes);
         chosenCategory = null;
         chosenBracket = null;
         resolvedCategory = null;
@@ -970,9 +1202,6 @@ immediately, with no resize listener or re-render needed.
         renderResolutionStep();
     }
 
-    // Progressively resolves (division, gender) → weight bracket,
-    // auto-advancing through anything unambiguous and only rendering a
-    // picker at whichever step genuinely has more than one valid option.
     function renderResolutionStep() {
         const summaryEl = document.getElementById("confirmSummary");
         const submitBtn = document.getElementById("confirmSubmitBtn");
@@ -987,20 +1216,12 @@ immediately, with no resize listener or re-render needed.
         `;
 
         if (eligibleCategories.length === 0) {
-            summaryEl.innerHTML = header + `
-                <p style="color: #b91c1c;">No category in ${escapeHtml(pendingEntryType.label)} matches this athlete's age, gender, and belt rank.</p>
-            `;
+            const reason = ineligibilityReason(pendingEntryType, selectedAthletes)
+                || `No category in ${pendingEntryType.label} matches this athlete's age, gender, and belt rank.`;
+            summaryEl.innerHTML = header + `<p style="color: #b91c1c;">${escapeHtml(reason)}</p>`;
             return;
         }
 
-        // Step A — pick a (division, beltClass, gender) combination, only
-        // shown when more than one genuinely applies. That happens either
-        // because two age ranges overlap for this birth year (e.g. Cadets
-        // 2011-2013 and Juniors 2009-2011 both include 2011), or because
-        // more than one gender bracket in the same division matches this
-        // athlete (e.g. a "Mixed" bracket alongside "Male"). Belt class
-        // brackets don't overlap by rank, so they don't add extra
-        // ambiguity on their own — they just get folded into the label.
         if (!chosenCategory) {
             if (eligibleCategories.length === 1) {
                 chosenCategory = eligibleCategories[0];
@@ -1021,9 +1242,6 @@ immediately, with no resize listener or re-render needed.
 
         const { division, beltClass, gender } = chosenCategory;
 
-        // Step B — weight bracket, only shown if there's more than one
-        // (disciplines with no weight dimension collapse to a single
-        // implicit bracket via parseCategories and skip this entirely).
         if (!chosenBracket) {
             if (gender.weightCats.length === 1) {
                 chosenBracket = gender.weightCats[0];
@@ -1042,11 +1260,11 @@ immediately, with no resize listener or re-render needed.
             }
         }
 
-        // Fully resolved.
         resolvedCategory = {
             code: `${pendingEntryType.code}_${chosenBracket.code}`,
             ageCode: division.code,
-            beltClassCode: beltClass.code || null,
+            beltClassCode: beltClass.beltCode || null,
+            paraClassCode: beltClass.paraCode || null,
             genderCode: gender.code,
             label: [pendingEntryType.label, division.label, beltClass.label, gender.label].filter(Boolean).join(" · ")
                 + (chosenBracket.label ? " " + chosenBracket.label : ""),
@@ -1097,6 +1315,7 @@ immediately, with no resize listener or re-render needed.
                         newEntryTypeCode: pendingEntryType.code,
                         newAgeCode: resolvedCategory.ageCode,
                         newBeltClassCode: resolvedCategory.beltClassCode,
+                        newParaClassCode: resolvedCategory.paraClassCode,
                         newGenderCode: resolvedCategory.genderCode,
                         newCategoryCode: resolvedCategory.code,
                         newCategoryLabel: resolvedCategory.label,
@@ -1110,6 +1329,7 @@ immediately, with no resize listener or re-render needed.
                         entryTypeCode: pendingEntryType.code,
                         ageCode: resolvedCategory.ageCode,
                         beltClassCode: resolvedCategory.beltClassCode,
+                        paraClassCode: resolvedCategory.paraClassCode,
                         genderCode: resolvedCategory.genderCode,
                         categoryCode: resolvedCategory.code,
                         categoryLabel: resolvedCategory.label,
@@ -1121,20 +1341,15 @@ immediately, with no resize listener or re-render needed.
                 throw new Error(body.detail || `Request failed (${res.status})`);
             }
 
-            // Optimistic local updates so the panel reflects the change
-            // immediately; loadCategoryCounts() on the next page load
-            // reconciles against the server's single-document count read.
             if (isEdit) {
                 categoryCounts[editingRegistration.oldCategoryCode] = Math.max(0, (categoryCounts[editingRegistration.oldCategoryCode] || 1) - 1);
                 categoryCounts[resolvedCategory.code] = (categoryCounts[resolvedCategory.code] || 0) + 1;
-                delete divisionRosterCache[editingRegistration.oldAgeCode];
+                invalidateRoster(editingRegistration.oldAgeCode);
             } else {
                 categoryCounts[resolvedCategory.code] = (categoryCounts[resolvedCategory.code] || 0) + 1;
                 totalRegistered += 1;
             }
-            // Drop the cached roster for the (possibly new) division — it's
-            // now stale either way. Re-expanding it will re-fetch.
-            delete divisionRosterCache[resolvedCategory.ageCode];
+            invalidateRoster(resolvedCategory.ageCode);
 
             const namesLine = selectedAthletes.map(a => a.displayName).join(", ");
             msg.textContent = isEdit
@@ -1162,16 +1377,6 @@ immediately, with no resize listener or re-render needed.
     }
 
     // ── ALL CLUBS & ATHLETES (read-only aggregate view) ───────────────
-    // Groups the SAME per-division roster data the Categories accordion
-    // above already fetches (division-rosters/{ageCode}) by club instead
-    // of by division/weight-bracket. Nothing new is read or exposed —
-    // every entry shown here is already visible to anyone who expands
-    // every division by hand; this just saves them the clicking. Results
-    // are cached in clubsData after the first load and only rebuilt if
-    // the overlay is reopened after new divisions have been fetched
-    // elsewhere on the page (cheap to just recompute from
-    // divisionRosterCache each time, since no extra network calls are
-    // needed once a division's roster is already cached).
     let clubsData = null; // [{ clubId, clubName, entries: [...] }], sorted by clubName
 
     async function openClubsOverlay() {
@@ -1179,7 +1384,7 @@ immediately, with no resize listener or re-render needed.
         document.getElementById("clubsSearchInput").value = "";
         document.getElementById("clubsList").innerHTML = `<p class="text-muted" style="padding: 1rem 0;">Loading every division's roster…</p>`;
 
-        await initPromise; // entryTypes must be populated before we know which ageCodes exist
+        await initPromise;
         await loadAllClubsData();
         renderClubsOverlay("");
     }
@@ -1188,11 +1393,6 @@ immediately, with no resize listener or re-render needed.
         document.getElementById("clubsOverlay").classList.add("hidden");
     }
 
-    // Builds { fullCategoryCode: "Entry Type · Division BeltClass Gender Weight" }
-    // from the already-parsed entryTypes tree — same composition
-    // renderDivisionBody uses for its own per-bracket heading, just
-    // prefixed with the entry-type label since this view spans every
-    // entry type at once instead of being nested under one.
     function buildCategoryLabelMap() {
         const map = {};
         entryTypes.forEach(entryType => {
@@ -1211,24 +1411,15 @@ immediately, with no resize listener or re-render needed.
         return map;
     }
 
-    // Fetches every division's roster that isn't already cached (reuses
-    // divisionRosterCache — divisions the visitor already expanded in
-    // the Categories accordion cost nothing here), then regroups every
-    // entry across every division/category by clubId.
     async function loadAllClubsData() {
         const ageCodes = new Set();
         entryTypes.forEach(et => et.divisions.forEach(d => ageCodes.add(d.code)));
 
         await Promise.all([...ageCodes].map(async (ageCode) => {
-            if (ageCode in divisionRosterCache) return;
             try {
-                const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/division-rosters/${ageCode}`);
-                if (!res.ok) throw new Error(`Roster fetch failed: ${res.status}`);
-                const data = await res.json();
-                divisionRosterCache[ageCode] = data.athletes || {};
+                await fetchDivisionRoster(ageCode);
             } catch (err) {
                 console.error(`Failed to load roster for division ${ageCode}`, err);
-                divisionRosterCache[ageCode] = divisionRosterCache[ageCode] || {};
             }
         }));
 
@@ -1289,10 +1480,6 @@ immediately, with no resize listener or re-render needed.
             return;
         }
 
-        // Every club starts expanded while filtering (so a name match is
-        // immediately visible without an extra click); with no filter,
-        // only the first club opens by default, same convention as the
-        // Categories accordion above.
         listEl.innerHTML = filteredClubs.map((club, i) => `
             <details style="border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.85rem; margin-bottom: 0.6rem;" ${(i === 0 || q) ? "open" : ""}>
                 <summary style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.95rem; list-style: revert;">

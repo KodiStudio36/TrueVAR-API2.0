@@ -136,8 +136,8 @@ class YouTubeService:
                 "selfDeclaredMadeForKids": False,
             },
             "contentDetails": {
-                "enableAutoStart": True,
-                "enableAutoStop": True,
+                "enableAutoStart": False,
+                "enableAutoStop": False,
                 "recordFromStart": True,
                 "enableDvr": True,
             },
@@ -193,3 +193,44 @@ class YouTubeService:
             videoId=video_id,
             media_body=media
         ).execute()
+
+    # ── Stream position (see youtube_router.StreamPositionService) ───────────
+
+    def get_broadcast_timing(self, broadcast_id: str) -> Dict[str, Any]:
+        """
+        When the broadcast actually went live / ended, and which ingest
+        stream feeds it. 1 quota unit. Returns {} if the broadcast doesn't
+        exist; actualStartTime is None until the broadcast is live.
+        """
+        resp = (
+            self._yt.liveBroadcasts()
+            .list(part="snippet,contentDetails", id=broadcast_id)
+            .execute()
+        )
+        items = resp.get("items") or []
+        if not items:
+            return {}
+        item = items[0]
+        return {
+            "actualStartTime": item.get("snippet", {}).get("actualStartTime"),
+            "actualEndTime": item.get("snippet", {}).get("actualEndTime"),
+            "boundStreamId": item.get("contentDetails", {}).get("boundStreamId"),
+        }
+
+    def get_stream_statuses(self, stream_ids: list) -> Dict[str, str]:
+        """
+        {streamId: streamStatus} for up to 50 ingest streams in ONE call
+        (1 quota unit). "active" = YouTube is receiving video right now;
+        anything else (inactive / error / ready) = nothing is arriving.
+        """
+        if not stream_ids:
+            return {}
+        resp = (
+            self._yt.liveStreams()
+            .list(part="status", id=",".join(stream_ids[:50]), maxResults=50)
+            .execute()
+        )
+        return {
+            item.get("id"): (item.get("status") or {}).get("streamStatus")
+            for item in resp.get("items") or []
+        }

@@ -3,10 +3,11 @@ import unicodedata
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from firebase_admin import firestore
 import jwt
 import os
+import secrets
 
 from adapters.database.firebase_case_repository import FirebaseCaseRepository
 from usecases.case_usecase import CreateCaseUseCase
@@ -104,7 +105,8 @@ class TournamentResponse(BaseModel):
 # Fixed set of Para sport-class codes selectable when an athlete is flagged
 # isPara=True. Kept as a plain module-level list (not Firestore-driven) since
 # this is a small, rarely-changing classification table — mirrors the same
-# list rendered in create_athlete.html's paraCategory <select>.
+# list rendered in create_athlete.html's paraCategory <select>, and the
+# para_class_options match_values in the tournament category schema.
 PARA_CATEGORIES = [
     "P11", "P12",
     "P21", "P22", "P23",
@@ -113,6 +115,14 @@ PARA_CATEGORIES = [
     "P51", "P52", "P53",
     "P60",
     "P72",
+]
+
+# Default para class split used for any para entry type whose schema doesn't
+# list its own para_class_options — mirrors DEFAULT_PARA_CLASS_OPTIONS in
+# tournament.html, so category codes match on both sides
+# (e.g. para_individual_poomsae_seniors_p72_men).
+DEFAULT_PARA_CLASS_OPTIONS = [
+    {"code": c.lower(), "label": c, "match_value": c} for c in PARA_CATEGORIES
 ]
 
 class CreateAthleteRequest(BaseModel):
@@ -313,6 +323,22 @@ async def get_current_user(request: Request) -> Optional[dict]:
     return decode_session_jwt(session_cookie)
 
 
+def _sport_club_fields(a: dict, sport_key: Optional[str]) -> dict:
+    """
+    Sport-scoped fields surfaced by both athlete search endpoints. isPara /
+    paraCategory are included so the registration modal can block non-para
+    athletes from para entry types and auto-resolve their para class.
+    """
+    sport_data = (a.get("sports") or {}).get(sport_key, {}) if sport_key else {}
+    return {
+        "club": sport_data.get("clubName", ""),
+        "clubId": sport_data.get("clubId"),
+        "rank": sport_data.get("rank"),
+        "isPara": bool(sport_data.get("isPara")),
+        "paraCategory": sport_data.get("paraCategory"),
+    }
+
+
 @router.get("/athletes/search")
 def search_athletes(
     q: str = Query(..., min_length=1),
@@ -349,16 +375,12 @@ def search_athletes(
 
     candidates.sort(key=lambda a: (a.get("lastName", ""), a.get("firstName", "")))
 
-    def _club_fields(a: dict) -> dict:
-        sport_data = (a.get("sports") or {}).get(club_sport, {})
-        return {"club": sport_data.get("clubName", ""), "clubId": sport_data.get("clubId"), "rank": sport_data.get("rank")}
-
     return {"athletes": [
         {
             "id": a["id"],
             "displayName": a.get("displayName") or f"{a.get('firstName','')} {a.get('lastName','')}".strip(),
             "firstname": a.get("firstName", ""), "lastname": a.get("lastName", ""),
-            **_club_fields(a),
+            **_sport_club_fields(a, club_sport),
             "gender": a.get("gender"), "birthYear": a.get("birthYear"),
         }
         for a in candidates[:limit]
@@ -397,15 +419,11 @@ def search_athletes_admin(
 
     candidates.sort(key=lambda a: (a.get("lastName", ""), a.get("firstName", "")))
 
-    def _club_fields(a: dict) -> dict:
-        sport_data = (a.get("sports") or {}).get(sport_key, {})
-        return {"club": sport_data.get("clubName", ""), "clubId": sport_data.get("clubId"), "rank": sport_data.get("rank")}
-
     return {"athletes": [
         {
             "id": a["id"],
             "displayName": a.get("displayName") or f"{a.get('firstName','')} {a.get('lastName','')}".strip(),
-            **_club_fields(a),
+            **_sport_club_fields(a, sport_key),
             "country": a.get("country"), "gender": a.get("gender"), "birthYear": a.get("birthYear"),
         }
         for a in candidates[:limit]
@@ -417,9 +435,129 @@ class RegisterEntryRequest(BaseModel):
     entryTypeCode: str
     ageCode: str
     beltClassCode: Optional[str] = None
+    paraClassCode: Optional[str] = None
     genderCode: str
     categoryCode: str
     categoryLabel: str
+
+
+# ── PARA ELIGIBILITY ──────────────────────────────────────────────────────
+# An entry_type option in the tournament's category schema can declare:
+#   "requires_para": true            → only athletes with isPara may enter
+#   "para_class_options": [...]      → each {code, label, match_value}; the
+#                                      athlete's paraCategory must equal the
+#                                      chosen option's match_value.
+# Declaring para_class_options implies requires_para. The frontend resolves
+# the class automatically; this is the server-side guarantee for club
+# registrations. Staff endpoints (admin-add / admin-move) are exempt.
+
+def _find_entry_type_option(tournament_id: str, entry_type_code: str) -> Optional[dict]:
+    doc = db.collection("tournament_categories").document(tournament_id).get()
+    if not doc.exists:
+        return None
+    schemas = ((doc.to_dict() or {}).get("categories") or {}).get("sportSchemas") or {}
+    for sport_schema in schemas.values():
+        for disc in (sport_schema.get("disciplines") or {}).values():
+            for dim in disc.get("dimensions") or []:
+                if dim.get("key") != "entry_type":
+                    continue
+                for opt in dim.get("options") or []:
+                    if opt.get("code") == entry_type_code:
+                        return opt
+    return None
+
+
+def _para_rules(opt: Optional[dict], entry_type_code: str) -> Tuple[bool, List[dict]]:
+    """
+    (requires_para, para_class_options) for an entry type. Mirrors
+    parseCategories in tournament.html so the server enforces the same
+    rules even when the stored schema predates the para fields:
+      - requires_para: false        → explicit opt-out, never para-only
+      - requires_para: true, a code starting with "para_", or a non-empty
+        para_class_options           → para-only
+      - para_class_options present  → that list ([] = para-only, no split)
+      - otherwise                   → DEFAULT_PARA_CLASS_OPTIONS (P11…P72)
+    """
+    opt = opt or {}
+    if opt.get("requires_para") is False:
+        return False, []
+    explicit = opt.get("para_class_options")
+    explicit = explicit if isinstance(explicit, list) else None
+    requires = (
+        opt.get("requires_para") is True
+        or (entry_type_code or "").lower().startswith("para_")
+        or bool(explicit)
+    )
+    if not requires:
+        return False, []
+    return True, (explicit if explicit is not None else DEFAULT_PARA_CLASS_OPTIONS)
+
+
+def _validate_para_eligibility(
+    tournament_id: str,
+    entry_type_code: str,
+    para_class_code: Optional[str],
+    category_code: str,
+    athletes: List[Tuple[str, dict]],
+    sport: Optional[str],
+    require_class: bool = True,
+) -> None:
+    """
+    Para-only entry types accept only athletes with isPara == True (a missing
+    isPara field counts as not para). When the entry type splits by para
+    class, the class is read from the category code itself
+    (…_seniors_p72_men → P72) and every athlete's paraCategory must equal it.
+
+    Called for club registrations/edits only — the staff endpoints
+    (admin-add, admin-move) skip it so staff can place anyone anywhere.
+    require_class=False tolerates a code without a class segment.
+    """
+    opt = _find_entry_type_option(tournament_id, entry_type_code)
+    requires_para, para_opts = _para_rules(opt, entry_type_code)
+
+    if not requires_para:
+        if para_class_code:
+            raise HTTPException(status_code=400, detail="This entry type has no para classes.")
+        return
+
+    def _name(a: dict) -> str:
+        return a.get("displayName") or f"{a.get('firstName', '')} {a.get('lastName', '')}".strip()
+
+    def _sport_data(a: dict) -> dict:
+        return (a.get("sports") or {}).get(sport) or {}
+
+    for _, a in athletes:
+        if _sport_data(a).get("isPara") is not True:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{_name(a)} is not registered as a para athlete. Only para athletes can enter this category.",
+            )
+
+    if not para_opts:
+        return  # para-only entry type without a class split
+
+    wrapped = f"_{category_code}_"
+    in_code = [p for p in para_opts if p.get("code") and f"_{p['code']}_" in wrapped]
+    if len(in_code) > 1:
+        raise HTTPException(status_code=400, detail="Category code contains more than one para class.")
+    chosen = in_code[0] if in_code else None
+
+    if para_class_code and (not chosen or chosen.get("code") != para_class_code):
+        raise HTTPException(status_code=400, detail="Category code does not match the para class.")
+
+    if not chosen:
+        if require_class:
+            raise HTTPException(status_code=400, detail="A para class (e.g. P72) is required for this category.")
+        return
+
+    expected = str(chosen.get("match_value") or chosen.get("code") or "").upper()
+    for _, a in athletes:
+        actual = str(_sport_data(a).get("paraCategory") or "").upper()
+        if actual != expected:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{_name(a)} is classified {actual or 'without a para class'}, not {expected}.",
+            )
 
 
 def _execute_registration_create(
@@ -436,6 +574,7 @@ def _execute_registration_create(
     sport = tournament_doc.to_dict().get("sport") if tournament_doc.exists else None
 
     members = []
+    athlete_docs: List[Tuple[str, dict]] = []
     for athlete_id in payload.athleteIds:
         athlete_doc = db.collection("athletes").document(athlete_id).get()
         if not athlete_doc.exists:
@@ -445,6 +584,17 @@ def _execute_registration_create(
         if enforce_club_match and athlete_club_id != requesting_club_id:
             raise HTTPException(status_code=403, detail="You can only register athletes from your own club.")
         members.append(_build_roster_member(athlete_id, athlete, sport))
+        athlete_docs.append((athlete_id, athlete))
+
+    # Para rules bind CLUB registrations only. Staff (admin-add, from the
+    # category manager) can put any athlete into any category — e.g. a
+    # non-para athlete into a para category, or a class the athlete isn't
+    # classified as — so the check is skipped entirely on that path.
+    if enforce_club_match:
+        _validate_para_eligibility(
+            tournament_id, payload.entryTypeCode, payload.paraClassCode,
+            payload.categoryCode, athlete_docs, sport,
+        )
 
     entry_id = "-".join(sorted(payload.athleteIds))
 
@@ -453,18 +603,14 @@ def _execute_registration_create(
     # Sport-scoped national/association federation ID, same source as the
     # roster member's own "associationId" field (see _build_roster_member)
     # — captured here too so it's on the registration doc itself, not just
-    # buried inside division_rosters. Needed downstream (club sheets,
-    # results reporting) without a second athlete lookup.
+    # buried inside division_rosters.
     association_id = members[0].get("associationId") if members else None
 
     reg_ref = tournament_ref.collection("registrations").document(f"{payload.categoryCode}_{entry_id}")
     roster_ref = tournament_ref.collection("division_rosters").document(payload.ageCode)
     counts_ref = tournament_ref.collection("meta").document("categoryCounts")
-    # Denormalized club roll-up: which clubs have >=1 active registration in
-    # this tournament, and how many, so the admin panel and the weigh-in /
-    # backup sheet generator can group by club without scanning every
-    # registration doc. Kept in the SAME transaction as the registration
-    # write so it never drifts out of sync with the real registration count.
+    # Denormalized club roll-up, kept in the SAME transaction as the
+    # registration write so it never drifts out of sync.
     clubs_ref = tournament_ref.collection("meta").document("registeredClubs")
 
     transaction = db.transaction()
@@ -480,6 +626,7 @@ def _execute_registration_create(
             "entryTypeCode": payload.entryTypeCode,
             "ageCode": payload.ageCode,
             "beltClassCode": payload.beltClassCode,
+            "paraClassCode": payload.paraClassCode,
             "genderCode": payload.genderCode,
             "categoryCode": payload.categoryCode,
             "categoryLabel": payload.categoryLabel,
@@ -510,26 +657,21 @@ def _execute_registration_create(
         raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
 
 
-def _check_registration_window(tournament_id: str) -> None:
+def _check_registration_window(tournament_id: str, action: str = "register") -> None:
     """
     Enforces isRegistrationOpen + registrationDeadline before a club-facing
-    registration is created. Previously nothing in this file checked either
-    of these at all — a club could register athletes into a tournament that
-    was never opened for registration, or after its deadline had passed,
-    and nothing would stop it.
+    registration is created.
 
-    Deliberately called ONLY from the club-facing register_entry_endpoint,
-    not admin_register_entry_endpoint — staff already have an unguarded
-    "no eligibility checks" override for everything else in this file (see
-    admin_remove_registration_endpoint's own docstring), and a deadline is
-    exactly the kind of thing staff legitimately need to be able to push
-    past (e.g. accepting a late entry by hand).
+    Called from the club-facing register_entry_endpoint AND
+    move_registration_endpoint (editing an entry after the deadline is not
+    allowed either). NOT called from remove_registration_endpoint — clubs
+    may still withdraw entries after the deadline — and not from the
+    admin-* endpoints — staff need to be able to push past
+    a deadline (e.g. accepting a late entry by hand).
 
     registrationDeadline is stored as a plain ISO string inside
-    tournaments/{id}.settings (not a Firestore Timestamp, unlike dateTime
-    itself — see the chat note on this inconsistency), so it's parsed
-    defensively here the same way consume_invite_token already has to for
-    permission_tokens.expiresAt.
+    tournaments/{id}.settings (not a Firestore Timestamp), so it's parsed
+    defensively here.
     """
     tournament_doc = db.collection("tournaments").document(tournament_id).get()
     if not tournament_doc.exists:
@@ -537,7 +679,11 @@ def _check_registration_window(tournament_id: str) -> None:
 
     data = tournament_doc.to_dict()
     if not data.get("isRegistrationOpen"):
-        raise HTTPException(status_code=403, detail="Registration is not open for this tournament.")
+        raise HTTPException(
+            status_code=403,
+            detail="Registration is not open for this tournament." if action == "register"
+            else "Registration is closed for this tournament — entries can no longer be changed, only removed.",
+        )
 
     deadline_raw = (data.get("settings") or {}).get("registrationDeadline")
     if not deadline_raw:
@@ -557,7 +703,10 @@ def _check_registration_window(tournament_id: str) -> None:
     if deadline and datetime.now(timezone.utc) > deadline:
         raise HTTPException(
             status_code=403,
-            detail=f"The registration deadline for this tournament ({deadline.strftime('%d %b %Y, %H:%M')} UTC) has passed.",
+            detail=(
+                f"The registration deadline for this tournament ({deadline.strftime('%d %b %Y, %H:%M')} UTC) has passed."
+                + ("" if action == "register" else " Entries can no longer be changed, only removed.")
+            ),
         )
 
 
@@ -603,10 +752,7 @@ def get_athlete_endpoint(athlete_id: str, user: Optional[dict] = Depends(get_cur
 
     # firstNameDisplay/lastNameDisplay preserve original casing/diacritics
     # for editing; "firstName"/"lastName" themselves stay lowercased +
-    # diacritic-stripped for the prefix-range search queries in
-    # search_athletes / search_athletes_admin above and must not be
-    # repurposed for display. Older athlete docs created before this field
-    # existed fall back to the normalized value (better than nothing).
+    # diacritic-stripped for the prefix-range search queries.
     return {
         "id": athlete_id,
         "displayName": data.get("displayName") or f"{data.get('firstName','')} {data.get('lastName','')}".strip(),
@@ -636,10 +782,7 @@ async def update_athlete_endpoint(
     Edit counterpart to create_athlete_endpoint. Reuses the same club-scoped
     ADMIN check and the same firstName/lastName normalization + display-name
     handling, but resolves the athlete's *existing* sport entry (via the
-    admin's own club sport, same lookup get_athlete_endpoint uses) rather
-    than accepting a sport from the client — mirrors create_athlete_endpoint,
-    which likewise ignores any client-sent sport and always files the
-    athlete under the admin's club's configured sport.
+    admin's own club sport) rather than accepting a sport from the client.
     """
     admin_club_id = get_admin_club_id(user)
     if not admin_club_id:
@@ -703,6 +846,7 @@ class MoveRegistrationRequest(BaseModel):
     newEntryTypeCode: str
     newAgeCode: str
     newBeltClassCode: Optional[str] = None
+    newParaClassCode: Optional[str] = None
     newGenderCode: str
     newCategoryCode: str
     newCategoryLabel: str
@@ -748,20 +892,28 @@ def _execute_registration_move(
             raise HTTPException(status_code=409, detail="An entry is already registered in the target category.")
 
         members = []
+        athlete_docs: List[Tuple[str, dict]] = []
         for athlete_id in payload.athleteIds:
             athlete_doc = db.collection("athletes").document(athlete_id).get()
             if not athlete_doc.exists:
                 raise HTTPException(status_code=404, detail=f"Athlete {athlete_id} not found.")
             athlete = athlete_doc.to_dict()
             members.append(_build_roster_member(athlete_id, athlete, sport))
+            athlete_docs.append((athlete_id, athlete))
+
+        # Para rules bind club edits only; staff (admin-move) are
+        # unrestricted (see _execute_registration_create).
+        if enforce_ownership:
+            _validate_para_eligibility(
+                tournament_id, payload.newEntryTypeCode, payload.newParaClassCode,
+                payload.newCategoryCode, athlete_docs, sport,
+            )
 
         tx.set(old_reg_ref, {"status": "moved", "movedTo": new_reg_ref.id}, merge=True)
 
         # clubName / associationId carry straight over from the existing
-        # registration (the club/athlete didn't change, only the
-        # category did) — falling back to a fresh lookup off the just-
-        # rebuilt `members` list for any older registration doc that
-        # predates these fields.
+        # registration, falling back to the rebuilt members list for older
+        # registration docs that predate these fields.
         club_name = old_data.get("clubName") or (members[0].get("club") if members else None)
         association_id = old_data.get("associationId") or (members[0].get("associationId") if members else None)
 
@@ -770,6 +922,7 @@ def _execute_registration_move(
             "entryTypeCode": payload.newEntryTypeCode,
             "ageCode": payload.newAgeCode,
             "beltClassCode": payload.newBeltClassCode,
+            "paraClassCode": payload.newParaClassCode,
             "genderCode": payload.newGenderCode,
             "categoryCode": payload.newCategoryCode,
             "categoryLabel": payload.newCategoryLabel,
@@ -795,9 +948,7 @@ def _execute_registration_move(
 
         # NOTE: no registeredClubs write here on purpose — moving a
         # registration between categories never changes which club owns
-        # the entry (old_data["clubId"] carries straight over to the new
-        # registration doc above), so the club roll-up counts stay correct
-        # without touching them.
+        # the entry.
 
     try:
         _move(transaction)
@@ -817,6 +968,7 @@ def move_registration_endpoint(
     if not admin_club_id:
         raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
 
+    _check_registration_window(tournament_id, action="update")
     _execute_registration_move(tournament_id, payload, requesting_club_id=admin_club_id, enforce_ownership=True)
     return {"message": "Registration updated", "categoryCode": payload.newCategoryCode}
 
@@ -870,6 +1022,38 @@ def _execute_registration_remove(
         raise HTTPException(status_code=500, detail=f"Remove failed: {exc}")
 
 
+def _check_tournament_not_started(tournament_id: str) -> None:
+    """
+    Clubs can withdraw entries after the registration deadline, but not once
+    the tournament itself has started (tournaments/{id}.dateTime). Staff
+    admin-remove is not affected.
+    """
+    tournament_doc = db.collection("tournaments").document(tournament_id).get()
+    if not tournament_doc.exists:
+        raise HTTPException(status_code=404, detail="Tournament not found.")
+
+    start_raw = (tournament_doc.to_dict() or {}).get("dateTime")
+    if not start_raw:
+        return
+
+    start = None
+    try:
+        if hasattr(start_raw, "tzinfo"):  # Firestore Timestamp / datetime
+            start = start_raw
+        else:
+            start = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        start = None
+
+    if start and datetime.now(timezone.utc) >= start:
+        raise HTTPException(
+            status_code=403,
+            detail="The tournament has already started — registrations can no longer be removed.",
+        )
+
+
 @router.delete("/tournaments/{tournament_id}/registrations/{category_code}/{entry_id}")
 def remove_registration_endpoint(
     tournament_id: str,
@@ -882,6 +1066,7 @@ def remove_registration_endpoint(
     if not admin_club_id:
         raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
 
+    _check_tournament_not_started(tournament_id)
     _execute_registration_remove(
         tournament_id, category_code, entry_id, age_code,
         requesting_club_id=admin_club_id, enforce_ownership=True,
@@ -900,12 +1085,7 @@ def admin_remove_registration_endpoint(
     """
     Staff-only unguarded remove — the DELETE counterpart to
     admin_register_entry_endpoint / admin_move_registration_endpoint.
-    Backs category_manager.html's trash-can button: that page already
-    lets staff add and move ANY club's entries with no ownership check
-    (see its "no eligibility checks" hint text), so the remove button
-    needs the same unguarded treatment — otherwise staff could add and
-    move freely but hit a 403 the moment they tried to remove an entry
-    that wasn't their own club's.
+    Backs category_manager.html's trash-can button.
 
     TODO: same as the other admin-* endpoints in this file — gate behind
     real staff auth once it exists.
@@ -930,9 +1110,7 @@ def get_registered_clubs(tournament_id: str):
     """
     Admin-panel-facing read of the denormalized club roll-up: every club
     with at least one active registration in this tournament, and how
-    many. Not used by the weigh-in/backup sheet generator (that endpoint
-    below groups fresh off live registrations instead) — this is purely
-    for fast "who's registered so far" UI.
+    many.
     """
     doc = db.collection("tournaments").document(tournament_id).collection("meta").document("registeredClubs").get()
     data = doc.to_dict() if doc.exists else {}
@@ -943,6 +1121,258 @@ def get_registered_clubs(tournament_id: str):
     ]
     clubs.sort(key=lambda c: c["clubName"].lower())
     return {"tournamentId": tournament_id, "clubs": clubs}
+
+
+# ── POOMSAE DRAW ─────────────────────────────────────────────────────────
+# Which poomsae each category performs in round 1, the semi-final and the
+# final (two). Settings (named poomsae pools + which pool each age × rank
+# group uses) and the draw itself live in ONE doc:
+#   tournaments/{id}/meta/poomsaeDraw
+#     pools:       [{id, name, poomsae: [key, ...]}]
+#     assignments: {"<ageCode>|<beltClassCode>": poolId}
+#     excludedRows: {"<entryType>|<ageCode>|<beltClassCode>": true/false}
+#     excludedGroups: {"<ageCode>|<beltClassCode>": true/false}  (whole group skipped / drawn;
+#                    only where it differs from the page default — classes C/D skipped)
+#     draw:        {rows: [{key, label, poolId, round1, semifinal, final: [a, b]}],
+#                   generatedAt}
+# The random draw happens HERE, not in the browser (secrets.SystemRandom),
+# so the result can't be nudged from a devtools console. Every row gets
+# four DIFFERENT poomsae — nothing repeats across round 1, semi-final and
+# the two finals.
+POOMSAE_KEYS = [
+    "taeguk_1", "taeguk_2", "taeguk_3", "taeguk_4",
+    "taeguk_5", "taeguk_6", "taeguk_7", "taeguk_8",
+    "koryo", "keumgang", "taebaek", "pyongwon",
+    "sipjin", "jitae", "cheonkwon", "hansu",
+]
+POOMSAE_NAMES = {
+    "taeguk_1": "Taeguk 1. Jang", "taeguk_2": "Taeguk 2. Jang", "taeguk_3": "Taeguk 3. Jang",
+    "taeguk_4": "Taeguk 4. Jang", "taeguk_5": "Taeguk 5. Jang", "taeguk_6": "Taeguk 6. Jang",
+    "taeguk_7": "Taeguk 7. Jang", "taeguk_8": "Taeguk 8. Jang",
+    "koryo": "Koryo", "keumgang": "Keumgang", "taebaek": "Taebaek", "pyongwon": "Pyongwon",
+    "sipjin": "Sipjin", "jitae": "Jitae", "cheonkwon": "Cheonkwon", "hansu": "Hansu",
+}
+POOMSAE_DRAW_SLOTS = 4  # round 1 + semi-final + 2 in the final
+
+
+class PoomsaePool(BaseModel):
+    id: str
+    name: str
+    poomsae: List[str]
+
+
+class PoomsaeDrawConfig(BaseModel):
+    pools: List[PoomsaePool]
+    assignments: Dict[str, str] = {}
+    # rowKey -> True (skip) / False (draw), only where the operator changed
+    # the page's default (freestyle and para are skipped by default).
+    excludedRows: Dict[str, bool] = {}
+    # groupKey -> True (skip) / False (draw) for a whole age × rank group,
+    # only where it differs from the page default (classes C/D skipped).
+    excludedGroups: Dict[str, bool] = {}
+
+
+class PoomsaeDrawRowRequest(BaseModel):
+    key: str                 # "<entryTypeCode>|<ageCode>|<beltClassCode>"
+    label: str               # e.g. "Individual Poomsae Cadets Class B"
+    poolId: Optional[str] = None
+    poomsae: List[str]       # the pool this row draws from
+
+
+class PoomsaeDrawGenerateRequest(BaseModel):
+    rows: List[PoomsaeDrawRowRequest]
+    # False = redraw only these rows and keep every other row of the saved draw.
+    replaceAll: bool = True
+
+
+def _poomsae_draw_ref(tournament_id: str):
+    return db.collection("tournaments").document(tournament_id).collection("meta").document("poomsaeDraw")
+
+
+def _clean_poomsae_list(keys: List[str]) -> List[str]:
+    """Known keys only, no duplicates, in canonical order."""
+    wanted = set(keys or [])
+    return [k for k in POOMSAE_KEYS if k in wanted]
+
+
+@router.get("/tournaments/{tournament_id}/poomsae-draw",
+            dependencies=[Depends(require_operator("brackets:manage"))])
+def get_poomsae_draw(tournament_id: str):
+    doc = _poomsae_draw_ref(tournament_id).get()
+    data = doc.to_dict() if doc.exists else {}
+    return {
+        "tournamentId": tournament_id,
+        "poomsaeKeys": POOMSAE_KEYS,
+        "pools": data.get("pools"),              # None → the page applies its defaults
+        "assignments": data.get("assignments") or {},
+        "excludedRows": data.get("excludedRows") or {},
+        "excludedGroups": data.get("excludedGroups") or {},
+        "draw": data.get("draw"),
+    }
+
+
+@router.put("/tournaments/{tournament_id}/poomsae-draw/config",
+            dependencies=[Depends(require_operator("brackets:manage"))])
+def save_poomsae_draw_config(tournament_id: str, payload: PoomsaeDrawConfig):
+    pool_ids = [p.id for p in payload.pools]
+    if len(pool_ids) != len(set(pool_ids)):
+        raise HTTPException(status_code=400, detail="Two pools share the same id.")
+    pools = [{"id": p.id, "name": p.name.strip() or p.id, "poomsae": _clean_poomsae_list(p.poomsae)} for p in payload.pools]
+    assignments = {k: v for k, v in (payload.assignments or {}).items() if v in pool_ids}
+    excluded_rows = dict(payload.excludedRows or {})
+    excluded_groups = {k: bool(v) for k, v in (payload.excludedGroups or {}).items()}
+    # merge=<field list> replaces these maps WHOLE (plain merge=True would
+    # deep-merge them, so an unticked exclusion could never be removed)
+    # while leaving the saved draw untouched.
+    _poomsae_draw_ref(tournament_id).set({
+        "pools": pools,
+        "assignments": assignments,
+        "excludedRows": excluded_rows,
+        "excludedGroups": excluded_groups,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    }, merge=["pools", "assignments", "excludedRows", "excludedGroups", "updatedAt"])
+    return {"ok": True, "pools": pools, "assignments": assignments,
+            "excludedRows": excluded_rows, "excludedGroups": excluded_groups}
+
+
+@router.post("/tournaments/{tournament_id}/poomsae-draw/generate",
+             dependencies=[Depends(require_operator("brackets:manage"))])
+def generate_poomsae_draw(tournament_id: str, payload: PoomsaeDrawGenerateRequest):
+    if not payload.rows:
+        raise HTTPException(status_code=400, detail="Nothing to draw.")
+
+    too_small = []
+    for row in payload.rows:
+        if len(_clean_poomsae_list(row.poomsae)) < POOMSAE_DRAW_SLOTS:
+            too_small.append(row.label)
+    if too_small:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A draw needs at least {POOMSAE_DRAW_SLOTS} different poomsae in the pool "
+                   f"(round 1, semi-final and two in the final). Too few for: {', '.join(too_small[:8])}"
+                   + (f" and {len(too_small) - 8} more" if len(too_small) > 8 else ""),
+        )
+
+    rng = secrets.SystemRandom()
+    drawn = {}
+    for row in payload.rows:
+        picks = rng.sample(_clean_poomsae_list(row.poomsae), POOMSAE_DRAW_SLOTS)
+        drawn[row.key] = {
+            "key": row.key,
+            "label": row.label,
+            "poolId": row.poolId,
+            "round1": picks[0],
+            "semifinal": picks[1],
+            "final": [picks[2], picks[3]],
+        }
+
+    ref = _poomsae_draw_ref(tournament_id)
+    rows = list(drawn.values())
+    if not payload.replaceAll:
+        existing = ((ref.get().to_dict() or {}).get("draw") or {}).get("rows") or []
+        kept = [r for r in existing if r.get("key") not in drawn]
+        # Keep the saved order; redrawn rows stay where they were.
+        order = [r.get("key") for r in existing]
+        merged = {r["key"]: r for r in kept}
+        merged.update(drawn)
+        rows = [merged[k] for k in order if k in merged] + [r for k, r in drawn.items() if k not in order]
+
+    draw = {"rows": rows, "generatedAt": datetime.now(timezone.utc).isoformat(), "method": "server-random"}
+    ref.set({"draw": draw, "updatedAt": firestore.SERVER_TIMESTAMP}, merge=True)
+    return {"ok": True, "draw": draw}
+
+
+# ── Drawn poomsae → match docs ─────────────────────────────────────────
+# A draw row key is "<entryTypeCode>|<ageCode>|<beltClassCode>"; a category
+# code starts with those same codes joined by "_" (category-schema.js:
+# {entryType}_{age}[_{belt}][_{para}]_{gender}…). The longest matching
+# prefix wins, so "seniors" never steals "seniors_under_30".
+# Round → drawn slot: F → the two final poomsae, SF → semi-final, anything
+# earlier (PR, QF, R16, RR…) → round 1.
+def _draw_rows_of(tournament_id: str) -> List[Dict]:
+    doc = _poomsae_draw_ref(tournament_id).get()
+    data = doc.to_dict() if doc.exists else {}
+    return ((data or {}).get("draw") or {}).get("rows") or []
+
+
+def _draw_row_for_category(category_code: Optional[str], rows: List[Dict]) -> Optional[Dict]:
+    code = str(category_code or "")
+    best, best_len = None, -1
+    for row in rows:
+        parts = [p for p in str(row.get("key") or "").split("|") if p]
+        if not parts:
+            continue
+        prefix = "_".join(parts) + "_"
+        if code.startswith(prefix) and len(prefix) > best_len:
+            best, best_len = row, len(prefix)
+    return best
+
+
+def _drawn_poomsae_keys(category_code: Optional[str], round_phase: Optional[str], rows: List[Dict]) -> List[str]:
+    row = _draw_row_for_category(category_code, rows)
+    if not row:
+        return []
+    if round_phase == "F":
+        keys = list(row.get("final") or [])
+    elif round_phase == "SF":
+        keys = [row.get("semifinal")]
+    else:
+        keys = [row.get("round1")]
+    return [k for k in keys if k in POOMSAE_NAMES]
+
+
+def _poomsae_field(keys: List[str]) -> List[Dict]:
+    return [{"key": k, "name": POOMSAE_NAMES[k]} for k in keys]
+
+
+@router.post("/tournaments/{tournament_id}/poomsae-draw/apply-to-matches",
+             dependencies=[Depends(require_operator("brackets:manage"))])
+def apply_poomsae_draw_to_matches(
+    tournament_id: str,
+    sport: str = Query(...),
+    discipline: str = Query(...),
+):
+    """
+    Writes the current draw onto every match already pushed for this
+    tournament — for a draw made (or redone) after the brackets were
+    pushed. Matches whose category isn't drawn lose any old poomsae.
+    """
+    rows = _draw_rows_of(tournament_id)
+    if not rows:
+        raise HTTPException(status_code=400, detail="Nothing drawn yet.")
+    matches_query = (
+        db.collection("sports").document(sport.lower())
+        .collection("disciplines").document(discipline.lower())
+        .collection("matches")
+        .where("tournamentId", "==", tournament_id)
+    )
+    updated = cleared = 0
+    batch, pending = db.batch(), 0
+    for doc in matches_query.stream():
+        data = doc.to_dict() or {}
+        keys = _drawn_poomsae_keys(data.get("categoryCode"), data.get("roundPhase"), rows)
+        if keys:
+            batch.update(doc.reference, {"poomsae": _poomsae_field(keys)})
+            updated += 1
+        elif data.get("poomsae"):
+            batch.update(doc.reference, {"poomsae": firestore.DELETE_FIELD})
+            cleared += 1
+        else:
+            continue
+        pending += 1
+        if pending >= 400:
+            batch.commit()
+            batch, pending = db.batch(), 0
+    if pending:
+        batch.commit()
+    return {"ok": True, "updated": updated, "cleared": cleared}
+
+
+@router.delete("/tournaments/{tournament_id}/poomsae-draw/draw",
+               dependencies=[Depends(require_operator("brackets:manage"))])
+def clear_poomsae_draw(tournament_id: str):
+    _poomsae_draw_ref(tournament_id).set({"draw": None, "updatedAt": firestore.SERVER_TIMESTAMP}, merge=True)
+    return {"ok": True}
 
 
 @router.get("/tournaments/{tournament_id}/division-rosters/{age_code}")
@@ -973,11 +1403,7 @@ class BracketCommitBracket(BaseModel):
     system: str
     orderingStrategy: str
     # Optional — only single_elimination has a real seed-placement
-    # strategy (which bracket slot each seed lands in). cut_off has no
-    # bracket slots at all, and round_robin's pairing order comes
-    # entirely from the circle method, not a placement strategy — the
-    # frontend correctly sends null for both, which a required `str`
-    # field would reject with a 422.
+    # strategy. cut_off and round_robin send null.
     placementStrategy: Optional[str] = None
     entries: List[Dict]
     pssHitLevelSetId: Optional[str] = None
@@ -991,10 +1417,7 @@ class BracketCommitMatch(BaseModel):
     displayNumber: Optional[float] = None
     blue: Dict
     # Optional — a poomsae cut-off match is a solo, judged performance
-    # with no opponent at all, not just an unfilled one. Kyorugi (and
-    # poomsae's own single_elimination/round_robin systems) always send
-    # a real dict here, so this change is purely additive and doesn't
-    # alter their behavior.
+    # with no opponent at all.
     red: Optional[Dict] = None
     status: str
     winnerEntryId: Optional[str] = None
@@ -1007,15 +1430,23 @@ class BracketCommitMatch(BaseModel):
     roundTime: Optional[str] = None
     breakTime: Optional[str] = None
     isRanked: bool = True  # official/ranked bout vs. friendly/exhibition — see insert_match_endpoint for the ad hoc counterpart
-    # NEW — equipment facts the bracket_builder.html scheduler already
-    # resolved at generation time. Pushed so live_queue.html can re-run
-    # the SAME vest/plexi availability check against LIVE court/position
-    # state (which can keep changing after commit, via drag-and-drop in
-    # either admin panel) instead of only ever seeing what was true at
-    # generation time.
-    resolvedVestGen: Optional[str] = None          # "gen2" | "gen3" — which specific generation this match was assigned
+    # Equipment facts the bracket_builder.html scheduler already resolved
+    # at generation time.
+    resolvedVestGen: Optional[str] = None          # "gen2" | "gen3"
     requiresPlexiHelmet: bool = False               # competition-rule fact for this match's category
-    scheduledWithRelaxedConstraints: bool = False    # true if the generator's guard-limit overflow path had to place this without a full equipment/rest-gap check
+    scheduledWithRelaxedConstraints: bool = False    # true if placed via the generator's overflow path
+    # POOMSAE only: the poomsae drawn for this match's category and round
+    # (Poomsae Draw page) — one key for round 1 / semi-final, two for the
+    # final. Stored on the match doc as [{key, name}] in performance order.
+    poomsae: Optional[List[str]] = None
+
+
+# Match fields only some disciplines use (kyorugi). commit_brackets_endpoint
+# writes them only when the request includes them.
+DISCIPLINE_ONLY_MATCH_FIELDS = (
+    "pssSize", "hitLevel", "pssHitLevelSetId", "roundTime", "breakTime",
+    "resolvedVestGen", "requiresPlexiHelmet", "scheduledWithRelaxedConstraints",
+)
 
 
 class BracketCommitRequest(BaseModel):
@@ -1023,13 +1454,8 @@ class BracketCommitRequest(BaseModel):
     discipline: str
     brackets: List[BracketCommitBracket]
     matches: List[BracketCommitMatch]
-    # NEW — session-local equipment configuration from bracket_builder.html
-    # (courts, vest inventory, plexi helmet count, transfer buffer, etc.),
-    # written to tournaments/{id}/meta/equipment in the SAME commit so
-    # live_queue.html can load it once and re-run the same vest/helmet
-    # conflict checks against live match data. Optional so older callers
-    # (or a commit that genuinely has nothing configured) don't fail
-    # validation.
+    # Session-local equipment configuration from bracket_builder.html,
+    # written to tournaments/{id}/meta/equipment in the SAME commit.
     equipment: Optional[Dict] = None
 
 
@@ -1043,8 +1469,11 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
 
     for b in payload.brackets:
         bracket_ref = tournament_ref.collection("brackets").document()
+        bracket_data = b.dict()
+        if bracket_data.get("pssHitLevelSetId") is None:
+            bracket_data.pop("pssHitLevelSetId", None)  # kyorugi only
         batch.set(bracket_ref, {
-            **b.dict(),
+            **bracket_data,
             "tournamentId": tournament_id,
             "status": "generated",
             "createdAt": firestore.SERVER_TIMESTAMP,
@@ -1057,6 +1486,10 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
     )
 
 
+    # Poomsae draw (Poomsae Draw page): the server attaches the drawn
+    # poomsae itself, so it never depends on the browser having sent them.
+    draw_rows = _draw_rows_of(tournament_id) if "poomsae" in (payload.discipline or "").lower() else []
+
     real_id_by_local_id = {}
     for m in payload.matches:
         match_number = m.displayNumber if m.displayNumber is not None else m.matchId
@@ -1067,12 +1500,6 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
         match_ref = matches_ref.document(doc_id)
 
         def _resolve_corner(corner: Optional[Dict]) -> Optional[Dict]:
-            # A poomsae cut-off match's red corner is genuinely None —
-            # it's a solo, judged performance with no opponent at all,
-            # not just an unresolved one. Passing that through as None
-            # (rather than dict()-ing it, which blows up on None) is
-            # exactly what BracketCommitMatch.red being Optional was
-            # meant to allow — see that field's own docstring.
             if corner is None:
                 return None
             corner = dict(corner)
@@ -1095,34 +1522,27 @@ def commit_brackets_endpoint(tournament_id: str, payload: BracketCommitRequest):
             "winnerEntryId": m.winnerEntryId,
             "courtId": m.courtId,
             "queuePosition": m.queuePosition,
-            "pssSize": m.pssSize,
-            "hitLevel": m.hitLevel,
-            "pssHitLevelSetId": m.pssHitLevelSetId,
-            "roundTime": m.roundTime,
-            "breakTime": m.breakTime,
             "isRanked": m.isRanked,
-            "resolvedVestGen": m.resolvedVestGen,
-            "requiresPlexiHelmet": m.requiresPlexiHelmet,
-            "scheduledWithRelaxedConstraints": m.scheduledWithRelaxedConstraints,
         }
-        # Omit any field that's genuinely None (a poomsae cut-off match's
-        # red/pssSize/hitLevel/resolvedVestGen, an unassigned match's
-        # courtId, etc.) rather than writing it as an explicit null —
-        # every consumer in this codebase already reads match fields via
-        # dict.get(), which returns None identically whether the key is
-        # absent or present-and-null, so this is purely cosmetic for
-        # existing readers and keeps a poomsae match doc free of a pile
-        # of kyorugi-only nulls that never apply to it. Booleans like
-        # requiresPlexiHelmet=False are NOT None, so they're kept.
+        # Discipline-only fields (kyorugi vests / helmets / round timing /
+        # scheduling flags) are written only when the builder actually sent
+        # them — the poomsae builder doesn't, so its matches don't get
+        # model defaults like requiresPlexiHelmet=false or roundTime.
+        sent = getattr(m, "model_fields_set", None) or getattr(m, "__fields_set__", set())
+        for field in DISCIPLINE_ONLY_MATCH_FIELDS:
+            if field in sent:
+                match_doc[field] = getattr(m, field)
+        # Builder-sent keys win (it knows single-elimination round depth);
+        # otherwise the server works them out from the saved draw.
+        poomsae_keys = [k for k in (m.poomsae or []) if k in POOMSAE_NAMES] \
+            or _drawn_poomsae_keys(m.bracketCategoryCode, m.roundPhase, draw_rows)
+        if poomsae_keys:
+            match_doc["poomsae"] = _poomsae_field(poomsae_keys)
+        # Omit any field that's genuinely None rather than writing it as
+        # an explicit null. Booleans like requiresPlexiHelmet=False are kept.
         match_doc = {k: v for k, v in match_doc.items() if v is not None}
         batch.set(match_ref, match_doc, merge=True)
 
-    # Equipment meta — same batch as brackets/matches, so a commit is
-    # atomic-ish w.r.t. this file's own writes (all three either land
-    # together or the whole batch fails together). Overwrites whatever
-    # was there before wholesale (not merge=True) — a fresh Generate +
-    # Push should fully replace the prior configuration, not accumulate
-    # stale keys from an earlier session's shape.
     if payload.equipment is not None:
         equipment_ref = tournament_ref.collection("meta").document("equipment")
         batch.set(equipment_ref, {
@@ -1143,22 +1563,11 @@ def clean_brackets_endpoint(
 ):
     """
     Wipes everything bracket_builder.html's "Push to Firebase" creates
-    for this tournament: every bracket doc, every match doc (scoped to
-    this tournament within the given sport/discipline), and the
-    equipment meta doc — so a fresh Generate + Push starts completely
-    clean instead of leaving stale matches/brackets behind from a
-    previous attempt.
+    for this tournament: every bracket doc, every match doc, and the
+    equipment meta doc.
 
     Deliberately does NOT touch registrations, division_rosters,
-    categoryCounts, or registeredClubs — those represent real people who
-    signed up, not generated bracket output, and this endpoint has no
-    business deleting them just because the brackets built from them are
-    being cleared.
-
-    Firestore has no server-side "delete where" — every matching
-    document has to be listed and deleted individually, batched in
-    chunks of 400 (comfortably under the 500-write batch limit) since a
-    tournament can have hundreds of matches.
+    categoryCounts, or registeredClubs.
     """
     tournament_ref = db.collection("tournaments").document(tournament_id)
 
@@ -1197,41 +1606,21 @@ def clean_brackets_endpoint(
 # ═══════════════════════════════════════════════════════════════════════════
 # LIVE QUEUE / MATCH ADMIN CONSOLE
 # ═══════════════════════════════════════════════════════════════════════════
-# Backs dashboard/live_queue.html. Design:
-#   - The match LIST + realtime "is this fight done yet" updates are read
-#     directly by the browser via the Firestore web SDK (see
-#     get_firebase_client_config below) — no polling, and no backend
-#     round-trip on every scroll/tick, which is what keeps this cheap.
-#     FastAPI only handles the WRITES an admin makes (reorder, status
-#     override, ad hoc insert) plus the one-time court summary on load.
-#   - Reordering never renumbers the matches around it. Both the queue
-#     order (queuePosition) and, for ad hoc inserted matches, the
-#     scoreboard-facing number (displayNumber) use classic fractional/
-#     LexoRank-style indexing: take the midpoint of the two neighbouring
-#     values. That's where decimals like 101.5 or 0.5 come from — one
-#     write, regardless of how many matches sit on either side.
-#   - SECURITY: since the browser talks to Firestore directly for reads,
-#     Firestore security rules (not this file) are what gate who can read
-#     the matches collection. This whole file currently has no staff auth
-#     (see the TODOs on the admin-* endpoints above), so before exposing
-#     this page, lock down both the Firestore rules for `matches` and add
-#     real auth in front of the endpoints below — right now anyone who
-#     can reach this route can rewrite the running order.
-#   - INDEX: the court query below (tournamentId == X AND courtId == Y,
-#     ordered by queuePosition) needs a Firestore composite index. The
-#     Firestore console/CLI will offer to create it the first time the
-#     query runs and errors with a "failed-precondition" link — do that
-#     once per sport/discipline collection before going live.
+# Backs dashboard/live_queue.html. The match list + realtime updates are
+# read directly by the browser via the Firestore web SDK; FastAPI only
+# handles admin writes (reorder, status override, ad hoc insert) plus the
+# one-time court summary on load. Reordering uses fractional indexing.
+# SECURITY: Firestore rules gate reads of `matches`; lock them down before
+# exposing the page.
+# INDEX: the court query needs a composite index (tournamentId, courtId,
+# queuePosition).
 
 
 @router.get("/firebase-client-config")
 def get_firebase_client_config():
     """
     Public (client-safe) Firebase config for the web SDK the live queue
-    page uses for realtime onSnapshot listeners. These values are not
-    secrets — Firestore security rules are what actually gate access,
-    same as any Firebase web app — so this just surfaces env vars rather
-    than hardcoding a project into the template.
+    page uses for realtime onSnapshot listeners.
     """
     return {
         "apiKey": os.getenv("FIREBASE_WEB_API_KEY", ""),
@@ -1246,12 +1635,9 @@ def get_firebase_client_config():
 @router.get("/tournaments/{tournament_id}/courts")
 def get_tournament_courts(tournament_id: str, repo: TournamentPort = Depends(get_tournament_repo)):
     """
-    One-time (per page load / court-bar refresh) summary used to build
-    the court tab bar: every courtId in use for this tournament, how
-    many matches are pending/ready/done on it, and which match is up
-    next. Everything AFTER this initial load is realtime via the client
-    SDK — this endpoint is just what lets the page know which courts and
-    counts to show before subscribing to any of them.
+    One-time summary used to build the court tab bar: every courtId in
+    use for this tournament, how many matches are pending/ready/done on
+    it, and which match is up next.
     """
     tournament = repo.getTournament(tournament_id)
     if not tournament:
@@ -1303,8 +1689,6 @@ def _fractional_midpoint(prev: Optional[float], nxt: Optional[float], fallback: 
     """
     Standard fractional/LexoRank-style indexing: the new value sits
     exactly between its two neighbours so nothing else has to move.
-    Falls back to prev+1 / nxt-1 at either end of the list, and to
-    `fallback` when there's nothing on the court yet.
     """
     if prev is not None and nxt is not None:
         return (prev + nxt) / 2
@@ -1327,13 +1711,8 @@ class PositionUpdateRequest(BaseModel):
               dependencies=[Depends(require_operator("matches:manage"))])
 def reposition_match_endpoint(sport: str, discipline: str, match_id: str, payload: PositionUpdateRequest):
     """
-    Drag-and-drop reorder / re-court. The client sends the queuePosition
-    of whichever two matches now straddle the drop spot (None at either
-    end of a court's list); see _fractional_midpoint for how the new
-    value is derived. Only writes the one document that moved — nothing
-    else in the queue is touched. If the drop also crosses a boundary
-    where the scoreboard-facing displayNumber matters, pass
-    prev/nextDisplayNumber too and it gets the same treatment.
+    Drag-and-drop reorder / re-court. Only writes the one document that
+    moved.
     """
     match_ref = (
         db.collection("sports").document(sport)
@@ -1365,14 +1744,7 @@ class MatchStatusUpdateRequest(BaseModel):
               dependencies=[Depends(require_operator("matches:manage"))])
 def update_match_status_endpoint(sport: str, discipline: str, match_id: str, payload: MatchStatusUpdateRequest):
     """
-    Manual status override for the admin console. TkStrike's
-    FirebaseSyncPlugin normally owns this once a fight is actually
-    fought (see commit_brackets_endpoint's docstring on the match doc
-    being a hybrid), but staff need an escape hatch: forcing a fight
-    ready ahead of its scheduled slot, calling a no-show a walkover, or
-    correcting a status that got stuck. Setting winnerEntryId here is
-    what "done" and "walkover" mean in practice — pass the winning
-    corner's entryId along with the status.
+    Manual status override for the admin console.
     """
     if payload.status not in VALID_MATCH_STATUSES:
         raise HTTPException(status_code=400, detail=f"status must be one of {sorted(VALID_MATCH_STATUSES)}")
@@ -1389,8 +1761,7 @@ def update_match_status_endpoint(sport: str, discipline: str, match_id: str, pay
     if payload.winnerEntryId is not None:
         update["winnerEntryId"] = payload.winnerEntryId
     elif payload.status not in ("done", "walkover"):
-        # Resetting back to pending/ready clears a stale winner instead
-        # of leaving it dangling on a fight that's no longer "done".
+        # Resetting back to pending/ready clears a stale winner.
         update["winnerEntryId"] = None
 
     match_ref.set(update, merge=True)
@@ -1424,18 +1795,8 @@ def insert_match_endpoint(
     repo: TournamentPort = Depends(get_tournament_repo),
 ):
     """
-    The "+" that appears when hovering the gap between two rows in the
-    live queue — creates a brand-new match that slots in right there,
-    without renumbering anything else. Uses the same fractional-index
-    trick as reposition_match_endpoint for BOTH queuePosition (its spot
-    in the running order) and displayNumber (the scoreboard number,
-    e.g. 101 and 102 becoming 101.5), so this is a single document write.
-
-    isRanked defaults to True but exists specifically for this endpoint:
-    an admin slotting in a late add-on or a friendly/exhibition bout
-    between two real bracket fights sets it False so results reporting
-    and standings can skip it — see BracketCommitMatch.isRanked for the
-    same flag on normally-scheduled matches.
+    Creates a brand-new match that slots in between two existing rows in
+    the live queue, without renumbering anything else.
     """
     tournament = repo.getTournament(tournament_id)
     if not tournament:
@@ -1460,6 +1821,7 @@ def insert_match_endpoint(
             "name": name,
             "country": members[0].get("country") if members else None,
             "clubId": first_sport_data.get("clubId"),
+            "clubName": first_sport_data.get("clubName"),
         }
 
     blue = _resolve_corner(payload.blue)
@@ -1508,20 +1870,10 @@ def insert_match_endpoint(
             dependencies=[Depends(require_operator("weighin:view"))])
 def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tournament_repo)):
     """
-    Single source of truth for the two client-generated backup documents
-    (weigh-in sheet, backup registration sheet) — see
-    dashboard/category_manager.html's "Generate Weigh-in Sheet" /
-    "Generate Registration Sheet" buttons, which fetch this once and
-    render an actual PDF entirely client-side with jsPDF (drawn as
-    vectors — not the browser's print engine — specifically so the
-    output is byte-identical regardless of which browser/OS/printer
-    driver opens it). Nothing here is persisted; it's a fresh read of
-    active registrations, grouped by club, every time it's called.
-
-    Registrations with no clubId (e.g. entries added via admin-add
-    without a requesting club) are returned separately under
-    "unassigned" rather than folded into any real club's roster, so the
-    client can render them as their own unlabeled page(s).
+    Single source of truth for the client-generated weigh-in sheet and
+    backup registration sheet. Fresh read of active registrations,
+    grouped by club. Registrations with no clubId are returned separately
+    under "unassigned".
     """
     tournament = repo.getTournament(tournament_id)
     if not tournament:
@@ -1533,8 +1885,6 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
         if d.to_dict().get("status", "active") == "active"
     ]
 
-    # Batch-resolve every referenced athlete once, instead of one read per
-    # registration entry.
     athlete_ids = {aid for r in regs for aid in r.get("athleteIds", [])}
     athlete_refs = [db.collection("athletes").document(aid) for aid in athlete_ids]
     athletes = {snap.id: snap.to_dict() for snap in db.get_all(athlete_refs) if snap.exists}
@@ -1581,15 +1931,6 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
 # ═══════════════════════════════════════════════════════════════════════════
 # FINAL PLACEMENTS / RESULTS COMPUTATION
 # ═══════════════════════════════════════════════════════════════════════════
-# Backs the "🏅 Compute Results" button on dashboard/live_queue.html.
-# Derives 1st / 2nd / joint-3rd / joint-5th / ... placements per category
-# purely from each match's bracketRound + winnerEntryId (already written
-# by commit_brackets_endpoint and kept current by update_match_status_endpoint
-# / TkStrike's own sync), and writes the result onto each athlete's own
-# entry inside tournaments/{id}/division_rosters/{ageCode} — the exact
-# same collection tournament.html's public roster view already reads via
-# get_division_roster above, so no new read path is needed on that page,
-# just a new field to render.
 
 class CategoryResultSummary(BaseModel):
     categoryCode: str
@@ -1608,42 +1949,16 @@ def compute_tournament_results_endpoint(
 ):
     """
     Walks every category's completed single-elimination bracket and
-    derives final placements (1st, 2nd, joint-3rd, joint-5th, ...) purely
-    from bracketRound + winnerEntryId, then writes each entry's placement
-    onto its division_rosters entry so tournament.html's public roster
-    view can read it straight off data it already fetches.
+    derives final placements (1st, 2nd, joint-3rd, joint-5th, ...) from
+    bracketRound + winnerEntryId, then writes each entry's placement onto
+    its division_rosters entry.
 
-    A match counts as "decided" when its status is "done", "walkover",
-    OR "completed" — TkStrike's own FirebaseSyncPlugin writes "completed"
-    directly onto the match doc once a fight actually finishes (along
-    with win/win_score/win_type/end_time), which is a DIFFERENT string
-    than the "done" status this file's own update_match_status_endpoint
-    uses for its manual override. Both mean the same thing — the fight
-    is over and winnerEntryId is set — so both are treated as decided
-    here; only "pending"/"ready" (or a missing winnerEntryId) count as
-    not yet decided.
+    A match counts as decided when its status is "done", "walkover", or
+    "completed" (TkStrike's FirebaseSyncPlugin).
 
-    PLACEMENT MATH: for a category whose bracket's final round is
-    totalRounds (the max bracketRound seen across ANY match in that
-    category, completed or not — the shape is fixed at commit time), a
-    match's LOSER at bracketRound r is placed at
-
-        placement = 2 ** (totalRounds - r) + 1
-
-    (final loser -> 2nd; both semifinal losers -> joint 3rd; the four
-    quarterfinal losers -> joint 5th; and so on.) There is no separate
-    bronze-medal match in this codebase's ROUND_PHASE_OPTIONS
-    (R32/R16/QF/SF/F only), so both semifinal losers share 3rd rather
-    than playing it off. The FINAL's winner is placement 1; winners of
-    every other round aren't placed by that round at all (they're only
-    placed once they eventually lose, or — for the champion — once the
-    final itself is decided).
-
-    A category is only processed once its final-round match is decided;
-    otherwise it's skipped entirely rather than half-written. This is
-    safe to re-run at any point during the tournament — it's idempotent
-    per category and only touches the "placement" field on each roster
-    entry, never "members".
+    Loser at bracketRound r is placed at 2 ** (totalRounds - r) + 1; the
+    final's winner is 1. A category is only processed once its final is
+    decided. Idempotent per category.
     """
     tournament = repo.getTournament(tournament_id)
     if not tournament:
@@ -1669,16 +1984,9 @@ def compute_tournament_results_endpoint(
     tournament_ref = db.collection("tournaments").document(tournament_id)
     results: List[CategoryResultSummary] = []
 
-    # "done"/"walkover" are this file's own manual-override statuses
-    # (see update_match_status_endpoint); "completed" is what TkStrike's
-    # FirebaseSyncPlugin writes directly onto the match doc once a real
-    # fight finishes. All three mean the match is over.
     DECIDED_STATUSES = ("done", "walkover", "completed")
 
     # ageCode -> {"athletes": {categoryCode: {entryId: {"placement": n}}}}
-    # Registration doc ids are deterministically "{categoryCode}_{entryId}"
-    # (see _execute_registration_create), so we can look up each entry's
-    # ageCode directly with no extra query/index needed.
     roster_updates: Dict[str, Dict] = {}
 
     def _queue_placement(category_code: str, entry_id: str, placement: int) -> bool:
@@ -1745,7 +2053,6 @@ def compute_tournament_results_endpoint(
             incompleteMatches=incomplete, status="complete" if incomplete == 0 else "partial",
         ))
 
-    # ── Commit roster writes, chunked under the 500-write batch cap ──
     roster_items = list(roster_updates.items())
     for i in range(0, len(roster_items), 400):
         batch = db.batch()
@@ -1753,8 +2060,6 @@ def compute_tournament_results_endpoint(
             batch.set(tournament_ref.collection("division_rosters").document(age_code), data, merge=True)
         batch.commit()
 
-    # ── Flag processed matches so future dashboards/exports can tell
-    # which matches already fed into a placement computation. ────────
     decided_categories = {r.categoryCode for r in results if r.status in ("complete", "partial")}
     flag_refs = [ref for cat, refs in match_docs_by_category.items() if cat in decided_categories for ref in refs]
     for i in range(0, len(flag_refs), 400):
@@ -1904,9 +2209,7 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
     athlete_data = {
         "firstName": normalize_name(payload.firstName),
         "lastName": normalize_name(payload.lastName),
-        # Preserve original casing/diacritics for display + edit prefill —
-        # "firstName"/"lastName" above stay normalized for the prefix-range
-        # search queries in search_athletes / search_athletes_admin.
+        # Preserve original casing/diacritics for display + edit prefill.
         "firstNameDisplay": payload.firstName.strip(),
         "lastNameDisplay": payload.lastName.strip(),
         "displayName": f"{payload.firstName} {payload.lastName}",
@@ -1921,7 +2224,6 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
     _, doc_ref = db.collection("athletes").add(athlete_data)
     return {"id": doc_ref.id, "message": "Athlete created successfully"}
 
-import secrets  # add to imports at top
 
 # ── SCHEMAS ────────────────────────────────────────────────────────────
 class CreateTokenRequest(BaseModel):

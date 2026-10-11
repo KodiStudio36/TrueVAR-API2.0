@@ -1,0 +1,106 @@
+{% extends "dashboard/bracket_builder_base.html" %}
+{# Kyorugi (sparring) bracket builder — PSS vests, plexi helmets,
+equipment-aware scheduling, rest-gap hard lock. Shared layout:
+bracket_builder_base.html; shared JS: /static/js/bracket-builder-common.js. #}
+
+{% block builder_title %}Kyorugi Brackets &amp; Court Ordering{% endblock %}
+
+{% block builder_hint %}
+Everything below runs in your browser — nothing is written to Firestore until you hit
+<strong>Push to Firebase</strong>. Configure courts and vest numbers (these save immediately, like the
+category manager), then Generate to compute brackets and court ordering as a local draft you can
+drag-and-drop to adjust before committing. Three <strong>hard locks</strong> are enforced and re-checked
+before every push: the rest gap between the same athlete's matches, no same-club first-round pairs when
+avoidable, and one court per category.
+{% endblock %}
+
+{% block courts_help %}
+Pre-filled from this tournament's court count. This is session-only — nothing here is saved to
+Firestore, so it resets if you leave the page. Vest numbers can repeat across courts (different
+physical vests). The min-gap number is a <strong>hard lock</strong>: two matches that can involve the
+same athlete are kept at least that many fights apart. Courts never idle — if a court has no other
+order, the match still goes next and is marked relaxed.
+<strong>The ID field must exactly match that court's own TrueVAR-Core court_id</strong> — a
+mismatch here is why a court-side server would see no matches at all, with no error to point at it.
+{% endblock %}
+
+{% block config_panes %}
+<div id="vestPane" class="card-panel bb-pane bb-pane--vest">
+    <div class="bb-pane-header">
+        <h2 class="panel-title" style="font-size:1.05rem;">Vest Size &amp; Hit-Level</h2>
+    </div>
+    <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+        Derived automatically by weight from whichever PSS hit-level table is selected below — not
+        assigned per tournament. Switching tables updates this preview immediately.
+    </p>
+    <div id="vestList" class="bb-vest-list"></div>
+</div>
+
+<div id="equipmentPane" class="card-panel bb-pane bb-pane--equipment">
+    <div class="bb-pane-header">
+        <h2 class="panel-title" style="font-size:1.05rem;">Equipment</h2>
+    </div>
+    <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+        Session-only, like Courts. Vest counts are keyed by size + generation — the scheduler
+        tries not to double-book more vests of a size/gen than you enter here, accounting for a
+        transfer buffer when a vest is reused on a different court. Plexi helmets work the same
+        way: the "Plexi" checkbox on a court above is a soft preference (categories needing one
+        incline toward that court), not a hard requirement — actual availability is governed by
+        the helmet count below plus the same transfer buffer. Equipment is soft: if nothing is
+        free after a short wait, the match is placed anyway and flagged.
+    </p>
+
+    <div class="bb-equip-block">
+        <h3 class="bb-equip-subhead">Vest inventory (by size &amp; generation)</h3>
+        <div id="vestInventoryList" class="bb-equip-inventory"></div>
+    </div>
+
+    <div class="bb-equip-block">
+        <h3 class="bb-equip-subhead">Vest generation policy by age division</h3>
+        <div id="vestGenPolicyList" class="bb-equip-genpolicy"></div>
+    </div>
+
+    <div class="bb-equip-block bb-equip-row">
+        <label class="bb-field">
+            <span>Plexi helmets available</span>
+            <input type="number" min="0" id="plexiHelmetCountInput" value="2"
+                onchange="plexiHelmetCount = parseInt(this.value) || 0">
+        </label>
+        <label class="bb-field">
+            <span>Transfer buffer (min)</span>
+            <input type="number" min="0" id="transferBufferInput" value="5"
+                onchange="transferBufferSeconds = (parseInt(this.value) || 0) * 60">
+        </label>
+        <label class="bb-field">
+            <span>Assumed rounds/match</span>
+            <input type="number" min="1" max="3" id="assumedRoundsInput" value="3"
+                onchange="assumedRoundsPerMatch = parseInt(this.value) || 3">
+        </label>
+        <label class="bb-field"
+            title="Categories are balanced across courts by fight count. A plexi-helmet category stays on a Plexi court unless that court would end up more than this many fights heavier than a non-plexi alternative.">
+            <span>Plexi court tolerance (fights)</span>
+            <input type="number" min="0" id="courtBalanceThresholdInput" value="5"
+                onchange="courtBalanceThreshold = parseInt(this.value) || 0">
+        </label>
+    </div>
+</div>
+{% endblock %}
+
+{% block generate_fields_after %}
+<label class="bb-field" id="pssSetFieldWrap">
+    <span>PSS hit-level table</span>
+    <select id="pssSetSelect" onchange="onPssSetChange()">
+        <option value="">Loading…</option>
+    </select>
+</label>
+{% endblock %}
+
+{% block court_order_hint %}
+The whole tournament is scheduled up front — later rounds show as "101 Winner" placeholders until
+their feeder match resolves. Drag a match to reorder it within its court (drops that would shorten an
+athlete's rest are rejected); dragging it onto a different court moves its whole category there.
+{% endblock %}
+
+{% block builder_script %}
+<script src="/static/js/bracket-builder-kyorugi.js"></script>
+{% endblock %}

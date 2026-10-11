@@ -770,6 +770,9 @@ JAVASCRIPT
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/static/js/bracket-core.js"></script>
+<script src="/static/js/bracket-sheets.js"></script>
 <script>
     "use strict";
 
@@ -1281,11 +1284,12 @@ JAVASCRIPT
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // BRACKET PDF EXPORT — the "📄 Bracket PDFs" button. This is the same
-    // SVG draw-sheet renderer bracket_builder.html uses for its own
-    // "Download All (PDF)" button, isolated and ported here so it can be
-    // regenerated from THIS page at any time, straight off Firestore —
-    // not off bracket_builder.html's own browser session.
+    // BRACKET PDF EXPORT — the "📄 Bracket PDFs" button. Tree building
+    // comes from /static/js/bracket-core.js and drawing/PDF/print from
+    // /static/js/bracket-sheets.js — the SAME files bracket_builder.html
+    // uses, so both pages always produce identical sheets. Regenerated
+    // from THIS page at any time, straight off Firestore — not off
+    // bracket_builder.html's own browser session.
     //
     // WHY THIS WORKS WITHOUT bracket_builder.html'S LOCAL STATE:
     // bracket_builder.html only ever keeps its full generated bracket
@@ -1302,12 +1306,12 @@ JAVASCRIPT
     //     scheduled up front — see generateCourtOrdering's own comment on
     //     why round 2+ already exist as "pending" docs immediately after
     //     commit, not just round 1.
-    // Single-elimination placement (placeStandard / placeClubCountrySpread)
+    // Single-elimination placement (BracketCore.PLACEMENT_STRATEGIES)
     // is a PURE function of (seeded entries, bracket size) — feed it the
     // exact same seed order and placement strategy and it reproduces the
     // identical tree, byes included, every time. So: sort the bracket
     // doc's own entries by their saved `seed`, re-run the same placement
-    // + single-elimination builder client-side (ported verbatim below),
+    // + single-elimination builder client-side (BracketCore),
     // then overlay each generated match with whatever's ACTUALLY in the
     // matches collection right now for that (round, matchNumber) pair —
     // status, corners (including any manual replacement made via this
@@ -1321,171 +1325,6 @@ JAVASCRIPT
 
     let bracketDocsByCategoryCode = {};
     let reconstructedBrackets = [];   // built fresh every time the modal opens — see prepareBracketPdfData()
-    let bracketMatchById = {};        // matchId -> reconstructed match, for resolving "101 Winner" placeholders
-    let __measureCanvasCtx = null;    // lazily-created scratch canvas 2D context, reused only to measure real text widths in buildBracketSVG
-    let leftLogoDataUrl = "/static/assets/logos/world_taekwondo.png";
-    let rightLogoDataUrl = "/static/assets/logos/truevar.png";
-    let logosLoadedAsDataUrls = false;
-    const BRACKET_PDF_DATE = ""; // this template gets no tournament.dateTime in its Jinja context — wrapSVG only prints this line when non-empty
-
-    const PAGE_W = 1123, PAGE_H = 794; // A4 landscape @ 96dpi
-    const BOX_HALF_W = 15; // half-width of the match-number badge rect — connector lines stop here, not at its center
-
-    function nextPowerOfTwo(n) {
-        let p = 1;
-        while (p < n) p *= 2;
-        return p;
-    }
-
-    // Textbook seeding table via recursive halving — identical to
-    // bracket_builder.html's own copy, since this has to reproduce the
-    // exact same tree given the exact same seed order.
-    function standardSeedSlotOrder(bracketSize) {
-        let order = [1];
-        while (order.length < bracketSize) {
-            const n = order.length * 2;
-            const next = [];
-            order.forEach(s => { next.push(s); next.push(n + 1 - s); });
-            order = next;
-        }
-        return order;
-    }
-
-    function placeStandard(seededEntries, bracketSize) {
-        const slotOrder = standardSeedSlotOrder(bracketSize);
-        const slots = new Array(bracketSize).fill(null);
-        slotOrder.forEach((seed, i) => { slots[i] = seededEntries[seed - 1] || null; });
-        return slots;
-    }
-
-    function placeClubCountrySpread(seededEntries, bracketSize) {
-        let slots = placeStandard(seededEntries, bracketSize);
-
-        function pairClash(a, b) {
-            if (!a || !b) return false;
-            return (a.clubId && a.clubId === b.clubId) || (a.country && a.country === b.country);
-        }
-
-        let improved = true, iterations = 0;
-        while (improved && iterations < 200) {
-            improved = false;
-            iterations++;
-            for (let i = 0; i < slots.length; i += 2) {
-                const a = slots[i], b = slots[i + 1];
-                if (!pairClash(a, b)) continue;
-                for (let j = 0; j < slots.length; j += 2) {
-                    if (j === i) continue;
-                    const c = slots[j], d = slots[j + 1];
-                    if (!c) continue;
-                    if (!pairClash(a, c) && !pairClash(b, d)) {
-                        slots[i + 1] = c; slots[j] = b;
-                        improved = true;
-                        break;
-                    }
-                }
-                if (improved) break;
-            }
-        }
-        return slots;
-    }
-
-    const PLACEMENT_STRATEGIES = {
-        standard: placeStandard,
-        club_country_spread: placeClubCountrySpread,
-    };
-
-    function roundPhaseCode(playersEntering) {
-        if (playersEntering === 2) return "F";
-        if (playersEntering === 4) return "SF";
-        if (playersEntering === 8) return "QF";
-        return `R${playersEntering}`;
-    }
-
-    function roundLabelText(playersEntering) {
-        if (playersEntering === 2) return "Final";
-        if (playersEntering === 4) return "Semifinals";
-        if (playersEntering === 8) return "Quarterfinals";
-        return `Round of ${playersEntering}`;
-    }
-
-    // Rebuilds the FULL single-elimination tree (every round, every bye)
-    // from scratch — a pure function of (seeded entries, placement fn),
-    // ported verbatim from bracket_builder.html. Match ids follow the
-    // exact same "{categoryCode}_r{round}_m{matchNumber}" scheme that
-    // page uses, which is what lets a still-unresolved corner's `source`
-    // pointer (already saved on the live match doc, from before that
-    // feeder match was decided) resolve correctly against the freshly
-    // rebuilt tree below — the id scheme depends only on categoryCode +
-    // round + matchNumber, never on WHO ends up in which slot.
-    function generateSingleElimination(categoryCode, entries, placementFn) {
-        const bracketSize = nextPowerOfTwo(entries.length);
-        const slots = placementFn(entries, bracketSize);
-
-        const rounds = [];
-        let prevRoundMatches = null;
-        let roundParticipantCount = bracketSize;
-        let roundNum = 1;
-
-        while (roundParticipantCount >= 1) {
-            if (roundNum > 1 && roundParticipantCount === prevRoundMatches.length) break;
-            const numMatches = roundNum === 1 ? bracketSize / 2 : prevRoundMatches.length / 2;
-            if (numMatches < 1) break;
-
-            const roundMatches = [];
-            for (let i = 0; i < numMatches; i++) {
-                const matchId = `${categoryCode}_r${roundNum}_m${i + 1}`;
-                let blue, red, status;
-                let winnerCorner = null;
-
-                function cornerFrom(slotEntry) {
-                    return slotEntry
-                        ? { entryId: slotEntry.entryId, athleteIds: slotEntry.athleteIds, name: slotEntry.name, country: slotEntry.country, clubId: slotEntry.clubId }
-                        : { entryId: null, source: null };
-                }
-
-                if (roundNum === 1) {
-                    const p1 = slots[i * 2], p2 = slots[i * 2 + 1];
-                    blue = cornerFrom(p1);
-                    red = cornerFrom(p2);
-                    if (p1 && !p2) {
-                        status = "walkover";
-                        winnerCorner = { entryId: p1.entryId, athleteIds: p1.athleteIds, name: p1.name, country: p1.country, clubId: p1.clubId };
-                    } else if (p2 && !p1) {
-                        status = "walkover";
-                        winnerCorner = { entryId: p2.entryId, athleteIds: p2.athleteIds, name: p2.name, country: p2.country, clubId: p2.clubId };
-                    } else if (p1 && p2) {
-                        status = "ready";
-                    } else {
-                        status = "walkover";
-                    }
-                } else {
-                    const m1 = prevRoundMatches[i * 2], m2 = prevRoundMatches[i * 2 + 1];
-                    blue = m1.status === "walkover"
-                        ? m1.winnerCorner
-                        : { entryId: null, source: { matchId: m1.matchId, slot: "winner" } };
-                    red = m2.status === "walkover"
-                        ? m2.winnerCorner
-                        : { entryId: null, source: { matchId: m2.matchId, slot: "winner" } };
-                    status = (blue.entryId && red.entryId) ? "ready" : "pending";
-                }
-
-                const playersEnteringRound = bracketSize / Math.pow(2, roundNum - 1);
-                roundMatches.push({
-                    matchId, categoryCode, round: roundNum, matchNumber: i + 1,
-                    roundPhase: roundPhaseCode(playersEnteringRound),
-                    blue, red, status, winnerEntryId: null, winnerCorner,
-                    courtId: null, queuePosition: null,
-                });
-            }
-
-            rounds.push(roundMatches);
-            if (roundMatches.length === 1) break;
-            prevRoundMatches = roundMatches;
-            roundNum++;
-        }
-
-        return { rounds, bracketSize };
-    }
 
     // Fetches every bracket doc for this tournament — small, cheap
     // documents (categoryCode/categoryLabel/entries/placementStrategy),
@@ -1521,59 +1360,6 @@ JAVASCRIPT
         return rostersByAgeCode;
     }
 
-    // Both default logo paths are same-origin static assets, but once
-    // rasterized onto a <canvas> for the PDF export a canvas that has
-    // ever drawn an <image> loaded from anything but a data: URL gets
-    // treated as tainted the moment the SVG itself is loaded via a
-    // blob: URL — canvas.toDataURL() then silently fails. Converting
-    // both logos to self-contained base64 data URLs up front avoids
-    // that entirely; done lazily (only once, only when a bracket PDF is
-    // actually requested) rather than on every page load.
-    async function loadLogoAsDataUrl(url) {
-        if (!url || url.startsWith("data:")) return url || null;
-        try {
-            const res = await fetch(url);
-            if (!res.ok) return null;
-            const blob = await res.blob();
-            return await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        } catch (err) {
-            console.error("Failed to load logo as data URL:", url, err);
-            return null;
-        }
-    }
-
-    async function ensureLogosLoaded() {
-        if (logosLoadedAsDataUrls) return;
-        const [leftLogo, rightLogo] = await Promise.all([
-            loadLogoAsDataUrl(leftLogoDataUrl),
-            loadLogoAsDataUrl(rightLogoDataUrl),
-        ]);
-        if (leftLogo) leftLogoDataUrl = leftLogo;
-        if (rightLogo) rightLogoDataUrl = rightLogo;
-        logosLoadedAsDataUrls = true;
-    }
-
-    // "(R 0-2 PTF)" / "(B 2-0 PTF)" — shown under a match's number badge
-    // once that match has an actual result. The corner letter comes
-    // from the match doc's own `win` field ("blue"/"red" -> B/R);
-    // win_score and win_type are printed exactly as TkStrike's own sync
-    // wrote them (e.g. "2-0", "ptf") — only the type gets uppercased,
-    // matching the RSC/WDR/DQB/PTF/DSQ legend already on the sheet.
-    // Returns null for anything not yet decided (no `win` field yet) or
-    // for byes (never carry these fields at all).
-    function matchResultLabel(match) {
-        if (!match || !match.win || !match.win_score) return null;
-        const cornerLetter = match.win === "blue" ? "B" : match.win === "red" ? "R" : null;
-        if (!cornerLetter) return null;
-        const type = (match.win_type || "").toString().toUpperCase();
-        return `${cornerLetter} ${match.win_score}${type ? " " + type : ""}`;
-    }
-
     // Rebuilds one category's full bracket tree from its saved doc, then
     // overlays every non-bye match with whatever's currently true in
     // matchesById (already kept live by this page's own realtime
@@ -1591,9 +1377,10 @@ JAVASCRIPT
     function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
         const entries = (bracketDoc.entries || []).slice().sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
         if (entries.length < 2) return null; // no bracket doc should exist for these anyway, but guard regardless
+        if (bracketDoc.system && bracketDoc.system !== "single_elimination") return null; // poomsae cut-off / round robin: no draw sheet to rebuild
 
-        const placementFn = PLACEMENT_STRATEGIES[bracketDoc.placementStrategy] || placeStandard;
-        const built = generateSingleElimination(bracketDoc.categoryCode, entries, placementFn);
+        const placementFn = BracketCore.PLACEMENT_STRATEGIES[bracketDoc.placementStrategy] || BracketCore.PLACEMENT_STRATEGIES.standard;
+        const built = BracketCore.generateSingleElimination(bracketDoc.categoryCode, entries, placementFn);
 
         const liveMatchByKey = {};
         matchesById.forEach(m => {
@@ -1617,7 +1404,7 @@ JAVASCRIPT
             // Result facts — TkStrike's own FirebaseSyncPlugin writes
             // these directly onto the match doc once a fight actually
             // finishes; not present at all until then, which is exactly
-            // what makes matchResultLabel() return null for anything
+            // what makes BracketSheets.matchResultLabel() return null for anything
             // still pending/ready.
             m.win = live.win || null;
             m.win_score = live.win_score || null;
@@ -1644,368 +1431,17 @@ JAVASCRIPT
     async function prepareBracketPdfData() {
         const [, , rostersByAgeCode] = await Promise.all([
             loadBracketDocsForPdf(),
-            ensureLogosLoaded(),
+            BracketSheets.prepareAssets(),
             loadDivisionRostersForPdf(),
         ]);
         reconstructedBrackets = Object.values(bracketDocsByCategoryCode)
             .map(bracketDoc => reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode))
             .filter(Boolean)
             .sort((a, b) => a.categoryLabel.localeCompare(b.categoryLabel));
-        bracketMatchById = {};
-        reconstructedBrackets.forEach(b => b.rounds.forEach(round => round.forEach(m => { bracketMatchById[m.matchId] = m; })));
     }
 
-    // A participant slot with no entryId yet is either a genuine
-    // permanent bye (no source — plain "BYE") or fed by an earlier match
-    // that hasn't resolved yet (shown as "101 Winner" using that
-    // feeder's own displayNumber, resolved from bracketMatchById).
-    function bracketParticipantLabel(entries, participant) {
-        if (participant.entryId) {
-            const e = entries.find(x => x.entryId === participant.entryId);
-            const name = e ? e.name : participant.entryId;
-            const country = e && e.country ? ` (${e.country})` : "";
-            return `${name}${country}`;
-        }
-        if (participant.source) {
-            const feeder = bracketMatchById[participant.source.matchId];
-            const num = feeder && feeder.displayNumber != null ? feeder.displayNumber : "?";
-            return `${num} Winner`;
-        }
-        return "BYE";
-    }
+    const BRACKET_SHEET_OPTIONS = { title: TOURNAMENT_TITLE }; // no tournament date in this template's Jinja context
 
-    function bracketParticipantDisplay(bracket, participant) {
-        return bracketParticipantLabel(bracket.entries, participant);
-    }
-
-    function bracketParticipantClubName(bracket, participant) {
-        if (!participant || !participant.entryId) return "";
-        const e = bracket.entries.find(x => x.entryId === participant.entryId);
-        return e && e.clubName ? e.clubName : "";
-    }
-
-    // ── The SVG draw-sheet builder itself — ported verbatim from
-    // bracket_builder.html's buildBracketSVG/wrapSVG, with only the
-    // participant-lookup calls renamed (bracketParticipant*) to avoid
-    // colliding with this page's own participantLabel(corner), which has
-    // a different signature and reads from a different data source. ──
-    function buildBracketSVG(bracket) {
-        const HEADER_H = 92, FOOTER_H = 150, MARGIN_X = 16, NAME_W = 190, FINAL_GAP = 70;
-        const bracketSize = bracket.bracketSize;
-        const numRounds = bracket.rounds.length;
-        const totalWidth = PAGE_W, totalHeight = PAGE_H;
-        const svgParts = [];
-
-        function line(x1, y1, x2, y2) {
-            svgParts.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#1e293b" stroke-width="1"/>`);
-        }
-        function text(x, y, anchor, str, opts) {
-            opts = opts || {};
-            svgParts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-size="${opts.size || 10}" font-weight="${opts.bold ? 700 : 400}" font-family="Arial, sans-serif" fill="${opts.color || "#0f172a"}">${escapeHtml(str)}</text>`);
-        }
-        function badge(x, y, str, resultLabel) {
-            svgParts.push(`<rect x="${(x - BOX_HALF_W).toFixed(1)}" y="${(y - 8).toFixed(1)}" width="${BOX_HALF_W * 2}" height="16" fill="#fff" stroke="#1e293b" stroke-width="1"/>`);
-            text(x, y + 3.5, "middle", str, { size: 8.5 });
-            // "(R 0-2 PTF)" style result, printed just under the badge
-            // once matchResultLabel() has something to show — see that
-            // function's own comment for exactly where these fields
-            // come from.
-            if (resultLabel) text(x, y + 25, "middle", resultLabel, { size: 9, color: "#64748b" });
-        }
-        function estimateTextWidth(str, fontSize) {
-            if (!__measureCanvasCtx) {
-                try { __measureCanvasCtx = document.createElement("canvas").getContext("2d"); } catch (err) { __measureCanvasCtx = null; }
-            }
-            if (!__measureCanvasCtx) return String(str ?? "").length * fontSize * 0.55;
-            __measureCanvasCtx.font = `${fontSize}px Arial, sans-serif`;
-            return __measureCanvasCtx.measureText(String(str ?? "")).width;
-        }
-        function drawMerge(xFeed1, y1, xFeed2, y2, xOutCenter) {
-            line(xFeed1, y1, xOutCenter, y1);
-            line(xFeed2, y2, xOutCenter, y2);
-            line(xOutCenter, y1, xOutCenter, y2);
-        }
-        function drawElbowInto(xFeedEdge, yFeed, xOutCenter, yOut) {
-            line(xFeedEdge, yFeed, xOutCenter, yFeed);
-            if (yFeed !== yOut) line(xOutCenter, yFeed, xOutCenter, yOut);
-        }
-
-        // Trivial case: a 2-entry bracket is just the Final — laid out
-        // the same way as a real round-1 pair (see the general path
-        // below): one fighter on the left margin, one on the right,
-        // each with its own line running in toward the center match
-        // badge, mirroring bracket_builder.html's own fix for this case.
-        if (bracketSize <= 2) {
-            const finalMatch = bracket.rounds[0][0];
-            const cx = totalWidth / 2, cy = HEADER_H + (totalHeight - HEADER_H - FOOTER_H) / 2;
-
-            const headerY = 70, headerH = 18;
-            svgParts.push(`<rect x="10" y="${headerY}" width="${totalWidth - 20}" height="${headerH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
-            text(cx, 82, "middle", "Final", { bold: true, size: 9 });
-
-            const blueName = bracketParticipantDisplay(bracket, finalMatch.blue);
-            const blueClub = bracketParticipantClubName(bracket, finalMatch.blue);
-            const redName = bracketParticipantDisplay(bracket, finalMatch.red);
-            const redClub = bracketParticipantClubName(bracket, finalMatch.red);
-            const nameFontSize = 11, clubFontSize = 10;
-
-            text(MARGIN_X, cy - 1.5, "start", blueName, { size: nameFontSize });
-            const blueW = estimateTextWidth(blueName, nameFontSize);
-            if (blueClub) text(MARGIN_X, cy + clubFontSize + 0.5, "start", blueClub, { size: clubFontSize, color: "#64748b" });
-            const blueFeedX = MARGIN_X + blueW + 4;
-
-            text(totalWidth - MARGIN_X, cy - 1.5, "end", redName, { size: nameFontSize });
-            const redW = estimateTextWidth(redName, nameFontSize);
-            if (redClub) text(totalWidth - MARGIN_X - redW, cy + clubFontSize + 0.5, "start", redClub, { size: clubFontSize, color: "#64748b" });
-            const redFeedX = totalWidth - MARGIN_X - redW - 4;
-
-            line(blueFeedX, cy, cx, cy);
-            line(redFeedX, cy, cx, cy);
-            badge(cx, cy, finalMatch.displayNumber ?? "", matchResultLabel(finalMatch));
-
-            return { svg: wrapBracketSVG(totalWidth, totalHeight, svgParts, bracket, cx), width: totalWidth, height: totalHeight };
-        }
-
-        const halfCount = bracket.rounds[0].length / 2;
-        const centerX = totalWidth / 2;
-
-        const bodyHeight = totalHeight - HEADER_H - FOOTER_H;
-        const MATCH_H = bodyHeight / halfCount;
-        const ROW_H = Math.min(26, MATCH_H * 0.5);
-        const nameFontSize = Math.max(6, Math.min(9, MATCH_H * 0.2));
-        const clubFontSize = Math.max(6.5, nameFontSize * 0.9);
-
-        const bodyWidthPerSide = centerX - MARGIN_X - NAME_W - FINAL_GAP;
-        const ROUND_W = numRounds > 1 ? bodyWidthPerSide / (numRounds - 1) : 0;
-
-        function xRoundLeft(r) { return MARGIN_X + NAME_W + r * ROUND_W; }
-        function xRoundRight(r) { return totalWidth - MARGIN_X - NAME_W - r * ROUND_W; }
-
-        const leftRounds = [], rightRounds = [];
-        const round0 = bracket.rounds[0];
-        leftRounds[0] = round0.slice(0, halfCount).map((m, i) => ({ match: m, y: HEADER_H + i * MATCH_H + MATCH_H / 2 }));
-        rightRounds[0] = round0.slice(halfCount).map((m, i) => ({ match: m, y: HEADER_H + i * MATCH_H + MATCH_H / 2 }));
-
-        for (let r = 1; r <= numRounds - 2; r++) {
-            const roundMatches = bracket.rounds[r];
-            const half = roundMatches.length / 2;
-            leftRounds[r] = roundMatches.slice(0, half).map((m, i) => ({
-                match: m, y: (leftRounds[r - 1][2 * i].y + leftRounds[r - 1][2 * i + 1].y) / 2,
-            }));
-            rightRounds[r] = roundMatches.slice(half).map((m, i) => ({
-                match: m, y: (rightRounds[r - 1][2 * i].y + rightRounds[r - 1][2 * i + 1].y) / 2,
-            }));
-        }
-
-        [
-            { side: leftRounds[0], nameX: MARGIN_X, anchor: "start", boxX: xRoundLeft(0), dir: 1 },
-            { side: rightRounds[0], nameX: totalWidth - MARGIN_X, anchor: "end", boxX: xRoundRight(0), dir: -1 },
-        ].forEach(({ side, nameX, anchor, boxX, dir }) => {
-            side.forEach((entry) => {
-                const { match, y } = entry;
-                if (match.status === "walkover") {
-                    const winnerStr = bracketParticipantDisplay(bracket, match.winnerCorner);
-                    const winnerClub = bracketParticipantClubName(bracket, match.winnerCorner);
-                    text(nameX, y - 1.5, anchor, winnerStr, { size: nameFontSize });
-                    const nameW = estimateTextWidth(winnerStr, nameFontSize);
-                    const nameStartX = dir === 1 ? nameX : nameX - nameW;
-                    if (winnerClub) text(nameStartX, y + clubFontSize + 0.5, "start", winnerClub, { size: clubFontSize, color: "#64748b" });
-                    const winnerFeedX = dir === 1 ? nameX + nameW + 4 : nameX - nameW - 4;
-                    line(winnerFeedX, y, boxX, y);
-                    entry.exitX = boxX;
-                    return;
-                }
-
-                const topY = y - ROW_H / 2, botY = y + ROW_H / 2;
-                const topStr = bracketParticipantDisplay(bracket, match.blue);
-                const topClub = bracketParticipantClubName(bracket, match.blue);
-                const botStr = bracketParticipantDisplay(bracket, match.red);
-                const botClub = bracketParticipantClubName(bracket, match.red);
-
-                text(nameX, topY - 1.5, anchor, topStr, { size: nameFontSize });
-                text(nameX, botY - 1.5, anchor, botStr, { size: nameFontSize });
-
-                const topW = estimateTextWidth(topStr, nameFontSize);
-                const botW = estimateTextWidth(botStr, nameFontSize);
-                const topStartX = dir === 1 ? nameX : nameX - topW;
-                const botStartX = dir === 1 ? nameX : nameX - botW;
-                if (topClub) text(topStartX, topY + clubFontSize + 0.5, "start", topClub, { size: clubFontSize, color: "#64748b" });
-                if (botClub) text(botStartX, botY + clubFontSize + 0.5, "start", botClub, { size: clubFontSize, color: "#64748b" });
-
-                const topFeedX = dir === 1 ? nameX + topW + 4 : nameX - topW - 4;
-                const botFeedX = dir === 1 ? nameX + botW + 4 : nameX - botW - 4;
-
-                drawMerge(topFeedX, topY, botFeedX, botY, boxX);
-                badge(boxX, y, match.displayNumber ?? "", matchResultLabel(match));
-                entry.exitX = boxX + dir * BOX_HALF_W;
-            });
-        });
-
-        for (let r = 1; r < leftRounds.length; r++) {
-            leftRounds[r].forEach((entry, i) => {
-                const feed1 = leftRounds[r - 1][2 * i].exitX;
-                const feed2 = leftRounds[r - 1][2 * i + 1].exitX;
-                drawMerge(feed1, leftRounds[r - 1][2 * i].y, feed2, leftRounds[r - 1][2 * i + 1].y, xRoundLeft(r));
-                badge(xRoundLeft(r), entry.y, entry.match.displayNumber ?? "", matchResultLabel(entry.match));
-                entry.exitX = xRoundLeft(r) + BOX_HALF_W;
-            });
-            rightRounds[r].forEach((entry, i) => {
-                const feed1 = rightRounds[r - 1][2 * i].exitX;
-                const feed2 = rightRounds[r - 1][2 * i + 1].exitX;
-                drawMerge(feed1, rightRounds[r - 1][2 * i].y, feed2, rightRounds[r - 1][2 * i + 1].y, xRoundRight(r));
-                badge(xRoundRight(r), entry.y, entry.match.displayNumber ?? "", matchResultLabel(entry.match));
-                entry.exitX = xRoundRight(r) - BOX_HALF_W;
-            });
-        }
-
-        const lastLeft = leftRounds[leftRounds.length - 1][0];
-        const lastRight = rightRounds[rightRounds.length - 1][0];
-        const yFinal = (lastLeft.y + lastRight.y) / 2;
-        const finalMatch = bracket.rounds[numRounds - 1][0];
-
-        drawElbowInto(lastLeft.exitX, lastLeft.y, centerX, yFinal);
-        drawElbowInto(lastRight.exitX, lastRight.y, centerX, yFinal);
-        badge(centerX, yFinal, finalMatch.displayNumber ?? "", matchResultLabel(finalMatch));
-
-        const roundLabels = [];
-        for (let r = 0; r < numRounds; r++) roundLabels.push(roundLabelText(bracketSize / Math.pow(2, r)));
-
-        const headerY = 70, headerH = 18;
-        svgParts.push(`<rect x="${10}" y="${headerY}" width="${totalWidth - 2 * 10}" height="${headerH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
-
-        for (let r = 0; r < numRounds - 1; r++) {
-            text(xRoundLeft(r), 82, "middle", roundLabels[r], { bold: true, size: 9 });
-            text(xRoundRight(r), 82, "middle", roundLabels[r], { bold: true, size: 9 });
-        }
-        text(centerX, 82, "middle", roundLabels[numRounds - 1], { bold: true, size: 9 });
-
-        return { svg: wrapBracketSVG(totalWidth, totalHeight, svgParts, bracket, centerX, totalHeight - FOOTER_H), width: totalWidth, height: totalHeight };
-    }
-
-    // Builds the 4 physical Classification rows (1st, 2nd, two 3rd-place
-    // slots) from whatever the 🏅 Compute Results feature has placed so
-    // far (bracket.placements — entryId -> 1/2/3/5/...). A rank with no
-    // placed entry yet (results not computed, or that far into the
-    // bracket not decided) falls back to just the bare rank number, same
-    // as the sheet always showed before this existed. 3rd place gets up
-    // to two names since this bracket format has no separate bronze
-    // match (see compute_tournament_results_endpoint's own placement
-    // math) — both semifinal losers can legitimately share it.
-    function buildClassificationRows(bracket) {
-        const placements = bracket.placements || {};
-        const byRank = {};
-        bracket.entries.forEach(e => {
-            const rank = placements[e.entryId];
-            if (rank == null) return;
-            (byRank[rank] = byRank[rank] || []).push(e);
-        });
-
-        const formatEntry = (rank, entry) => {
-            const noc = entry.country ? ` (${entry.country})` : "";
-            return `${rank}. ${entry.name}${noc}`;
-        };
-
-        const rows = [];
-        rows.push(byRank[1] && byRank[1][0] ? formatEntry(1, byRank[1][0]) : "1");
-        rows.push(byRank[2] && byRank[2][0] ? formatEntry(2, byRank[2][0]) : "2");
-        const bronze = byRank[3] || [];
-        rows.push(bronze[0] ? formatEntry(3, bronze[0]) : "3");
-        rows.push(bronze[1] ? formatEntry(3, bronze[1]) : "3");
-        return rows;
-    }
-
-    // Shrinks the row's font size just enough to fit the box width —
-    // "Samuel Chudý (SVK)" and similar are usually fine at 9px, but a
-    // long name + long club/country combo can overflow the fixed
-    // 180px-wide Classification box otherwise.
-    function fitClassificationFontSize(str, maxWidth) {
-        if (!__measureCanvasCtx) {
-            try { __measureCanvasCtx = document.createElement("canvas").getContext("2d"); } catch (err) { __measureCanvasCtx = null; }
-        }
-        if (!__measureCanvasCtx) return 9;
-        let size = 9;
-        while (size > 6.5) {
-            __measureCanvasCtx.font = `${size}px Arial, sans-serif`;
-            if (__measureCanvasCtx.measureText(str).width <= maxWidth) return size;
-            size -= 0.5;
-        }
-        return 6.5;
-    }
-
-    function wrapBracketSVG(totalWidth, totalHeight, bodyParts, bracket, centerX, footerTop) {
-        footerTop = footerTop || (totalHeight - 150);
-        const parts = [];
-        parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${totalHeight}" width="${totalWidth}" height="${totalHeight}" font-family="Arial, sans-serif">`);
-        parts.push(`<rect x="0" y="0" width="${totalWidth}" height="${totalHeight}" fill="#ffffff"/>`);
-
-        let logoSize = 72;
-        if (leftLogoDataUrl) {
-            parts.push(`<image href="${leftLogoDataUrl}" x="10" y="0" width="${logoSize}" height="${64}" preserveAspectRatio="xMidYMid meet"/>`);
-        }
-        logoSize = 80;
-        if (rightLogoDataUrl) {
-            parts.push(`<image href="${rightLogoDataUrl}" x="${totalWidth - logoSize - 10}" y="0" width="${logoSize}" height="${64}" preserveAspectRatio="xMidYMid meet"/>`);
-        }
-
-        parts.push(`<text x="${centerX}" y="24" text-anchor="middle" font-size="16" font-weight="700" fill="#0f172a">${escapeHtml(TOURNAMENT_TITLE)}</text>`);
-        if (BRACKET_PDF_DATE) parts.push(`<text x="${centerX}" y="42" text-anchor="middle" font-size="12" fill="#0f172a">${escapeHtml(BRACKET_PDF_DATE)}</text>`);
-        parts.push(`<text x="${centerX}" y="60" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">${escapeHtml(bracket.categoryLabel)} Contestants : ${bracket.entries.length}</text>`);
-        parts.push(...bodyParts);
-
-        const clsX = centerX - 90, clsY = footerTop, clsW = 180, clsH = 92;
-        parts.push(`<rect x="${clsX}" y="${clsY}" width="${clsW}" height="20" fill="none" stroke="#1e293b"/>`);
-        parts.push(`<text x="${centerX}" y="${clsY + 14}" text-anchor="middle" font-size="10" font-weight="700">Classification</text>`);
-        buildClassificationRows(bracket).forEach((label, i) => {
-            const rowY = clsY + 20 + i * 18;
-            parts.push(`<rect x="${clsX}" y="${rowY}" width="${clsW}" height="18" fill="#fff" stroke="#1e293b"/>`);
-            const fitSize = fitClassificationFontSize(label, clsW - 16);
-            parts.push(`<text x="${clsX + 8}" y="${rowY + 13}" font-size="${fitSize}">${escapeHtml(label)}</text>`);
-        });
-
-        const legendY = footerTop + 110;
-        const legendMargin = 16;
-        const legendW = totalWidth - 2 * legendMargin;
-        const legendRowH = 20;
-        const legendFontSize = 8.5;
-        const legendGap = 30;
-        const legendItems = [
-            "RSC: Win by Referee Stops Contest",
-            "WDR: Win by Withdrawal",
-            "DQB: Disqualification (unsportsmanlike)",
-            "PTF: Win by final score",
-            "DSQ: Disqualification",
-        ];
-        parts.push(`<rect x="${legendMargin}" y="${legendY}" width="${legendW}" height="${legendRowH}" fill="none" stroke="#1e293b" stroke-width="1"/>`);
-        let legendX = legendMargin + 10;
-        legendItems.forEach(itemText => {
-            parts.push(`<text x="${legendX}" y="${legendY + legendRowH / 2 + 3}" font-size="${legendFontSize}" font-family="Arial, sans-serif" fill="#0f172a">${escapeHtml(itemText)}</text>`);
-            legendX += itemText.length * legendFontSize * 0.55 + legendGap;
-        });
-
-        parts.push(`</svg>`);
-        return parts.join("\n");
-    }
-
-    function svgStringToPngDataUrl(svgString, width, height, scale) {
-        return new Promise((resolve, reject) => {
-            const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-            const url = URL.createObjectURL(svgBlob);
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                canvas.width = width * scale;
-                canvas.height = height * scale;
-                const ctx = canvas.getContext("2d");
-                ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                URL.revokeObjectURL(url);
-                resolve(canvas.toDataURL("image/png"));
-            };
-            img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
-            img.src = url;
-        });
-    }
 
     // Shared by every "generate something then send it straight to
     // print" function on this page. Positioned far off-screen with REAL
@@ -2023,20 +1459,6 @@ JAVASCRIPT
         document.body.appendChild(iframe);
         return iframe;
     }
-    // Exact physical size of the sheets svgStringToPngDataUrl produces
-    // (PAGE_W x PAGE_H px @ 96dpi is, not coincidentally, A4). Declaring
-    // @page AND the <img> itself in these exact mm values — instead of
-    // "size: landscape" + "width: 100%" (or vh) — means the browser never
-    // has to reconcile our image's aspect ratio against whatever its own
-    // default paper size happens to be. Any mismatch there (Letter vs A4,
-    // or a few mm eaten by a non-zeroable minimum margin) is what made the
-    // image a hair taller than one printable page, which Chrome resolved
-    // by overflowing the remainder onto a second page — blank when the
-    // overflow was tiny (original bug), or containing sliced content when
-    // forcing height:100vh made the overflow worse (my last fix).
-    const MM_PER_PX = 25.4 / 96;
-    const BRACKET_PAGE_MM = { width: PAGE_W * MM_PER_PX, height: PAGE_H * MM_PER_PX };
-
     function printHtmlInFrame(bodyHtml, opts) {
         opts = opts || {};
         const imgSizeCss = opts.pageSizeMm
@@ -2098,16 +1520,11 @@ JAVASCRIPT
         });
     }
 
-    // landscape=true for content whose own pixel dimensions are wider
-    // than tall (bracket sheets, drawn at PAGE_W x PAGE_H — see
-    // buildBracketSVG) — without this, the browser defaults to
-    // portrait and squeezes a landscape image into a portrait page,
-    // leaving it tiny with huge blank margins top and bottom.
-    function printImagesSequence(dataUrls, landscape) {
-        return printHtmlInFrame(
-            dataUrls.map(u => `<img src="${u}">`).join(""),
-            landscape ? { landscape: true, pageSizeMm: BRACKET_PAGE_MM } : {}
-        );
+    // Prints already-rasterized pages (KO/Protest/Friendly templates).
+    // Bracket sheets don't come through here any more — they print as
+    // vector SVG via BracketSheets.print().
+    function printImagesSequence(dataUrls) {
+        return printHtmlInFrame(dataUrls.map(u => `<img src="${u}">`).join(""));
     }
 
     // Rasterizes a real PDF FILE (not one we generated) into one PNG
@@ -2148,11 +1565,12 @@ JAVASCRIPT
                     number as e.g. "B 2-0 PTF" — and the Classification box is filled in with real names once
                     🏅 Compute Results has run. This never depends on bracket_builder.html's own browser session,
                     so it works even if that page was closed, refreshed, or its local draft was otherwise lost.
-                    Every sheet here goes straight to print — nothing downloads or opens a preview.
+                    🖨 sends sheets straight to print; ⬇ downloads one searchable PDF of every sheet.
                 </p>
                 <div id="bracket-pdf-list"><p class="lq-field-hint">Loading brackets…</p></div>
                 <div class="lq-modal-actions">
                     <button class="btn btn-primary" id="bracket-pdf-print-all-btn" onclick="printAllBracketsPDF()" disabled>🖨 Print All</button>
+                    <button class="btn btn-ghost" id="bracket-pdf-download-btn" onclick="downloadAllBracketsPDF()" disabled>⬇ Download PDF</button>
                     <button class="btn btn-ghost" onclick="closeModal()">Close</button>
                 </div>
             </div>
@@ -2170,6 +1588,7 @@ JAVASCRIPT
         }
 
         printAllBtn.disabled = false;
+        document.getElementById("bracket-pdf-download-btn").disabled = false;
         listEl.innerHTML = reconstructedBrackets.map(b => {
             const missing = b.rounds.some(r => r.some(m => m.notInDatabase));
             return `
@@ -2193,9 +1612,7 @@ JAVASCRIPT
         if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Printing…"; }
 
         try {
-            const { svg } = buildBracketSVG(bracket);
-            const pngUrl = await svgStringToPngDataUrl(svg, PAGE_W, PAGE_H, 2);
-            await printImagesSequence([pngUrl], true);
+            await BracketSheets.print([bracket], BRACKET_SHEET_OPTIONS);
         } catch (err) {
             console.error("Failed to print bracket sheet", err);
             alert(err.message || "Failed to print — try again.");
@@ -2204,22 +1621,26 @@ JAVASCRIPT
         }
     }
 
-    // Core image assembly, decoupled from any particular button's
-    // disabled/text state — two different entry points call this: the
-    // "📄 Bracket PDFs" modal's own "Print All" button, and the
-    // "🏅 Compute Results" modal's shortcut button below, which needs to
-    // manage its own button element instead. One PNG per category, each
-    // becoming its own printed page via printImagesSequence.
+    // Core print, decoupled from any particular button's disabled/text
+    // state — called by the "📄 Bracket PDFs" modal's "Print All" and by
+    // the "🏅 Compute Results" modal's shortcut button below.
     async function buildAndPrintAllBracketsPdf() {
         if (reconstructedBrackets.length === 0) throw new Error("No brackets to print.");
+        await BracketSheets.print(reconstructedBrackets, BRACKET_SHEET_OPTIONS);
+    }
 
-        const pngUrls = [];
-        for (const bracket of reconstructedBrackets) {
-            const { svg } = buildBracketSVG(bracket);
-            const pngUrl = await svgStringToPngDataUrl(svg, PAGE_W, PAGE_H, 2);
-            pngUrls.push(pngUrl);
+    async function downloadAllBracketsPDF() {
+        const btn = document.getElementById("bracket-pdf-download-btn");
+        if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
+        try {
+            const safeTitle = (TOURNAMENT_TITLE || "brackets").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "brackets";
+            await BracketSheets.downloadPdf(reconstructedBrackets, `${safeTitle}_brackets.pdf`, BRACKET_SHEET_OPTIONS);
+        } catch (err) {
+            console.error("Failed to build brackets PDF", err);
+            alert(err.message || "Failed to build the PDF — try again.");
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "⬇ Download PDF"; }
         }
-        await printImagesSequence(pngUrls, true);
     }
 
     async function printAllBracketsPDF() {
@@ -2689,6 +2110,7 @@ JAVASCRIPT
             name: a.displayName,
             country: a.country || null,
             clubId: a.clubId || null,
+            clubName: a.club || null,
         });
 
         const roundTime = document.getElementById("insert-roundTime").value.trim();
@@ -3662,7 +3084,7 @@ JAVASCRIPT
         // A corner is only touched at all if the admin actually picked a
         // replacement athlete via search — otherwise blue/red are left
         // completely out of `updates`, so entryId/athleteIds/name/
-        // country/clubId all stay exactly as they were. Replacing writes
+        // country/clubId/clubName all stay exactly as they were. Replacing writes
         // a fresh, internally-consistent corner object sourced straight
         // from the athlete record (same fields insert_match_endpoint's
         // own _resolve_corner produces), rather than hand-typed text
@@ -3675,6 +3097,7 @@ JAVASCRIPT
                 name: a.displayName,
                 country: a.country || null,
                 clubId: a.clubId || null,
+                clubName: a.club || null,
             };
         }
         if (pendingCornerReplacement.red) {
@@ -3685,6 +3108,7 @@ JAVASCRIPT
                 name: a.displayName,
                 country: a.country || null,
                 clubId: a.clubId || null,
+                clubName: a.club || null,
             };
         }
 

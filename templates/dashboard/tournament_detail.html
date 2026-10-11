@@ -280,6 +280,34 @@
     {% endif %}
 
     {# ═══════════════════════════════════════════════════════════════════════════
+    POOMSAE DRAW CARD (poomsae tournaments only) — which poomsae each category
+    performs in round 1, the semi-final and the final.
+    ═══════════════════════════════════════════════════════════════════════════ #}
+    {% if 'poomsae' in (tournament.discipline or '')|lower %}
+    <div class="card-panel">
+        <div class="panel-header" style="margin-bottom:1rem">
+            <div class="panel-title-group">
+                <span class="panel-eyebrow">Poomsae</span>
+                <h2 class="panel-title" style="font-size:1.4rem">Poomsae Draw</h2>
+            </div>
+        </div>
+        <p class="text-muted" style="margin-bottom:1.25rem;">
+            Set which poomsae each age and rank category may perform, then draw round 1, semi-final and the two
+            final poomsae for every category — no poomsae repeats within a category. Print the draw as a PDF.
+        </p>
+        <a href="/dashboard/tournaments/{{ tournament.id }}/poomsae-draw" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="3" />
+                <circle cx="8.5" cy="8.5" r="1.3" fill="currentColor" />
+                <circle cx="15.5" cy="15.5" r="1.3" fill="currentColor" />
+                <circle cx="12" cy="12" r="1.3" fill="currentColor" />
+            </svg>
+            Open Poomsae Draw
+        </a>
+    </div>
+    {% endif %}
+
+    {# ═══════════════════════════════════════════════════════════════════════════
     YOUTUBE STREAMING CARD (only shown if isStream is enabled)
     ═══════════════════════════════════════════════════════════════════════════ #}
     {% if tournament.settings.get('isStream') %}

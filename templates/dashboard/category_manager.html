@@ -73,8 +73,8 @@
     </div>
 
     <p class="text-muted cm-hint">
-        Staff tool — no eligibility checks. Click a category to see who's in it, then drag any entry onto a
-        different category to move it. Changes save immediately.
+        Staff tool — no eligibility checks (age, gender, belt or para class). Click a category to see who's in it,
+        then drag any entry onto a different category to move it. Changes save immediately.
     </p>
 
     <div class="cm-board">
@@ -83,6 +83,10 @@
         <div class="card-panel cm-pane cm-pane--categories">
             <input id="categoryFilter" type="text" placeholder="Filter categories…" class="cm-filter"
                 oninput="renderCategoryList()">
+            <label id="showEmptyParaWrap" class="cm-toggle hidden">
+                <input type="checkbox" id="showEmptyPara" onchange="renderCategoryList()">
+                Show empty para classes
+            </label>
             <div id="categoryList" class="cm-category-list">
                 <p class="text-muted" style="padding: 1rem 0;">Loading categories…</p>
             </div>
@@ -115,6 +119,7 @@ each browser's own print-to-PDF engine. #}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="/static/js/truevar-lib.js"></script>
+<script src="/static/js/category-schema.js"></script>
 
 <script>
     const TOURNAMENT_ID = "{{ tournament.id }}";
@@ -122,7 +127,8 @@ each browser's own print-to-PDF engine. #}
     const TOURNAMENT_SPORT = "{{ tournament.sport | default('') | lower }}";
     const TOURNAMENT_DISCIPLINE = "{{ tournament.discipline | default('') | lower }}";
 
-    let flatCategories = [];    // every leaf category, flattened: {code, ageCode, genderCode, entryTypeCode, groupLabel, label}
+    let flatCategories = [];    // every leaf category, flattened — see /static/js/category-schema.js
+    let orphanCategories = [];  // registrations under codes the schema doesn't produce: {code, ageCode, groupLabel, label, orphan: true}
     let categoryCounts = {};    // { categoryCode: count }
     let divisionRosterCache = {}; // ageCode -> { categoryCode: { entryId: {members} } }, lazy-fetched per division
     let activeCategoryCode = null;
@@ -146,20 +152,13 @@ each browser's own print-to-PDF engine. #}
         let dimensions = [];
         try {
             const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/categories`);
-            const data = await res.json();
-            const sportSchemas = (data.categories && data.categories.sportSchemas) || {};
-            const sportKeys = Object.keys(sportSchemas);
-            const sportKey = sportSchemas[TOURNAMENT_SPORT] ? TOURNAMENT_SPORT : sportKeys[0];
-            const sportSchema = sportKey ? sportSchemas[sportKey] : {};
-            const disciplineSchemas = sportSchema.disciplines || {};
-            const disciplineKeys = Object.keys(disciplineSchemas);
-            const disciplineKey = disciplineSchemas[TOURNAMENT_DISCIPLINE] ? TOURNAMENT_DISCIPLINE : disciplineKeys[0];
-            dimensions = disciplineKey ? (disciplineSchemas[disciplineKey].dimensions || []) : [];
+            dimensions = TrueVARCategories.dimensionsFor(await res.json(), TOURNAMENT_SPORT, TOURNAMENT_DISCIPLINE);
         } catch (err) {
             console.error("Failed to load category schema", err);
         }
 
-        flatCategories = flattenCategories(dimensions);
+        flatCategories = TrueVARCategories.flatten(dimensions);
+        document.getElementById("showEmptyParaWrap").classList.toggle("hidden", !flatCategories.some(c => c.paraClassCode));
 
         try {
             const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/category-counts`);
@@ -170,80 +169,38 @@ each browser's own print-to-PDF engine. #}
             console.error("Failed to load category counts", err);
         }
 
+        orphanCategories = findOrphanCategories();
         renderCategoryList();
     }
 
-    // Flattens the schema straight into a list of leaf categories — no
-    // eligibility, no per-entry-type Register button grouping like the
-    // club-facing page. This tool just needs "every place an entry could
-    // possibly live," to click on or drop onto.
-    //
-    // CHANGE: mirrors tournament.html's parseCategories exactly — each
-    // entry_type option can override age_options/gender_options, and can
-    // declare belt_class_options (Individual/Pairs/Teams Poomsae's Class
-    // D/C/B/A). Entry types without belt_class_options get a single
-    // implicit "" class that contributes nothing to the code, so
-    // kyorugi's codes are unaffected. This MUST stay in lockstep with
-    // parseCategories in tournament.html — a category code composed here
-    // has to be byte-identical to the one a real registration was saved
-    // under, or this page's counts/rosters silently show as empty even
-    // though the tournament page shows real registrations. If the code
-    // composition rule there ever changes again, mirror it here too.
-    function flattenCategories(schema) {
-        const entryDim = schema.find(d => d.key === "entry_type");
-        const ageDim = schema.find(d => d.key === "age");
-        const genderDim = schema.find(d => d.key === "gender");
-        const weightDim = schema.find(d => d.key === "weight");
-
-        const entryOptions = (entryDim && entryDim.options && entryDim.options.length > 0)
-            ? entryDim.options
-            : [{ code: "individual", label: "Individual" }];
-        const unit = (weightDim && weightDim.unit) || "kg";
-        const IMPLICIT_BELT_CLASS = { code: "", label: "", min: null, max: null };
-
-        const flat = [];
-        entryOptions.forEach(entryOpt => {
-            const ageOptions = entryOpt.age_options || (ageDim && ageDim.options) || [];
-            const genderOptions = entryOpt.gender_options || (genderDim && genderDim.options) || [];
-            const beltClassOptions = (entryOpt.belt_class_options && entryOpt.belt_class_options.length > 0)
-                ? entryOpt.belt_class_options
-                : [IMPLICIT_BELT_CLASS];
-
-            ageOptions.forEach(ageOpt => {
-                beltClassOptions.forEach(beltOpt => {
-                    genderOptions.forEach(genderOpt => {
-                        const codeBase = [ageOpt.code, beltOpt.code, genderOpt.code].filter(Boolean).join("_");
-                        let weightCats;
-                        if (weightDim) {
-                            const key = `${ageOpt.code}|${genderOpt.code}`;
-                            const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[key]) || [];
-                            if (thresholds.length === 0) return;
-                            weightCats = thresholds.map(w => ({ code: `${codeBase}_${w}`, label: `-${w}${unit}` }));
-                            if (weightDim.open_top) {
-                                const top = thresholds[thresholds.length - 1];
-                                weightCats.push({ code: `${codeBase}_${top}plus`, label: `+${top}${unit}` });
-                            }
-                        } else {
-                            weightCats = [{ code: codeBase, label: "" }];
-                        }
-
-                        weightCats.forEach(c => {
-                            flat.push({
-                                code: `${entryOpt.code}_${c.code}`,
-                                ageCode: ageOpt.code,
-                                beltClassCode: beltOpt.code || null,
-                                genderCode: genderOpt.code,
-                                entryTypeCode: entryOpt.code,
-                                groupLabel: entryOpt.label,
-                                label: [ageOpt.label, beltOpt.label, genderOpt.label, c.label].filter(Boolean).join(" "),
-                            });
-                        });
-                    });
-                });
-            });
-        });
-        return flat;
+    // Registrations stored under a code the current schema doesn't produce
+    // (schema edited after people registered, or a code-rule mismatch).
+    // Listed separately so they can be opened and dragged into a real
+    // category instead of silently disappearing. The age division — needed
+    // to load the roster — is recovered from the code's segments.
+    function findOrphanCategories() {
+        const known = new Set(flatCategories.map(c => c.code));
+        const ageCodes = [...new Set(flatCategories.map(c => c.ageCode))].sort((a, b) => b.length - a.length);
+        return Object.entries(categoryCounts)
+            .filter(([code, n]) => n > 0 && !known.has(code))
+            .map(([code]) => ({
+                code,
+                ageCode: ageCodes.find(a => `_${code}_`.includes(`_${a}_`)) || null,
+                groupLabel: "⚠ Not in current schema",
+                label: code,
+                orphan: true,
+            }));
     }
+
+    function findCategory(code) {
+        return flatCategories.find(c => c.code === code) || orphanCategories.find(c => c.code === code) || null;
+    }
+
+    // Category codes come from /static/js/category-schema.js — the same
+    // rule tournament.html and the API use, para classes included (e.g.
+    // para_individual_poomsae_seniors_p72_men). If a code composed there
+    // ever differs from a real registration's, that registration shows up
+    // under "Not in current schema" below instead of vanishing.
 
     function renderCategoryList() {
         const container = document.getElementById("categoryList");
@@ -254,22 +211,26 @@ each browser's own print-to-PDF engine. #}
             return;
         }
 
+        // Each para entry type expands to one category per para class (P11 … P72)
+        // for every age/gender — hide the empty ones unless asked.
+        const showEmptyPara = document.getElementById("showEmptyPara").checked;
         const groups = {};
-        flatCategories.forEach(c => {
+        [...flatCategories, ...orphanCategories].forEach(c => {
             if (filter && !`${c.groupLabel} ${c.label}`.toLowerCase().includes(filter)) return;
+            if (c.paraClassCode && !showEmptyPara && !(categoryCounts[c.code] > 0) && c.code !== activeCategoryCode) return;
             (groups[c.groupLabel] = groups[c.groupLabel] || []).push(c);
         });
 
         container.innerHTML = Object.entries(groups).map(([groupLabel, cats]) => `
-            <div class="cm-group-label">${escapeHtml(groupLabel)}</div>
+            <div class="cm-group-label ${cats[0].orphan ? "cm-group-label--warn" : ""}">${escapeHtml(groupLabel)}</div>
             ${cats.map(c => `
                 <div class="cm-category-item ${c.code === activeCategoryCode ? 'cm-category-item--active' : ''}"
-                    data-category-code="${c.code}" data-age-code="${c.ageCode}" data-gender-code="${c.genderCode}"
+                    data-category-code="${escapeHtml(c.code)}" data-age-code="${escapeHtml(c.ageCode || "")}" data-gender-code="${escapeHtml(c.genderCode || "")}"
                     data-entry-type-code="${c.entryTypeCode}"
                     onclick="selectCategory('${c.code}')"
-                    ondragover="onCategoryDragOver(event, this)"
+                    ${c.orphan ? "" : `ondragover="onCategoryDragOver(event, this)"
                     ondragleave="onCategoryDragLeave(event, this)"
-                    ondrop="onCategoryDrop(event, this)">
+                    ondrop="onCategoryDrop(event, this)"`}>
                     <span>${escapeHtml(c.label)}</span>
                     <span class="cm-count">${categoryCounts[c.code] || 0}</span>
                 </div>
@@ -281,10 +242,12 @@ each browser's own print-to-PDF engine. #}
         activeCategoryCode = categoryCode;
         renderCategoryList(); // refresh active-state highlight
 
-        const cat = flatCategories.find(c => c.code === categoryCode);
+        const cat = findCategory(categoryCode);
         if (!cat) return;
 
-        document.getElementById("rosterHeader").innerHTML = `
+        document.getElementById("rosterHeader").innerHTML = cat.orphan
+            ? `<span><strong>${escapeHtml(cat.code)}</strong><br><span class="text-muted" style="font-size:0.82rem;">This code isn't produced by the current category schema — drag each entry onto the correct category.</span></span>`
+            : `
             <strong>${escapeHtml(cat.groupLabel)} · ${escapeHtml(cat.label)}</strong>
             <button type="button" class="btn btn-primary btn-sm" onclick="openAddAthlete(event)">
                 + Add Athlete
@@ -293,6 +256,11 @@ each browser's own print-to-PDF engine. #}
         const listEl = document.getElementById("rosterList");
         listEl.innerHTML = `<p class="text-muted" style="padding: 1rem 0;">Loading…</p>`;
         closeAddAthlete(); // any popover from a previously selected category shouldn't linger
+
+        if (!cat.ageCode) {
+            listEl.innerHTML = `<p style="color:#b91c1c;">Can't tell which age division this code belongs to, so its roster can't be loaded here.</p>`;
+            return;
+        }
 
         if (!(cat.ageCode in divisionRosterCache)) {
             try {
@@ -370,10 +338,11 @@ each browser's own print-to-PDF engine. #}
 
             categoryCounts[categoryCode] = Math.max(0, (categoryCounts[categoryCode] || 1) - 1);
             delete divisionRosterCache[ageCode];
+            orphanCategories = findOrphanCategories();
 
             renderCategoryList();
             if (activeCategoryCode) {
-                const activeCat = flatCategories.find(c => c.code === activeCategoryCode);
+                const activeCat = findCategory(activeCategoryCode);
                 if (activeCat) await selectCategory(activeCat.code);
             }
             showFlash("Entry removed.");
@@ -460,6 +429,7 @@ each browser's own print-to-PDF engine. #}
                     entryTypeCode: cat.entryTypeCode,
                     ageCode: cat.ageCode,
                     beltClassCode: cat.beltClassCode,
+                    paraClassCode: cat.paraClassCode,
                     genderCode: cat.genderCode,
                     categoryCode: cat.code,
                     categoryLabel: `${cat.groupLabel} · ${cat.label}`,
@@ -534,6 +504,7 @@ each browser's own print-to-PDF engine. #}
                     newEntryTypeCode: cat.entryTypeCode,
                     newAgeCode: cat.ageCode,
                     newBeltClassCode: cat.beltClassCode,
+                    newParaClassCode: cat.paraClassCode,
                     newGenderCode: cat.genderCode,
                     newCategoryCode: cat.code,
                     newCategoryLabel: `${cat.groupLabel} · ${cat.label}`,
@@ -551,10 +522,11 @@ each browser's own print-to-PDF engine. #}
             categoryCounts[newCategoryCode] = (categoryCounts[newCategoryCode] || 0) + 1;
             delete divisionRosterCache[draggedEntry.oldAgeCode];
             delete divisionRosterCache[cat.ageCode];
+            orphanCategories = findOrphanCategories();
 
             renderCategoryList();
             if (activeCategoryCode) {
-                const activeCat = flatCategories.find(c => c.code === activeCategoryCode);
+                const activeCat = findCategory(activeCategoryCode);
                 if (activeCat) await selectCategory(activeCat.code);
             }
             showFlash(`Moved to ${cat.groupLabel} · ${cat.label}.`);
@@ -911,7 +883,9 @@ each browser's own print-to-PDF engine. #}
         const skipped = [];
 
         for (const [ageCode, targetCount] of Object.entries(REALISTIC_AGE_DISTRIBUTION)) {
-            const ageCategories = shuffled(flatCategories.filter(c => c.ageCode === ageCode));
+            // Para categories left out: each para type has up to 20 classes per
+            // age/gender, so random picks would pile most mock entries into them.
+            const ageCategories = shuffled(flatCategories.filter(c => c.ageCode === ageCode && !c.requiresPara));
             if (ageCategories.length === 0) {
                 skipped.push(`${ageCode}: no categories in this tournament's schema`);
                 continue;
@@ -939,6 +913,7 @@ each browser's own print-to-PDF engine. #}
                                 entryTypeCode: cat.entryTypeCode,
                                 ageCode: cat.ageCode,
                                 beltClassCode: cat.beltClassCode,
+                                paraClassCode: cat.paraClassCode,
                                 genderCode: cat.genderCode,
                                 categoryCode: cat.code,
                                 categoryLabel: `${cat.groupLabel} · ${cat.label}`,
@@ -963,7 +938,7 @@ each browser's own print-to-PDF engine. #}
 
         renderCategoryList();
         if (activeCategoryCode) {
-            const activeCat = flatCategories.find(c => c.code === activeCategoryCode);
+            const activeCat = findCategory(activeCategoryCode);
             if (activeCat) await selectCategory(activeCat.code);
         }
 
@@ -1215,6 +1190,21 @@ each browser's own print-to-PDF engine. #}
         letter-spacing: 0.08em;
         color: var(--muted);
         margin: 1rem 0 0.35rem;
+    }
+
+    .cm-group-label--warn {
+        color: #b45309;
+    }
+
+    .cm-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin: -0.35rem 0 0.5rem;
+        flex-shrink: 0;
+        cursor: pointer;
     }
 
     .cm-category-item {

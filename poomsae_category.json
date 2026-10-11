@@ -17,34 +17,34 @@
                                 "unit": null,
                                 "options": [
                                     {
-                                        "code": "individual_poomsae",
-                                        "label": "Individual Poomsae",
-                                        "match_value": "individual_poomsae",
+                                        "code": "individual",
+                                        "label": "Individual",
+                                        "match_value": "individual",
                                         "participantCount": 1,
                                         "min": null,
                                         "max": null,
                                         "belt_class_options": [
                                             {
                                                 "code": "class_d",
-                                                "label": "Class D: 9. - 7. Gup",
+                                                "label": "Class D",
                                                 "min": 0,
                                                 "max": 3
                                             },
                                             {
                                                 "code": "class_c",
-                                                "label": "Class C: 6. - 4. Gup",
+                                                "label": "Class C",
                                                 "min": 4,
                                                 "max": 6
                                             },
                                             {
                                                 "code": "class_b",
-                                                "label": "Class B: 3. - 1. Gup",
+                                                "label": "Class B",
                                                 "min": 7,
                                                 "max": 9
                                             },
                                             {
                                                 "code": "class_a",
-                                                "label": "Class A: 1. Dan and higher",
+                                                "label": "Class A",
                                                 "min": 10,
                                                 "max": null
                                             }
@@ -60,25 +60,25 @@
                                         "belt_class_options": [
                                             {
                                                 "code": "class_d",
-                                                "label": "Class D: 9. - 7. Gup",
+                                                "label": "Class D",
                                                 "min": 0,
                                                 "max": 3
                                             },
                                             {
                                                 "code": "class_c",
-                                                "label": "Class C: 6. - 4. Gup",
+                                                "label": "Class C",
                                                 "min": 4,
                                                 "max": 6
                                             },
                                             {
                                                 "code": "class_b",
-                                                "label": "Class B: 3. - 1. Gup",
+                                                "label": "Class B",
                                                 "min": 7,
                                                 "max": 9
                                             },
                                             {
                                                 "code": "class_a",
-                                                "label": "Class A: 1. Dan and higher",
+                                                "label": "Class A",
                                                 "min": 10,
                                                 "max": null
                                             }
@@ -106,25 +106,25 @@
                                         "belt_class_options": [
                                             {
                                                 "code": "class_d",
-                                                "label": "Class D: 9. - 7. Gup",
+                                                "label": "Class D",
                                                 "min": 0,
                                                 "max": 3
                                             },
                                             {
                                                 "code": "class_c",
-                                                "label": "Class C: 6. - 4. Gup",
+                                                "label": "Class C",
                                                 "min": 4,
                                                 "max": 6
                                             },
                                             {
                                                 "code": "class_b",
-                                                "label": "Class B: 3. - 1. Gup",
+                                                "label": "Class B",
                                                 "min": 7,
                                                 "max": 9
                                             },
                                             {
                                                 "code": "class_a",
-                                                "label": "Class A: 1. Dan and higher",
+                                                "label": "Class A",
                                                 "min": 10,
                                                 "max": null
                                             }
@@ -143,12 +143,115 @@
                                         ]
                                     },
                                     {
-                                        "code": "para_individual_poomsae",
-                                        "label": "Para Individual Poomsae",
-                                        "match_value": "para_individual_poomsae",
+                                        "code": "para_individual",
+                                        "label": "Para Individual",
+                                        "match_value": "para_individual",
                                         "participantCount": 1,
                                         "min": null,
                                         "max": null,
+                                        "requires_para": true,
+                                        "para_class_options": [
+                                            {
+                                                "code": "p11",
+                                                "label": "P11",
+                                                "match_value": "P11"
+                                            },
+                                            {
+                                                "code": "p12",
+                                                "label": "P12",
+                                                "match_value": "P12"
+                                            },
+                                            {
+                                                "code": "p21",
+                                                "label": "P21",
+                                                "match_value": "P21"
+                                            },
+                                            {
+                                                "code": "p22",
+                                                "label": "P22",
+                                                "match_value": "P22"
+                                            },
+                                            {
+                                                "code": "p23",
+                                                "label": "P23",
+                                                "match_value": "P23"
+                                            },
+                                            {
+                                                "code": "p31",
+                                                "label": "P31",
+                                                "match_value": "P31"
+                                            },
+                                            {
+                                                "code": "p32",
+                                                "label": "P32",
+                                                "match_value": "P32"
+                                            },
+                                            {
+                                                "code": "p33",
+                                                "label": "P33",
+                                                "match_value": "P33"
+                                            },
+                                            {
+                                                "code": "p34",
+                                                "label": "P34",
+                                                "match_value": "P34"
+                                            },
+                                            {
+                                                "code": "p35",
+                                                "label": "P35",
+                                                "match_value": "P35"
+                                            },
+                                            {
+                                                "code": "p41",
+                                                "label": "P41",
+                                                "match_value": "P41"
+                                            },
+                                            {
+                                                "code": "p42",
+                                                "label": "P42",
+                                                "match_value": "P42"
+                                            },
+                                            {
+                                                "code": "p43",
+                                                "label": "P43",
+                                                "match_value": "P43"
+                                            },
+                                            {
+                                                "code": "p44",
+                                                "label": "P44",
+                                                "match_value": "P44"
+                                            },
+                                            {
+                                                "code": "p45",
+                                                "label": "P45",
+                                                "match_value": "P45"
+                                            },
+                                            {
+                                                "code": "p51",
+                                                "label": "P51",
+                                                "match_value": "P51"
+                                            },
+                                            {
+                                                "code": "p52",
+                                                "label": "P52",
+                                                "match_value": "P52"
+                                            },
+                                            {
+                                                "code": "p53",
+                                                "label": "P53",
+                                                "match_value": "P53"
+                                            },
+                                            {
+                                                "code": "p60",
+                                                "label": "P60",
+                                                "match_value": "P60"
+                                            },
+                                            {
+                                                "code": "p72",
+                                                "label": "P72",
+                                                "match_value": "P72"
+                                            }
+                                        ],
                                         "age_options": [
                                             {
                                                 "code": "cadets",
@@ -174,12 +277,13 @@
                                         ]
                                     },
                                     {
-                                        "code": "para_pairs_poomsae",
-                                        "label": "Para Pairs Poomsae",
-                                        "match_value": "para_pairs_poomsae",
+                                        "code": "para_pairs",
+                                        "label": "Para Pairs",
+                                        "match_value": "para_pairs",
                                         "participantCount": 2,
                                         "min": null,
                                         "max": null,
+                                        "requires_para": true,
                                         "age_options": [
                                             {
                                                 "code": "cadets",
@@ -217,12 +321,13 @@
                                         ]
                                     },
                                     {
-                                        "code": "para_teams_poomsae",
-                                        "label": "Para Teams Poomsae",
-                                        "match_value": "para_teams_poomsae",
+                                        "code": "para_teams",
+                                        "label": "Para Teams",
+                                        "match_value": "para_teams",
                                         "participantCount": 3,
                                         "min": null,
                                         "max": null,
+                                        "requires_para": true,
                                         "age_options": [
                                             {
                                                 "code": "cadets",
@@ -260,9 +365,9 @@
                                         ]
                                     },
                                     {
-                                        "code": "freestyle_individual_poomsae",
-                                        "label": "Freestyle Individual Poomsae",
-                                        "match_value": "freestyle_individual_poomsae",
+                                        "code": "freestyle_individual",
+                                        "label": "Freestyle Individual",
+                                        "match_value": "freestyle_individual",
                                         "participantCount": 1,
                                         "min": null,
                                         "max": null,
@@ -291,9 +396,9 @@
                                         ]
                                     },
                                     {
-                                        "code": "freestyle_pairs_poomsae",
-                                        "label": "Freestyle Pairs Poomsae",
-                                        "match_value": "freestyle_pairs_poomsae",
+                                        "code": "freestyle_pairs",
+                                        "label": "Freestyle Pairs",
+                                        "match_value": "freestyle_pairs",
                                         "participantCount": 2,
                                         "min": null,
                                         "max": null,
@@ -334,9 +439,9 @@
                                         ]
                                     },
                                     {
-                                        "code": "freestyle_teams_poomsae",
-                                        "label": "Freestyle Teams Poomsae",
-                                        "match_value": "freestyle_teams_poomsae",
+                                        "code": "freestyle_teams",
+                                        "label": "Freestyle Teams",
+                                        "match_value": "freestyle_teams",
                                         "participantCount": 3,
                                         "min": null,
                                         "max": null,

@@ -24,6 +24,47 @@ def get_tournament_repo() -> FirebaseTournamentRepository:
     return FirebaseTournamentRepository(db)
 
 
+def _field(obj, name: str, default=None):
+    """Reads a field from a tournament whether it's a model or a plain dict."""
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _bracket_builder_discipline(tournament_id: str, tournament) -> str:
+    """Which bracket builder serves this tournament: "kyorugi" or "poomsae".
+
+    Same rule the builder page used to apply in the browser: the category
+    schema decides. A discipline whose schema has a "weight" dimension is
+    weight-class sparring (kyorugi); one without is judged forms (poomsae).
+    The schema is looked up like the page does — the tournament's own
+    sport/discipline key if present, otherwise the first one defined.
+    Only when there is no schema yet does the discipline name decide.
+    """
+    sport = str(_field(tournament, "sport") or "").lower()
+    discipline = str(_field(tournament, "discipline") or "").lower()
+    by_name = "poomsae" if "poomsae" in discipline else "kyorugi"
+
+    try:
+        doc = init_firestore().collection("tournament_categories").document(tournament_id).get()
+    except Exception:
+        return by_name
+    if not doc.exists:
+        return by_name
+
+    sport_schemas = ((doc.to_dict() or {}).get("categories") or {}).get("sportSchemas") or {}
+    sport_schema = sport_schemas.get(sport) or next(iter(sport_schemas.values()), None)
+    if not sport_schema:
+        return by_name
+    discipline_schemas = sport_schema.get("disciplines") or {}
+    discipline_schema = discipline_schemas.get(discipline) or next(iter(discipline_schemas.values()), None)
+    if not discipline_schema:
+        return by_name
+
+    dimensions = discipline_schema.get("dimensions") or []
+    return "kyorugi" if any(d.get("key") == "weight" for d in dimensions) else "poomsae"
+
+
 @router.get("/")
 async def dashboard_page(
     request: Request,
@@ -80,13 +121,32 @@ async def tournament_category_manager_page(request: Request, tournament_id: str,
 @router.get("/tournaments/{tournament_id}/brackets",
             dependencies=[Depends(require_operator("brackets:manage"))])
 async def bracket_builder_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
-    """TCO and TOS only."""
+    """TCO and TOS only. Serves the kyorugi or the poomsae builder — one
+    URL, the discipline is detected from the tournament's category schema
+    (see _bracket_builder_discipline)."""
     use_case = GetTournamentUseCase(repo)
     tournament = use_case.execute(tournament_id)
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
 
-    return templates.TemplateResponse(request, "dashboard/bracket_builder.html", {
+    discipline = _bracket_builder_discipline(tournament_id, tournament)
+    return templates.TemplateResponse(request, f"dashboard/bracket_builder_{discipline}.html", {
+        "request": request, "tournament": tournament, "builder_discipline": discipline,
+    })
+
+
+@router.get("/tournaments/{tournament_id}/poomsae-draw",
+            dependencies=[Depends(require_operator("brackets:manage"))])
+async def poomsae_draw_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
+    """TCO and TOS only — same permission as the bracket builder. Poomsae
+    pools per age × rank group and the round 1 / semi-final / final draw
+    (see the POOMSAE DRAW endpoints in api_router.py)."""
+    use_case = GetTournamentUseCase(repo)
+    tournament = use_case.execute(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    return templates.TemplateResponse(request, "dashboard/poomsae_draw.html", {
         "request": request, "tournament": tournament,
     })
 

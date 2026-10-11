@@ -88,7 +88,7 @@
         { alpha2: "CD", alpha3: "COD", name: "Congo, The Democratic Republic of the" },
         { alpha2: "CK", alpha3: "COK", name: "Cook Islands" },
         { alpha2: "CR", alpha3: "CRI", name: "Costa Rica" },
-        { alpha2: "HR", alpha3: "HRV", name: "Croatia" },
+        { alpha2: "HR", alpha3: "CRO", name: "Croatia" },
         { alpha2: "CU", alpha3: "CUB", name: "Cuba" },
         { alpha2: "CW", alpha3: "CUW", name: "Cura\u00e7ao" },
         { alpha2: "CY", alpha3: "CYP", name: "Cyprus" },

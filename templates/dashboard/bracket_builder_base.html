@@ -1,0 +1,945 @@
+{% extends "dashboard/base.html" %}
+{#
+Shared shell for the per-discipline bracket builders:
+dashboard/bracket_builder_kyorugi.html
+dashboard/bracket_builder_poomsae.html
+The /dashboard/tournaments/{id}/brackets route picks one of them from the
+tournament's category schema (see _bracket_builder_discipline in the
+dashboard router). Shared JS: /static/js/bracket-builder-common.js.
+#}
+{% block content %}
+
+<div id="flash" class="flash-banner hidden"></div>
+
+<div class="bb-wrapper">
+
+    <div class="bb-topbar">
+        <a href="/dashboard/tournaments/{{ tournament.id }}/categories" class="btn btn-ghost btn-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5" />
+                <path d="M12 19l-7-7 7-7" />
+            </svg>
+            Back to Categories
+        </a>
+        <div class="bb-topbar-title">
+            <span class="panel-eyebrow">{{ tournament.title }}</span>
+            <h1 class="panel-title" style="font-size:1.5rem;">{% block builder_title %}Brackets &amp; Court Ordering{%
+                endblock %}</h1>
+        </div>
+        <button id="pushBtn" type="button" class="btn btn-primary" disabled onclick="pushToFirebase()">
+            Push to Firebase
+        </button>
+        <button id="cleanBtn" type="button" class="btn btn-danger" onclick="cleanPushedData()"
+            title="Permanently deletes every bracket, match, and equipment setting pushed for this tournament. Registrations are not affected.">
+            🗑 Clean Pushed Data
+        </button>
+    </div>
+
+    <p class="text-muted bb-hint">
+        {% block builder_hint %}{% endblock %}
+    </p>
+
+    <div class="bb-config-row {% block config_row_class %}{% endblock %}">
+
+        <div class="card-panel bb-pane bb-pane--courts">
+            <div class="bb-pane-header">
+                <h2 class="panel-title" style="font-size:1.05rem;">Courts</h2>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="addCourtRow()">+ Add Court</button>
+            </div>
+            <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+                {% block courts_help %}{% endblock %}
+            </p>
+            <div id="courtsList" class="bb-courts-list"></div>
+        </div>
+
+        {% block config_panes %}{% endblock %}
+
+    </div>
+
+    {% block extra_panes %}{% endblock %}
+
+    {# ── GENERATE ROW ──────────────────────────────────────────────────── #}
+    <div class="card-panel bb-pane" style="margin-top: 1rem;">
+        <div class="bb-pane-header">
+            <h2 class="panel-title" style="font-size:1.05rem;">Generate</h2>
+        </div>
+        <div class="bb-generate-controls">
+            {% block generate_fields_before %}{% endblock %}
+            <label class="bb-field">
+                <span>Seed ordering</span>
+                <select id="orderingSelect">
+                    <option value="registration_order">Registration order</option>
+                </select>
+            </label>
+            <label class="bb-field" id="placementFieldWrap">
+                <span>Seed placement</span>
+                <select id="placementSelect">
+                    <option value="club_country_spread">Club spread (hard lock) + country tie-break</option>
+                    <option value="standard">Standard (seed order only — checker flags avoidable club pairs)</option>
+                </select>
+            </label>
+            {% block generate_fields_after %}{% endblock %}
+            <button type="button" class="btn btn-primary" onclick="generateEverything()">Generate Brackets &amp;
+                Ordering</button>
+        </div>
+        <p class="text-muted" style="font-size: 0.8rem; margin-top: 0.6rem;">
+            Each dropdown is a registry — new algorithms slot in without touching the pipeline around them
+            (ORDERING_STRATEGIES in bracket-builder-common.js, PLACEMENT_STRATEGIES in bracket-core.js).
+        </p>
+        <div id="generateSummary" class="bb-generate-summary"></div>
+    </div>
+
+    {# ── RESULTS ────────────────────────────────────────────────────────── #}
+    <div id="resultsSection" class="hidden">
+
+        <div id="hardLockReport" class="card-panel bb-pane bb-lock-report hidden" style="margin-bottom: 0.75rem;"></div>
+
+        <div class="bb-view-pins">
+            <div style="display:flex; gap:0.5rem;">
+                <button type="button" id="pinBrackets" class="bb-pin bb-pin--active"
+                    onclick="showView('brackets')">Brackets</button>
+                <button type="button" id="pinCourtOrder" class="bb-pin" onclick="showView('courtOrder')">Court
+                    Order</button>
+            </div>
+            <div style="margin-left:auto; display:flex; gap:0.5rem;">
+                <button type="button" id="downloadClubSheetsBtn" class="btn btn-ghost btn-sm"
+                    onclick="downloadClubSheetsPDF()">Download Club Sheets (PDF)</button>
+                <button type="button" id="downloadAllPdfBtn" class="btn btn-ghost btn-sm"
+                    onclick="downloadAllBracketsPDF()">Download All (PDF)</button>
+            </div>
+        </div>
+
+        <div id="bracketsView" class="card-panel bb-pane" style="margin-top: 0.75rem;">
+            <h2 class="panel-title" style="font-size:1.05rem; margin-bottom: 0.75rem;">Brackets</h2>
+            <div id="bracketsPreview" class="bb-brackets-grid"></div>
+        </div>
+
+        <div id="courtOrderView" class="card-panel bb-pane hidden" style="margin-top: 0.75rem;">
+            <h2 class="panel-title" style="font-size:1.05rem; margin-bottom: 0.35rem;">Court Order</h2>
+            <p id="courtOrderHint" class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
+                {% block court_order_hint %}{% endblock %}
+            </p>
+            <div id="unassignedWarning" class="hidden"></div>
+            <div id="courtColumns" class="bb-court-columns"></div>
+        </div>
+
+    </div>
+
+</div>
+
+<div id="bracketPreviewOverlay" class="bb-preview-overlay hidden"
+    onclick="if (event.target === this) closeBracketPreview()">
+    <div class="bb-preview-panel">
+        <div class="bb-preview-header">
+            <span id="bracketPreviewTitle" class="text-muted" style="font-size: 0.85rem;"></span>
+            <div style="display: flex; gap: 0.5rem;">
+                <button type="button" id="bracketPreviewDownload" class="btn btn-ghost btn-sm">Download PDF</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="closeBracketPreview()">Close</button>
+            </div>
+        </div>
+        <div id="bracketPreviewBody" class="bb-preview-body"></div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="/static/js/bracket-core.js"></script>
+<script src="/static/js/bracket-sheets.js"></script>
+<script>
+    // Page constants — read by bracket-builder-common.js and the discipline script.
+    // tojson (not a quoted Jinja expression) so a title containing a quote can't
+    // break this script, and isn't HTML-escaped into "&#34;" on printed sheets.
+    const TOURNAMENT_ID = {{ tournament.id | string | tojson }};
+    const TOURNAMENT_SPORT = {{ tournament.sport | default ('', true) | string | lower | tojson }};
+    const TOURNAMENT_DISCIPLINE = {{ tournament.discipline | default ('', true) | string | lower | tojson }};
+    const TOURNAMENT_TITLE = {{ tournament.title | default ('', true) | string | tojson }};
+    const TOURNAMENT_DATE = {{ tournament.dateTime | default ('', true) | string | tojson }};
+    const TOURNAMENT_LOCATION = {{ tournament.location | default ('', true) | string | tojson }};
+    const TOURNAMENT_COURT_NUM = {{ tournament.courtNum | default (0) | int }};
+</script>
+<script src="/static/js/category-schema.js"></script>
+<script src="/static/js/bracket-builder-common.js"></script>
+{# Discipline code lives in /static/js/bracket-builder-<discipline>.js — never inline JS in a
+    child template: editors format it as HTML text and join lines into // comments. #}
+    {% block builder_script %}{% endblock %}
+
+    <style>
+        :root {
+            --surface: #ffffff;
+            --border: #e2e8f0;
+            --muted: #64748b;
+            --text: #0f172a;
+            --accent: #4f46e5;
+            --green: #16a34a;
+            --green-bg: #dcfce7;
+            --radius: 14px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .text-muted {
+            color: var(--muted) !important;
+        }
+
+        .container {
+            max-width: none !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 1.5rem 2rem !important;
+            box-sizing: border-box !important;
+        }
+
+        body {
+            background: #f1f5f9;
+        }
+
+        .card-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 1px 4px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .04);
+        }
+
+        .panel-eyebrow {
+            font-size: .7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+            display: block;
+            margin-bottom: .25rem;
+        }
+
+        .panel-title {
+            margin: 0;
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1.2;
+        }
+
+        .badge {
+            display: inline-block;
+            font-size: .72rem;
+            font-weight: 600;
+            padding: .2rem .55rem;
+            border-radius: 99px;
+            white-space: nowrap;
+        }
+
+        .badge-green {
+            background: var(--green-bg);
+            color: var(--green);
+        }
+
+        .badge-grey {
+            background: #f1f5f9;
+            color: var(--muted);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .5rem 1rem;
+            border-radius: 8px;
+            font-size: .875rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #4338ca;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--border);
+        }
+
+        .btn-ghost:hover {
+            background: #f8fafc;
+            color: var(--text);
+        }
+
+        .btn-danger {
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fca5a5;
+        }
+
+        .btn-danger:hover {
+            background: #fee2e2;
+        }
+
+        .btn-sm {
+            font-size: .8rem;
+            padding: .35rem .8rem;
+        }
+
+        .bb-wrapper {
+            width: 100%;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .bb-topbar {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+        }
+
+        .bb-topbar-title {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .bb-hint {
+            margin-top: -0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .bb-config-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1.2fr;
+            gap: 1.25rem;
+        }
+
+        /* ── Rule / scheduling panes (poomsae) ───────────────────────────── */
+        .bb-rule-default {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            padding: 0.6rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 0.6rem;
+        }
+
+        .bb-rule-default strong {
+            font-size: 0.88rem;
+        }
+
+        .bb-rule-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .bb-rule-row {
+            display: grid;
+            grid-template-columns: repeat(var(--rule-cols, 3), minmax(0, 1fr)) auto minmax(0, 1.3fr) 6.5rem auto;
+            gap: 0.4rem;
+            align-items: center;
+            font-size: 0.82rem;
+        }
+
+        .bb-rule-row select,
+        .bb-rule-default select,
+        .bb-sched-age-row select {
+            padding: 0.35rem 0.45rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.82rem;
+            min-width: 0;
+        }
+
+        .bb-rule-arrow {
+            color: var(--muted);
+        }
+
+        .bb-rule-count {
+            color: var(--muted);
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+
+        .bb-rule-count--none {
+            color: #b45309;
+        }
+
+        .bb-rule-resolved {
+            margin-top: 0.75rem;
+            font-size: 0.82rem;
+        }
+
+        .bb-rule-resolved summary {
+            cursor: pointer;
+            color: var(--muted);
+        }
+
+        .bb-rule-resolved-list {
+            margin-top: 0.4rem;
+            max-height: 260px;
+            overflow: auto;
+        }
+
+        .bb-rule-source {
+            color: var(--muted);
+            font-size: 0.72rem;
+            margin-left: 0.4rem;
+        }
+
+        .bb-sched-grid {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) 2fr;
+            gap: 1.25rem;
+        }
+
+        @media (max-width: 900px) {
+            .bb-sched-grid {
+                grid-template-columns: 1fr;
+            }
+
+            /* phone: type | age, belt | system, count | remove — one card per exception */
+            .bb-rule-row {
+                grid-template-columns: 1fr 1fr;
+                padding-bottom: 0.5rem;
+                border-bottom: 1px solid var(--border);
+            }
+
+            .bb-rule-arrow {
+                display: none;
+            }
+
+            .bb-rule-row .cm-bin-btn-inline {
+                justify-self: end;
+            }
+        }
+
+        .bb-priority-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.35rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 0.3rem;
+            font-size: 0.85rem;
+        }
+
+        .bb-priority-num {
+            width: 1.4rem;
+            color: var(--muted);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .bb-priority-label {
+            flex: 1;
+        }
+
+        .bb-icon-btn {
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text);
+            border-radius: 6px;
+            width: 1.8rem;
+            height: 1.6rem;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .bb-icon-btn:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
+
+        .bb-sched-age-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.85rem;
+        }
+
+        .bb-sched-age-label {
+            min-width: 150px;
+            font-weight: 600;
+        }
+
+        .bb-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.2rem 0.55rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            font-size: 0.78rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .bb-chip input {
+            margin: 0;
+        }
+
+        .bb-chip--on {
+            border-color: var(--accent);
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .bb-config-row--two {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        @media (max-width: 1100px) {
+
+            .bb-config-row,
+            .bb-config-row--two {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .bb-pane--equipment {
+            display: flex;
+            flex-direction: column;
+            gap: 0.9rem;
+            max-height: 480px;
+            overflow-y: auto;
+        }
+
+        .bb-equip-block {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .bb-equip-subhead {
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--muted);
+            margin: 0;
+        }
+
+        .bb-equip-row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .bb-equip-inventory .bb-equip-row {
+            align-items: center;
+            border-bottom: 1px solid #f1f5f9;
+            padding: 0.3rem 0;
+        }
+
+        .bb-equip-inventory input,
+        .bb-equip-genpolicy select {
+            padding: 0.35rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            box-sizing: border-box;
+            width: 100%;
+        }
+
+        .bb-pane {
+            padding: 1.25rem;
+        }
+
+        .bb-pane--vest {
+            display: flex;
+            flex-direction: column;
+            max-height: 480px;
+            overflow-y: auto;
+        }
+
+        .bb-vest-list {
+            flex: 1;
+            min-height: 0;
+        }
+
+        .bb-pane-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .bb-court-row {
+            display: grid;
+            grid-template-columns: 70px 1fr 1.3fr 90px 130px 60px 110px auto auto;
+            gap: 0.5rem;
+            align-items: center;
+            padding: 0.4rem 0;
+        }
+
+        .bb-court-row--poomsae {
+            grid-template-columns: 70px 1fr 130px auto;
+        }
+
+        .bb-plexi-check {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.8rem;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .bb-court-row input,
+        .bb-court-row select {
+            padding: 0.4rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            box-sizing: border-box;
+            width: 100%;
+        }
+
+        .cm-bin-btn-inline {
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .cm-bin-btn-inline:hover {
+            color: #b91c1c;
+        }
+
+        .bb-vest-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0;
+            font-size: 0.85rem;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .bb-vest-row input {
+            padding: 0.35rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        .bb-generate-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: end;
+        }
+
+        .bb-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            font-size: 0.82rem;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .bb-field select {
+            padding: 0.45rem 0.6rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: var(--text);
+            font-weight: 400;
+        }
+
+        .bb-generate-summary {
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+        }
+
+        .bb-view-pins {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .bb-pin {
+            padding: 0.5rem 1.1rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--muted);
+            font-size: 0.88rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .bb-pin--active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        .bb-brackets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 1rem 1.5rem;
+            align-items: start;
+        }
+
+        .bb-bracket-block {
+            padding: 0.9rem;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            max-height: 350px;
+            overflow-y: auto;
+        }
+
+        .bb-bracket-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .bb-bracket-title-row .bb-bracket-title {
+            margin-bottom: 0;
+        }
+
+        .bb-preview-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, .55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 60;
+            padding: 1.5rem;
+        }
+
+        .bb-preview-panel {
+            background: #fff;
+            border-radius: 12px;
+            width: min(95vw, 1200px);
+            max-height: 92vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .bb-preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .bb-preview-body {
+            overflow: auto;
+            padding: 1rem;
+        }
+
+        .bb-preview-body svg {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .bb-bracket-title {
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .bb-round {
+            margin-bottom: 0.5rem;
+        }
+
+        .bb-round-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--muted);
+            margin-bottom: 0.2rem;
+        }
+
+        .bb-match-line {
+            font-size: 0.88rem;
+            padding: 0.2rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .bb-court-columns {
+            display: flex;
+            gap: 1rem;
+            overflow-x: auto;
+            padding-bottom: 0.5rem;
+        }
+
+        .bb-court-column {
+            flex: 0 0 350px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #f8fafc;
+            min-height: 200px;
+        }
+
+        .bb-court-column-header {
+            font-weight: 700;
+            font-size: 0.9rem;
+            padding: 0.6rem 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .bb-court-column-body {
+            padding: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.45rem;
+            min-height: 120px;
+        }
+
+        .bb-court-match {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.5rem 0.6rem;
+            cursor: grab;
+        }
+
+        .bb-court-match--dragging {
+            opacity: 0.4;
+        }
+
+        .bb-category-block {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.5rem 0.6rem;
+            cursor: grab;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            gap: 0.15rem;
+            overflow: hidden;
+        }
+
+        .bb-category-block-title {
+            font-weight: 600;
+            font-size: 0.82rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bb-category-block--dragging {
+            opacity: 0.4;
+        }
+
+        .bb-court-column--drop-target {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25) inset;
+        }
+
+        .bb-drop-indicator {
+            height: 3px;
+            border-radius: 2px;
+            background: var(--accent);
+            margin: -0.1rem 0;
+            animation: bb-drop-pulse 0.9s ease-in-out infinite;
+        }
+
+        @keyframes bb-drop-pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        /* ── Hard-lock report ───────────────────────────────────────────── */
+        .bb-lock-report .bb-lock-row {
+            display: grid;
+            grid-template-columns: 1.5rem 1fr auto;
+            gap: 0.5rem;
+            align-items: center;
+            padding: 0.45rem 0.6rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .bb-lock-row ul {
+            grid-column: 2 / -1;
+            margin: 0.25rem 0 0;
+            padding-left: 1.1rem;
+            font-size: 0.8rem;
+        }
+
+        .bb-lock-row--ok {
+            background: var(--green-bg);
+            color: var(--green);
+        }
+
+        .bb-lock-row--bad {
+            background: #fef2f2;
+            color: #b91c1c;
+        }
+
+        .bb-lock-row--na {
+            background: #f8fafc;
+            color: var(--muted);
+        }
+
+        .bb-lock-notes {
+            font-size: 0.8rem;
+            color: #92400e;
+            margin-top: 0.4rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .bb-lock-row--warn {
+            background: #fffbeb;
+            color: #b45309;
+        }
+
+        .flash-banner {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            background: var(--green-bg);
+            color: var(--green);
+            font-size: 0.9rem;
+        }
+
+        .flash-banner--error {
+            background: #fef2f2;
+            color: #b91c1c;
+        }
+    </style>
+    {% endblock %}
