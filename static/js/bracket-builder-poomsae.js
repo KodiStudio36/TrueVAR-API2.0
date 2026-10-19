@@ -15,7 +15,31 @@
 //   • courts by age  — which courts each age division may use
 // ════════════════════════════════════════════════════════════════════
 
-let poomsaeSecondsPerPerformance = 90; // one flat per-match time estimate, used only to balance courts
+// Round time per poomsae type, in seconds. Written onto every match as
+// `roundSeconds` (the court's round timer starts from it — see
+// PoomsaeControlPlugin._duration_for_stage) and used to balance courts.
+let poomsaeSecondsPerPerformance = 90;           // recognized poomsae
+let poomsaeParaSecondsPerPerformance = 120;      // para poomsae runs longer
+let poomsaeFreestyleSecondsPerPerformance = 100; // freestyle routine, max 100 s
+
+function isParaCategory(cat) {
+    return !!(cat && (cat.requiresPara || cat.paraClassCode));
+}
+
+// Freestyle categories — same test as the court plugin
+// (is_freestyle_category: "freestyle" in the category code), plus the
+// entry type in case the code doesn't spell it out.
+function isFreestyleCategory(cat) {
+    if (!cat) return false;
+    const text = `${cat.code || ""} ${cat.categoryCode || ""} ${cat.entryTypeCode || ""} ${cat.entryTypeLabel || ""}`;
+    return /freestyle/i.test(text);
+}
+
+// Round time for one category's matches: freestyle and para have their own.
+function secondsPerMatchFor(cat) {
+    if (isFreestyleCategory(cat)) return poomsaeFreestyleSecondsPerPerformance;
+    return isParaCategory(cat) ? poomsaeParaSecondsPerPerformance : poomsaeSecondsPerPerformance;
+}
 
 // Choices offered per category. `system` is what gets pushed; cut-off's
 // structure is a build option, not a separate system.
@@ -53,6 +77,8 @@ async function init() {
     ]);
     loadPoomsaeConfig();
     document.getElementById("poomsaeSecondsInput").value = poomsaeSecondsPerPerformance;
+    document.getElementById("poomsaeParaSecondsInput").value = poomsaeParaSecondsPerPerformance;
+    document.getElementById("poomsaeFreestyleSecondsInput").value = poomsaeFreestyleSecondsPerPerformance;
     document.getElementById("ageOrderSelect").value = poomsaeConfig.ageOrder;
     renderCourtsList();
     renderSystemRules();
@@ -72,13 +98,20 @@ function disciplineHardLockChecks(report) {
     });
 }
 
-// No vests, helmets or round timing in poomsae. The one poomsae-only
-// field is `poomsae`: the keys drawn on the Poomsae Draw page for this
-// match's category and round (see drawnPoomsaeFor). Left out when the
-// category wasn't drawn, so the match doc simply has no poomsae.
+// Poomsae-only match fields:
+//   roundSeconds  this match's round time by type (poomsae / para /
+//                 freestyle) — the court plugin's round timer starts from it
+//   poomsae       the keys drawn on the Poomsae Draw page for this match's
+//                 category and round (see drawnPoomsaeFor); left out when
+//                 the category wasn't drawn. Never for freestyle — the
+//                 athletes perform their own routine.
 function disciplineMatchFields(m) {
-    const keys = drawnPoomsaeFor(m);
-    return keys ? { poomsae: keys } : {};
+    const bracket = generatedBrackets.find(b => b.categoryCode === m.categoryCode);
+    const fields = {};
+    if (bracket && bracket.durationSeconds > 0) fields.roundSeconds = bracket.durationSeconds;
+    const keys = bracket && bracket.isFreestyle ? null : drawnPoomsaeFor(m);
+    if (keys) fields.poomsae = keys;
+    return fields;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -168,6 +201,8 @@ function disciplineEquipmentPayload() {
     return {
         courts: courts.map(c => ({ id: c.id, label: c.label, minGapBetweenSameAthlete: c.minGapBetweenSameAthlete })),
         secondsPerMatch: poomsaeSecondsPerPerformance,
+        paraSecondsPerMatch: poomsaeParaSecondsPerPerformance,
+        freestyleSecondsPerMatch: poomsaeFreestyleSecondsPerPerformance,
         poomsaeScheduling: JSON.parse(JSON.stringify(poomsaeConfig)),
     };
 }
@@ -194,6 +229,8 @@ function loadPoomsaeConfig() {
             if (saved.ageCourts && typeof saved.ageCourts === "object") poomsaeConfig.ageCourts = saved.ageCourts;
             if (saved.ageOrder === "oldest_first" || saved.ageOrder === "youngest_first") poomsaeConfig.ageOrder = saved.ageOrder;
             if (saved.secondsPerMatch > 0) poomsaeSecondsPerPerformance = saved.secondsPerMatch;
+            if (saved.paraSecondsPerMatch > 0) poomsaeParaSecondsPerPerformance = saved.paraSecondsPerMatch;
+            if (saved.freestyleSecondsPerMatch > 0) poomsaeFreestyleSecondsPerPerformance = saved.freestyleSecondsPerMatch;
         }
     } catch (err) { /* storage unavailable or corrupt — start from defaults */ }
     poomsaeConfig.typePriority = reconcileTypePriority(poomsaeConfig.typePriority);
@@ -201,12 +238,27 @@ function loadPoomsaeConfig() {
 
 function savePoomsaeConfig() {
     try {
-        localStorage.setItem(POOMSAE_CONFIG_KEY, JSON.stringify({ ...poomsaeConfig, secondsPerMatch: poomsaeSecondsPerPerformance }));
+        localStorage.setItem(POOMSAE_CONFIG_KEY, JSON.stringify({
+            ...poomsaeConfig,
+            secondsPerMatch: poomsaeSecondsPerPerformance,
+            paraSecondsPerMatch: poomsaeParaSecondsPerPerformance,
+            freestyleSecondsPerMatch: poomsaeFreestyleSecondsPerPerformance,
+        }));
     } catch (err) { /* private mode etc. — settings just won't persist */ }
 }
 
 function setSecondsPerMatch(value) {
     poomsaeSecondsPerPerformance = parseInt(value) || 90;
+    savePoomsaeConfig();
+}
+
+function setParaSecondsPerMatch(value) {
+    poomsaeParaSecondsPerPerformance = parseInt(value) || 120;
+    savePoomsaeConfig();
+}
+
+function setFreestyleSecondsPerMatch(value) {
+    poomsaeFreestyleSecondsPerPerformance = parseInt(value) || 100;
     savePoomsaeConfig();
 }
 
@@ -262,9 +314,12 @@ function ruleSpecificity(rule) {
     return RULE_FIELDS.filter(f => rule[f.key] !== ANY).length;
 }
 
-// -> { key, ruleIndex } — ruleIndex is null when the default applies.
-// Most specific matching rule wins; ties go to the later rule.
+// -> { key, ruleIndex, forced } — ruleIndex is null when the default
+// applies. Most specific matching rule wins; ties go to the later rule.
+// Freestyle is always a cut-off Final only (one round, no Preliminary or
+// Semi-Final), whatever the default or the exceptions say.
 function resolveSystem(cat) {
+    if (isFreestyleCategory(cat)) return { key: "cut_off_final", ruleIndex: null, forced: true };
     let best = null;
     poomsaeConfig.systemRules.forEach((rule, i) => {
         if (!ruleMatches(rule, cat)) return;
@@ -359,7 +414,7 @@ function renderResolvedSystems() {
         .map(r => `
             <div class="bb-vest-row">
                 <span>${escapeHtml(r.cat.groupLabel)} · ${escapeHtml(r.cat.label)}</span>
-                <span>${escapeHtml(POOMSAE_SYSTEMS[r.key].label)}<span class="bb-rule-source">${r.ruleIndex == null ? "default" : `exception ${r.ruleIndex + 1}`}</span></span>
+                <span>${escapeHtml(POOMSAE_SYSTEMS[r.key].label)}<span class="bb-rule-source">${r.forced ? "freestyle" : r.ruleIndex == null ? "default" : `exception ${r.ruleIndex + 1}`}</span></span>
             </div>`)
         .join("");
 
@@ -637,6 +692,8 @@ function realMatchesOf(bracket) {
 // placed first, longest first, each onto the allowed court with the least
 // running time so far. Within a court: type priority → age → belt →
 // gender. Every slot counts, including cut-off placeholders.
+// Each bracket's durationSeconds already reflects its own per-match
+// estimate (para categories run longer — see secondsPerMatchFor).
 function generatePoomsaeCourtOrdering(brackets) {
     if (courts.length === 0) return { placedCount: 0, unassigned: [], courtSeconds: {} };
 
@@ -714,7 +771,11 @@ async function generateEverything() {
             return generateCutOff(cat.code, seeded, POOMSAE_SYSTEMS[resolveSystem(cat).key].structure);
         },
         extraBracketFields: cat => ({
-            durationSeconds: poomsaeSecondsPerPerformance,
+            // Round time by type (poomsae / para / freestyle) — pushed on
+            // every match as roundSeconds, and the court-balancing estimate.
+            durationSeconds: secondsPerMatchFor(cat),
+            isPara: isParaCategory(cat),
+            isFreestyle: isFreestyleCategory(cat),
             // Used by the scheduler (court per age, running order) and the court view.
             entryTypeCode: cat.entryTypeCode, ageCode: cat.ageCode, beltClassCode: cat.beltClassCode,
             entryIndex: cat.entryIndex, ageIndex: cat.ageIndex, beltIndex: cat.beltIndex, paraIndex: cat.paraIndex, genderIndex: cat.genderIndex,
@@ -812,7 +873,7 @@ function renderCategoryBlock(bracket) {
         <div class="bb-category-block" style="height:${height}px;" draggable="true" data-category-code="${bracket.categoryCode}"
             ondragstart="onCategoryBlockDragStart(event, this)" ondragend="onCategoryBlockDragEnd(event, this)">
             <div class="bb-category-block-title">${escapeHtml(bracket.categoryLabel)}</div>
-            <div class="text-muted" style="font-size:0.72rem;">${bracket.entries.length} entries · ${matchCount} matches (${firstNum}–${lastNum}) · ~${estMinutes} min</div>
+            <div class="text-muted" style="font-size:0.72rem;">${bracket.entries.length} entries · ${matchCount} matches (${firstNum}–${lastNum}) · ~${estMinutes} min${bracket.isPara || bracket.isFreestyle ? ` · ${perMatch}s/match` : ""}</div>
             <div class="text-muted" style="font-size:0.7rem;">${escapeHtml(stageSummary)}</div>
             ${drawSummary ? `<div style="font-size:0.7rem;color:var(--accent,#4f46e5);font-weight:600;">${escapeHtml(drawSummary)}</div>` : ""}
         </div>

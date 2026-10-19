@@ -85,7 +85,7 @@
                   "code": "seniors",
                   "label": "Seniors",
                   "match_value": null,
-                  "min": 1990,
+                  "min": 1900,
                   "max": 2009,
                   "roundTime": "01:30",
                   "breakTime": "00:30"

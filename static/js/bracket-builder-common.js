@@ -183,6 +183,9 @@ async function loadEntriesForCategory(cat) {
             clubName: members[0] ? members[0].club : null,
             country: members[0] ? members[0].country : null,
             name: members.map(m => m.name).join(" & "),
+            // One per member (pairs/teams have several) — printed next to
+            // the name on the bracket sheets (see bracket-sheets.js).
+            associationIds: members.map(m => m.associationId || null),
         };
     });
 }
@@ -233,7 +236,10 @@ async function buildAllBrackets({ categories, systemKey, build, decorateMatch, e
             system,
             orderingStrategy: orderingKey,
             placementStrategy: system === "single_elimination" ? placementKey : null,
-            entries: seeded.map(e => ({ entryId: e.entryId, athleteIds: e.athleteIds, clubId: e.clubId, clubName: e.clubName, country: e.country, name: e.name, seed: e.seed })),
+            entries: seeded.map(e => ({
+                entryId: e.entryId, athleteIds: e.athleteIds, clubId: e.clubId, clubName: e.clubName,
+                country: e.country, name: e.name, seed: e.seed, associationIds: e.associationIds || [],
+            })),
             rounds: built.rounds,
             bracketSize: built.bracketSize,
             entrySlotIndex: built.entrySlotIndex,

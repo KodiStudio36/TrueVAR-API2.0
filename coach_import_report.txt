@@ -1,0 +1,99 @@
+Coaches in workbook: 65
+  will get coach role : 55
+  already coach       : 0
+  NOT FOUND           : 4
+  MORE THAN ONE MATCH : 6
+  no taekwondo profile: 0
+  (picked by club     : 0)
+
+=== NOT FOUND (not updated) ===
+- Eduard Dudaško  [sheet: SPOLU, TRÉNER; club: 011 ILYO - TAEKWONDO TRENČÍN]
+- Elizabeth Šuk  [sheet: TRÉNER; club: 003 Športový klub polície - ILYO Taekwondo Košice]
+    similar in database: Elisabeth Šuk (DBlfMZje5KT6GvvtfjXv)
+- Gabriela Bohušová  [sheet: SPOLU, TRÉNER; club: 003 Športový klub polície - ILYO Taekwondo Košice]
+    similar in database: Gabriela Briškárová (KZsuATXOXUJEBdW0P4pb)
+- Oľga Weis  [sheet: SPOLU; club: 011 ILYO - TAEKWONDO TRENČÍN]
+    similar in database: Oľga Weiss (0yrFrgv0gMju14781DIl)
+
+=== MORE THAN ONE MATCH (not updated) ===
+- Adrián Angyal  [sheet: SPOLU, TRÉNER; club: 002 TAEKWONDO HAKIMI Rožňava]
+    · Adrián Angyal st.  | id JzuLMwiAxNMpz5ug43o3 | club TAEKWONDO HAKIMI Rožňava | born 1971-03-11
+    · Adrián Angyal  | id qoGXqeOQPZ5eOGQ8kz04 | club TAEKWONDO HAKIMI Rožňava | born 1996-03-14
+- Gabriel Hiczér  [sheet: SPOLU, TRÉNER; club: 014 KORYO PANTHERS TAEKWONDO Rožňava]
+    · Gabriel Hiczér  | id 5xDiWP4zxgaYVvGl7Rgn | club KORYO PANTHERS TAEKWONDO Rožňava | born 2000-10-03
+    · Gabriel Hiczér st.  | id NpHHT9F6b3cu2yx6bK8K | club KORYO PANTHERS TAEKWONDO Rožňava | born 1975-11-25
+- Ivana Kyseľová  [sheet: SPOLU, TRÉNER; club: 004 TAEKWONDO KLUB Hnúšťa]
+    · Ivana Kyseľová  | id Oqx5crJ2Q2G1gxEEZdc1 | club TAEKWONDO KLUB Hnúšťa | born 1979-05-10
+    · Ivana Kyseľová  | id wxYsLVSw6PGoEOSc4mvn | club TAEKWONDO KLUB Hnúšťa | born 2005-09-14
+- Martin Suchý  [sheet: SPOLU, TRÉNER; club: 016 Star-club bojových umení]
+    · Martin Suchý  | id SWgHjEkFu0rtmB9wPYo7 | club STAR-CLUB BOJOVÝCH UMENÍ | born 1983-03-11
+    · Martin Suchý ml.  | id gKaDzGO6eIawWDqp21eH | club STAR-CLUB BOJOVÝCH UMENÍ | born 2020-06-12
+- Pavel Ižarik  [sheet: SPOLU, TRÉNER, TRÉNER WT; club: 003 Športový klub polície - ILYO Taekwondo Košice]
+    · Pavel Ižarik  | id 10fNbhHoYsL0AeBbadrh | club Športový klub polície - ILYO Taekwondo Košice | born 1973-02-26
+    · Pavel Ižarik  | id oIJCtglTHKhMBLc9aj3F | club Športový klub polície - ILYO Taekwondo Košice | born 2004-12-05
+- Tomáš Potocký  [sheet: SPOLU, TRÉNER, TRÉNER WT; club: 008 Black Tiger Taekwondo - Klub Snina]
+    · Tomáš Potocký  | id h0RByZY95FLJZw4EvpmZ | club Black Tiger Taekwondo - Klub Snina | born 1987-12-08
+    · Tomáš Potocký  | id ki8MCori2FP7FYTw2WEp | club Black Tiger Taekwondo - Klub Snina | born 2018-11-24
+
+=== MATCHED BUT NO TAEKWONDO PROFILE (not updated) ===
+
+=== SEVERAL MATCHES, PICKED BY CLUB (will be updated — double-check) ===
+
+=== GOT COACH ROLE ===
+- Adrian Mag  →  Adrian Mag  | id UTzfmlBdRH70F032Uj3z | club Falcon Taekwondo klub Rimavská Sobota | born 2008-03-03
+- Alexandra Vyskočániová  →  Alexandra Vyskočániová  | id BOSYqeOS26ajMj8S5nFU | club Taekwondo 4U Liptovský Mikuláš | born 1984-08-23
+- Andrea Mandzáková  →  Andrea Mandzáková  | id Nb3GjgbMwIWIbyBlWTgW | club Black Tiger Taekwondo - Klub Snina | born 2005-01-08
+- Aurel Špak  →  Aurel Špak  | id R2BDU1jlXCbyBHGX3ank | club Športový klub polície - ILYO Taekwondo Košice | born 2008-09-05
+- Daniel Ižarik  →  Daniel Ižarik  | id O6sH31NYFZur0VgPvGMt | club Športový klub polície - ILYO Taekwondo Košice | born 2007-08-13
+- Dominik Kuvik  →  Dominik Kuvik  | id xvIO7bByFTqDP1tnXs6u | club Falcon Taekwondo klub Rimavská Sobota | born 2002-03-25
+- Dávid Sajko  →  Dávid Sajko  | id sBdMz43dGh3YachwceSt | club Športový klub polície - ILYO Taekwondo Košice | born 1996-08-27
+- Dávid Tung Duong Nguyen Bat  →  Dávid Tung Duong Nguyen Bat  | id 4ewTdrke7dqh8M4oCCiX | club TAEKWONDO HAKIMI Rožňava | born 2005-07-19
+- Filip Škarčák  →  Filip Škarčák  | id caXr9wUVL6FoB6lATk1L | club ILYO Taekwondo Zvolen | born 1995-03-13
+- Filip Švec  →  Filip Švec  | id ARBjJdwn3ESsiw1d0FQp | club KORYO TAEKWONDO SLÁVIA UPJŠ KOŠICE | born 2001-01-14
+- Gabriel Briškár  →  Gabriel Briškár  | id slDg0V2ygfotfV883sAc | club Haneul Taekwondo Trenčín | born 2001-08-02
+- Gabriela Briškárová  →  Gabriela Briškárová  | id KZsuATXOXUJEBdW0P4pb | club Športový klub polície - ILYO Taekwondo Košice | born 2001-08-02
+- Jakub Hudák  →  Jakub Hudák  | id fJ5b7BNWPLAorISEYf9s | club Ilyo Taekwondo Prešov | born 2002-06-01
+- Jana Babinská  →  Jana Babinská  | id kd0nqIrt4VC8540zbeEH | club ILYO - TAEKWONDO TRENČÍN | born 1987-04-24
+- Ján Kopčík  →  Ján Kopčík  | id vOFQ9ZSwOhoo82swGtcX | club Športový klub polície - ILYO Taekwondo Košice | born 1970-02-24
+- Karol Legemza  →  Karol Legemza  | id 9XVYxh2AiLOOPOoadZKm | club Black Tiger Taekwondo - Klub Snina | born 1996-10-11
+- Katarína Macíková  →  Katarína Macíková  | id WFpNH2IeJ2wn0VG2Vmd5 | club Športový klub polície Ryong Bratislava | born 1991-12-10
+- Klaudia Šandorová  →  Klaudia Šandorová  | id x9BEpWAD4cIYlbueSGzf | club Športový klub polície Ryong Bratislava | born 2007-05-06
+- Kristína Krupjaková  →  Kristína Krupjaková  | id sOBPz8NTSK5CaearE5xa | club Black Tiger Taekwondo - Klub Snina | born 2001-10-16
+- Kristína Mandzáková  →  Kristína Mandzáková  | id L7TjDeMMeJ9VZ4SCEbQL | club Black Tiger Taekwondo - Klub Snina | born 2003-12-11
+- Kyrylo Honcharov  →  Kyrylo Honcharov  | id HypoGeoJWRI0gitGpuUV | club Športový klub polície Ryong Bratislava | born 2007-11-08
+- Ladislav Farkaš  →  Ladislav Farkaš  | id XDYFCGiDxDIpRnMWnzR0 | club Falcon Taekwondo klub Rimavská Sobota | born 1984-09-22
+- Lucia Gečanová  →  Lucia Gečanová  | id ZBgnr0UH4inB0cpUbfyb | club Športový klub polície - ILYO Taekwondo Košice | born 2006-07-29
+- Lukáš Sečkár  →  Lukáš Sečkár  | id x0MBCRTeoaIQ2dT4itsl | club TAEKWONDO HAKIMI Rožňava | born 2007-02-21
+- Marek Goga  →  Marek Goga  | id Wb2Riu8cJsuO2ZeQrPI0 | club Taekwondo klub Humenné | born 1982-04-24
+- Mario Švec  →  Mário Švec  | id IGplMN67OKlseRnbeGDZ | club KORYO TAEKWONDO SLÁVIA UPJŠ KOŠICE | born 1978-06-08
+- Maroš Oláh  →  Maroš Oláh  | id ebkTzcNurq6IIrj9llXQ | club TAEKWONDO KLUB Hnúšťa | born 1974-06-10
+- Matej Horváth  →  Matej Horváth  | id szBTYdfDSXUgtjJTnWei | club Haneul Taekwondo Trenčín | born 2004-07-15
+- Matúš Matejka  →  Matúš Matejka  | id zL2bWtuE71qsxbHiYa1j | club Športový klub polície Ryong Bratislava | born 2006-03-03
+- Michaela Kaminská  →  michaela kaminska  | id gAmK92KvwTkJGD6IJnL6 | club KORYO TAEKWONDO SLÁVIA UPJŠ KOŠICE | born 2007-11-28
+- Michal Kavečanky  →  Michal Kavečanky  | id NzRSUQgo9yfWD5ijBSpw | club TAEKWONDO HAKIMI Rožňava | born 1986-04-29
+- Michal Kotvas  →  Michal Kotvas  | id oLmRWGR5AbzlvALuo5mO | club Športový klub polície Ryong Bratislava | born 1996-10-23
+- Michal Matiko  →  Michal Matiko  | id IiP255kbIn3pebh8EjnE | club STAR-CLUB BOJOVÝCH UMENÍ | born 2000-01-06
+- Mikuláš Angyal  →  Mikuláš Angyal  | id ajQuuKix2B4BsQKVTPVQ | club TAEKWONDO HAKIMI Rožňava | born 1985-10-16
+- Miroslav Bitala  →  Miroslav Bitala  | id 47cGQsHRxLFPpJeNvlY6 | club Falcon Taekwondo klub Rimavská Sobota | born 1984-01-27
+- Miroslav Frgolec  →  Miroslav Frgolec  | id UXFR87Zn5TLnP5TcwL5N | club Športový klub polície - ILYO Taekwondo Košice | born 2004-09-13
+- Natália Zagyiová  →  Natália Zagyiová  | id XXXfMRIt73mLEyzi4jT5 | club Športový klub polície Ryong Bratislava | born 2009-07-17
+- Nora Angyalová  →  Nora Angyalová  | id aARb4YY41zALMLW8Mhl0 | club TAEKWONDO HAKIMI Rožňava | born 1976-09-03
+- Ondrej Chalčák  →  Ondrej Chalčák  | id Jhms2BRHllTPUBJG00ER | club Taekwondo klub Humenné | born 1971-09-15
+- Oto Ďurčovič  →  Oto Ďurčovič  | id JTuPdLXN8x8jO6Y930es | club ILYO Taekwondo Zvolen | born 1963-05-24
+- Oľga Weiss  →  Oľga Weiss  | id 0yrFrgv0gMju14781DIl | club ILYO - TAEKWONDO TRENČÍN | born 1994-03-10
+- Patrik Palenčár  →  Patrik Palenčár  | id AffWRP6POBtNna4DWMvh | club STAR-CLUB BOJOVÝCH UMENÍ | born 2008-12-20
+- Peter Czintel  →  Peter Czintel  | id SQG4w5IozhRrFOXDIEPx | club KORYO PANTHERS TAEKWONDO Rožňava | born 1978-04-01
+- Peter Meleh  →  Peter Meleh  | id NSCXXw6Ua6FQtRsNaZd4 | club TAEKWONDO HAKIMI Rožňava | born 1989-08-28
+- Peter Zagyi  →  Peter Zagyi  | id tTB2YEA4TAsck4LaJHjE | club Športový klub polície Ryong Bratislava | born 1983-09-21
+- Samuel Chudý  →  Samuel Chudý  | id buRZ3UJayM8ysrvegAEB | club Športový klub polície Ryong Bratislava | born 2006-05-29
+- Sára Sekelová  →  Sára Sekelová  | id Ae8hqvcGBfAQKAgwy0uX | club Športový klub polície - ILYO Taekwondo Košice | born 2002-09-28
+- Tomas Kamenca  →  Tomáš Kamenca  | id DBxgcB76ewIrYBMTzbp1 | club Black Tiger Taekwondo - Klub Snina | born 2000-10-06
+- Tomáš Antal  →  Tomáš Antal  | id pHJJNLB1FrtvukRRvyDV | club Falcon Taekwondo klub Rimavská Sobota | born 1983-06-06
+- Tomáš Blišák  →  Tomáš Blišák  | id EDeoTXPRRQ9fJEEFgOhx | club Taekwondo klub Humenné | born 1989-04-13
+- Tomáš Kuvik  →  Tomáš Kuvik  | id sd9DRN48bTVDr2DEsFu0 | club Falcon Taekwondo klub Rimavská Sobota | born 2006-04-12
+- Tomáš Výboch  →  Tomáš Výboch  | id 77e8dYwplDQCYFiDR93H | club ILYO Taekwondo Zvolen | born 1993-06-13
+- Viktória Bitalová  →  Viktória Bitalová  | id XKn8s81DCYEyNGnu1vxT | club Falcon Taekwondo klub Rimavská Sobota | born 1996-12-15
+- Vladimír Mikláš  →  Vladimír Mikláš  | id iaj0V9P6E4ehfLAq218K | club ILYO Taekwondo Zvolen | born 1994-06-03
+- Ľubomír Štickner  →  Ľubomír Štickner  | id nqODY8so7cnU157D6oEE | club KORYO PANTHERS TAEKWONDO Rožňava | born 1976-07-15
+
+=== ALREADY COACH (unchanged) ===

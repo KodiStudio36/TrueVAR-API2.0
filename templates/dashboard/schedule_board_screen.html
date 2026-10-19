@@ -1,0 +1,1638 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Schedule Board</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&display=swap"
+        rel="stylesheet">
+    {#
+    templates/dashboard/schedule_board_screen.html — the venue TV screen.
+    Standalone page (does NOT extend base.html). Served by the dashboard
+    router at /dashboard/tournaments/{id}/schedule-board/screen.
+
+    Designed on a fixed 1920×1080 stage scaled to whatever screen it runs on.
+
+    CONFIG — client only, no backend:
+    • cookie "truevar_sb_{hostTournamentId}", written by the control page
+    (schedule_board_control.html). Re-read every second, so any change
+    made on the control page in the same browser lands within ~1 s.
+    • "#cfg=<base64url JSON>" in the URL (the control page's "link for
+        another device") is copied into THIS browser's cookie on load.
+        • no cookie at all → the host tournament alone, default settings.
+
+        DATA
+        • Firestore sports/{sport}/disciplines/{discipline}/matches
+        where tournamentId == … — the schedule (one listener per
+        tournament on the board; same query as live_queue.html).
+        • RTDB tournaments/{tid}/courts/{cid}/match_data (and live/state)
+        — what is on the mat right now, per court:
+        kyorugi: the TkStrike state FirebaseSyncPlugin pushes on
+        every scoreboard.stable_update (match_id, state,
+        round, blue/red points per round, win…)
+        poomsae: PoomsaeControlPlugin's match_data (matchId,
+        stage, timer facts, corners/judges…)
+        plus poomsae_settings/scoring_method for the poomsae score.
+        • Firestore tournaments/{id}/brackets — category labels (once).
+
+        VIEWS per court (the tournament's "view" setting)
+        • duel — blue vs red • cutoff — one performer + starting order
+        • auto — duel when the current match has a red corner, else cut-off
+        #}
+        <style>
+            :root {
+                --panel: #2b2b2b;
+                --hdr: #3b3b3b;
+                --blue1: #2a50e6;
+                --blue2: #0b1f8c;
+                --red1: #d61b1b;
+                --red2: #6e0909;
+                --chip: #f3ec19;
+                --gold: #f5c518;
+                --muted: #a9b0bd;
+                --line-h: 40px;
+            }
+
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                background: #000;
+                overflow: hidden;
+                color: #fff;
+                font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+                cursor: none;
+            }
+
+            #stage {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                width: 1920px;
+                height: 1080px;
+                transform-origin: center center;
+                display: flex;
+                flex-direction: column;
+                padding: 0 24px 16px;
+                box-sizing: border-box;
+            }
+
+            .hidden {
+                display: none !important;
+            }
+
+            /* ── Header ─────────────────────────────────────────── */
+            .hd {
+                flex: 0 0 76px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 24px;
+            }
+
+            .hd-title {
+                flex: 1;
+                font-size: 36px;
+                font-weight: 700;
+                letter-spacing: .02em;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .hd-pages {
+                display: flex;
+                gap: 10px;
+            }
+
+            .dot {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                background: #444;
+            }
+
+            .dot.on {
+                background: #fff;
+            }
+
+            .hd-right {
+                flex: 1;
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 16px;
+                font-size: 32px;
+                font-weight: 600;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .conn {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                background: #555;
+            }
+
+            .conn.ok {
+                background: #22c55e;
+            }
+
+            .conn.err {
+                background: #ef4444;
+            }
+
+            #main {
+                flex: 1;
+                min-height: 0;
+                position: relative;
+            }
+
+            .ticker {
+                flex: 0 0 60px;
+                margin-top: 12px;
+                background: var(--chip);
+                color: #000;
+                font-size: 36px;
+                font-weight: 800;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0 24px;
+                border-radius: 4px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .empty-state {
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: var(--muted);
+                font-size: 48px;
+                font-weight: 600;
+            }
+
+            /* ── Grid layout: one row per court ─────────────────── */
+            .grid {
+                display: grid;
+                height: 100%;
+                row-gap: 10px;
+            }
+
+            .row {
+                display: grid;
+                grid-template-columns: 790px 140px 1fr;
+                min-height: 0;
+            }
+
+            .court-no {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                font-weight: 800;
+                font-size: calc(var(--line-h) * 1.9);
+                line-height: .9;
+            }
+
+            .court-no small {
+                font-size: calc(var(--line-h) * .36);
+                color: var(--muted);
+                font-weight: 600;
+                letter-spacing: .06em;
+                text-transform: uppercase;
+                margin-bottom: 4px;
+                max-width: 130px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .cur {
+                display: grid;
+                min-height: 0;
+                gap: 1px;
+                background: #000;
+            }
+
+            .duel {
+                grid-template-columns: 150px 1fr 78px 78px 78px 112px;
+                grid-template-rows: repeat(3, 1fr);
+            }
+
+            .duel--simple {
+                grid-template-columns: 150px 1fr 170px;
+                grid-template-rows: repeat(3, 1fr);
+            }
+
+            .cut {
+                grid-template-columns: 150px 1fr 190px;
+                grid-template-rows: repeat(3, 1fr);
+            }
+
+            .cell {
+                display: flex;
+                align-items: center;
+                min-width: 0;
+                overflow: hidden;
+                padding: 0 12px;
+                font-size: calc(var(--line-h) * .52);
+                font-weight: 600;
+                white-space: nowrap;
+            }
+
+            .hdr {
+                background: var(--hdr);
+                justify-content: center;
+                font-size: calc(var(--line-h) * .4);
+                text-transform: uppercase;
+                letter-spacing: .04em;
+            }
+
+            .hdr-title {
+                justify-content: flex-start;
+                text-transform: none;
+                letter-spacing: 0;
+            }
+
+            .hdr-title span {
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .chip {
+                background: #d1d5db;
+                color: #000;
+                justify-content: center;
+                font-weight: 800;
+                letter-spacing: .06em;
+                font-size: calc(var(--line-h) * .46);
+            }
+
+            .chip--live {
+                background: var(--chip);
+                animation: pulse 1.6s ease-in-out infinite;
+            }
+
+            .chip--hold {
+                background: var(--chip);
+            }
+
+            .chip--done {
+                background: #fff;
+            }
+
+            .chip--alert {
+                background: #ef4444;
+                color: #fff;
+            }
+
+            @keyframes pulse {
+                50% {
+                    filter: brightness(.75);
+                }
+            }
+
+            .num {
+                grid-column: 1;
+                grid-row: 2 / span 2;
+                background: var(--panel);
+                justify-content: center;
+                font-size: calc(var(--line-h) * .85);
+                font-weight: 700;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .blue {
+                background: linear-gradient(90deg, var(--blue1), var(--blue2));
+            }
+
+            .red {
+                background: linear-gradient(90deg, var(--red1), var(--red2));
+            }
+
+            .neutral {
+                background: var(--panel);
+            }
+
+            .won {
+                box-shadow: inset 6px 0 0 var(--gold);
+            }
+
+            .lost {
+                filter: saturate(.35) brightness(.7);
+            }
+
+            .pt {
+                justify-content: center;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .score {
+                font-weight: 800;
+            }
+
+            .nm {
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .sub {
+                color: rgba(255, 255, 255, .7);
+                font-size: .72em;
+                margin-left: 12px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .flag-box {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                flex: 0 0 auto;
+                margin-right: 12px;
+                line-height: 1;
+            }
+
+            .flag-box--right {
+                margin: 0 0 0 12px;
+            }
+
+            .flag {
+                height: calc(var(--line-h) * .4);
+                aspect-ratio: 3 / 2;
+                object-fit: cover;
+                border-radius: 2px;
+                box-shadow: 0 0 0 1px rgba(255, 255, 255, .3);
+            }
+
+            .noc {
+                font-size: calc(var(--line-h) * .25);
+                font-weight: 700;
+                margin-top: 2px;
+                letter-spacing: .03em;
+            }
+
+            .cut-name {
+                grid-column: 2;
+            }
+
+            .cut-name--wide {
+                grid-column: 2 / span 2;
+            }
+
+            .cut-score {
+                justify-content: center;
+                font-size: calc(var(--line-h) * .62);
+                font-weight: 800;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .cut-info {
+                grid-column: 2 / span 2;
+                background: var(--panel);
+                color: #ddd;
+                font-size: calc(var(--line-h) * .4);
+                gap: 18px;
+            }
+
+            .cut-info b {
+                color: #fff;
+            }
+
+            .tmr {
+                font-variant-numeric: tabular-nums;
+                font-weight: 800;
+            }
+
+            .tmr.over {
+                color: #fca5a5;
+            }
+
+            .cur--empty {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: var(--panel);
+                color: var(--muted);
+                font-size: calc(var(--line-h) * .55);
+                font-weight: 600;
+            }
+
+            /* Upcoming list (right side of a court row) */
+            .ups {
+                display: grid;
+                gap: 1px;
+                background: #000;
+                min-height: 0;
+            }
+
+            .up {
+                display: grid;
+                min-height: 0;
+                gap: 1px;
+            }
+
+            .duel-up {
+                grid-template-columns: 130px 76px 1fr 1fr;
+            }
+
+            .cut-up {
+                grid-template-columns: 130px 76px 1fr 280px;
+            }
+
+            .up--blank {
+                background: #0d0d0d;
+            }
+
+            .u-num {
+                background: var(--panel);
+                justify-content: center;
+                font-size: calc(var(--line-h) * .6);
+                font-weight: 700;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .u-ph {
+                background: var(--panel);
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                font-size: calc(var(--line-h) * .3);
+                line-height: 1.05;
+                color: #ddd;
+                padding: 0 4px;
+            }
+
+            .u-ph small {
+                font-size: .9em;
+                color: var(--muted);
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .u-red {
+                justify-content: flex-end;
+            }
+
+            .u-club {
+                background: var(--panel);
+                color: #ccc;
+                font-size: calc(var(--line-h) * .38);
+                justify-content: flex-end;
+            }
+
+            /* ── Focus layout: one court, full screen ───────────── */
+            .focus {
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+            }
+
+            .f-court {
+                display: flex;
+                align-items: baseline;
+                gap: 22px;
+                font-size: 64px;
+                font-weight: 800;
+                line-height: 1;
+            }
+
+            .f-court small {
+                font-size: 32px;
+                font-weight: 600;
+                color: var(--muted);
+            }
+
+            .f-bar {
+                background: #e5e7eb;
+                color: #111;
+                font-size: 34px;
+                font-weight: 700;
+                text-align: center;
+                padding: 8px 16px;
+                border-radius: 3px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .f-main {
+                --line-h: 84px;
+            }
+
+            .f-main .cur {
+                height: calc(var(--line-h) * 3.1);
+            }
+
+            .f-cols {
+                flex: 1;
+                min-height: 0;
+                display: grid;
+                grid-template-columns: 1.4fr 1fr;
+                gap: 20px;
+                --line-h: 54px;
+            }
+
+            .f-3 {
+                flex: 1;
+                min-height: 0;
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 20px;
+                --line-h: 58px;
+            }
+
+            .f-panel {
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+                overflow: hidden;
+            }
+
+            .f-ph {
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                gap: 12px;
+                font-size: 34px;
+                font-weight: 700;
+                margin-bottom: 10px;
+                white-space: nowrap;
+            }
+
+            .f-ph span {
+                font-size: 28px;
+                color: var(--muted);
+                font-weight: 600;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .f-list {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+
+            .f-row {
+                display: grid;
+                height: var(--line-h);
+                gap: 1px;
+                background: #000;
+                flex: 0 0 auto;
+            }
+
+            .so-row {
+                grid-template-columns: 84px 1fr 170px;
+            }
+
+            .rk-row {
+                grid-template-columns: 72px 1fr 150px;
+            }
+
+            .rs-row {
+                grid-template-columns: 120px 1fr 190px;
+            }
+
+            .so-status {
+                justify-content: center;
+                background: var(--panel);
+                font-size: calc(var(--line-h) * .42);
+                color: #cbd5e1;
+            }
+
+            .so-status.running {
+                color: var(--chip);
+                font-weight: 800;
+            }
+
+            .so-status.done {
+                color: #fff;
+                font-weight: 700;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .so-row.is-current .cell:not(.so-status) {
+                box-shadow: inset 0 0 0 2px var(--chip);
+            }
+
+            .so-row.is-done {
+                opacity: .6;
+            }
+
+            .rk-pos {
+                justify-content: center;
+                background: var(--blue2);
+                font-size: calc(var(--line-h) * .6);
+                font-weight: 800;
+            }
+
+            .rk-score {
+                justify-content: center;
+                background: var(--blue2);
+                font-weight: 800;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .rk-row.is-live .cell {
+                box-shadow: inset 0 0 0 2px var(--chip);
+            }
+
+            .f-muted {
+                color: var(--muted);
+                font-size: 30px;
+                padding: 12px 0;
+            }
+
+            .overlay {
+                position: fixed;
+                inset: 0;
+                background: #000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                font-size: 4vmin;
+                color: var(--muted);
+                padding: 5vmin;
+                z-index: 10;
+            }
+        </style>
+</head>
+
+<body>
+    <div id="stage">
+        <header class="hd">
+            <div class="hd-title" id="hd-title"></div>
+            <div class="hd-pages" id="hd-pages"></div>
+            <div class="hd-right"><span id="conn" class="conn"></span><span id="clock"></span></div>
+        </header>
+        <main id="main">
+            <div class="empty-state">Loading schedule…</div>
+        </main>
+        <footer id="ticker" class="ticker hidden"></footer>
+    </div>
+    <div id="overlay" class="overlay hidden"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+    <script>
+        "use strict";
+
+        const HOST = {{ host | tojson }};   // {id, title, sport, discipline, courtNum}
+        const COOKIE_NAME = "truevar_sb_" + HOST.id;
+        const COOKIE_POLL_MS = 1000;
+        const LABEL_REFETCH_MS = 60000;
+
+        // RTDB node under tournaments/{tid}/courts/{cid}/ holding what is on
+        // the mat. PoomsaeControlPlugin calls it match_data; FirebaseSyncPlugin's
+        // docstring says live/state — both go through the same
+        // DatabasePort.push_live_state, so both are watched and the first one
+        // with data wins. Drop the wrong one once confirmed.
+        const LIVE_PATHS = ["match_data", "live/state"];
+
+        const DONE_STATUSES = new Set(["done", "walkover", "completed", "finished"]);
+        const POOMSAE_KEYS = ["poomsae1", "poomsae2"];
+
+        let config = null;
+        let configRaw = null;
+        let fsDb = null;
+        let rtdb = null;
+        let serverOffsetMs = 0;
+        const subs = new Map(); // tournamentId -> sub (see subscribe)
+        let pageIndex = 0;
+        let rotateTimer = null;
+        let renderQueued = false;
+        let lastRenderAt = 0;
+
+        // ── Boot ─────────────────────────────────────────────────────────────
+        (async function init() {
+            fitStage();
+            window.addEventListener("resize", fitStage);
+            startClock();
+            keepAwake();
+            document.addEventListener("click", () => {
+                if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(() => { });
+                }
+            });
+
+            importConfigFromHash();
+            loadConfig(true);
+            await initFirebase();
+            if (config && fsDb) syncSubscriptions();
+            setInterval(() => loadConfig(false), COOKIE_POLL_MS);
+            setInterval(tickTimers, 250);
+        })();
+
+        function fitStage() {
+            const s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+            document.getElementById("stage").style.transform = `translate(-50%, -50%) scale(${s})`;
+        }
+
+        async function keepAwake() {
+            try { if ("wakeLock" in navigator) await navigator.wakeLock.request("screen"); } catch (e) { /* unsupported */ }
+        }
+        document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") keepAwake(); });
+
+        function startClock() {
+            const el = document.getElementById("clock");
+            const tick = () => {
+                const d = new Date();
+                const pad = n => String(n).padStart(2, "0");
+                const day = d.toLocaleDateString(undefined, { weekday: "long" });
+                el.textContent = `${pad(d.getHours())}h${pad(d.getMinutes())} ${day} ${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
+            };
+            tick();
+            setInterval(tick, 1000);
+        }
+
+        function showOverlay(text) {
+            const el = document.getElementById("overlay");
+            el.textContent = text;
+            el.classList.remove("hidden");
+        }
+
+        // ── Config (cookie, client only) ─────────────────────────────────────
+        function readCookie(name) {
+            const hit = document.cookie.split("; ").find(c => c.startsWith(name + "="));
+            if (!hit) return null;
+            try { return decodeURIComponent(hit.slice(name.length + 1)); } catch (e) { return null; }
+        }
+
+        function writeCookie(name, value) {
+            document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax`;
+        }
+
+        function defaultConfig() {
+            return {
+                v: 1, title: HOST.title || "",
+                tournaments: [{ id: HOST.id, title: HOST.title, sport: HOST.sport, discipline: HOST.discipline, courtNum: HOST.courtNum, view: "auto", label: "", prefix: "", courts: [] }],
+                layout: "grid", focusCourt: "", upcomingCount: 3, courtsPerPage: 7, rotateSeconds: 15, message: "", showMessage: false,
+            };
+        }
+
+        // "#cfg=…" from the control page's "link for another device".
+        function importConfigFromHash() {
+            const m = /[#&]cfg=([^&]+)/.exec(location.hash);
+            if (!m) return;
+            try {
+                const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+                const json = decodeURIComponent(escape(atob(b64)));
+                JSON.parse(json); // validate
+                writeCookie(COOKIE_NAME, json);
+            } catch (e) {
+                console.warn("Ignoring invalid #cfg", e);
+            }
+            history.replaceState(null, "", location.pathname + location.search);
+        }
+
+        function normalizeConfig(c) {
+            const d = defaultConfig();
+            const out = { ...d, ...(c && typeof c === "object" ? c : {}) };
+            out.tournaments = Array.isArray(out.tournaments) && out.tournaments.length
+                ? out.tournaments.filter(t => t && t.id && t.sport && t.discipline).map(t => ({
+                    ...t,
+                    sport: String(t.sport).toLowerCase(),
+                    discipline: String(t.discipline).toLowerCase(),
+                    courts: Array.isArray(t.courts) ? t.courts.map(String) : [],
+                }))
+                : d.tournaments;
+            out.upcomingCount = clamp(out.upcomingCount, 1, 6, 3);
+            out.courtsPerPage = clamp(out.courtsPerPage, 1, 12, 7);
+            out.rotateSeconds = clamp(out.rotateSeconds, 5, 120, 15);
+            return out;
+        }
+
+        function clamp(v, min, max, fallback) {
+            const n = parseInt(v, 10);
+            return Number.isNaN(n) ? fallback : Math.min(max, Math.max(min, n));
+        }
+
+        function loadConfig(force) {
+            const raw = readCookie(COOKIE_NAME) || "";
+            if (!force && raw === configRaw) return;
+            configRaw = raw;
+            let parsed = null;
+            try { parsed = raw ? JSON.parse(raw) : null; } catch (e) { console.warn("Bad board cookie — using defaults", e); }
+            applyConfig(normalizeConfig(parsed));
+        }
+
+        function applyConfig(c) {
+            const prevRotate = config && config.rotateSeconds;
+            config = c;
+            document.getElementById("hd-title").textContent = c.title || "";
+            if (fsDb) syncSubscriptions();
+            if (prevRotate !== c.rotateSeconds) {
+                clearInterval(rotateTimer);
+                rotateTimer = setInterval(() => { pageIndex++; scheduleRender(); }, c.rotateSeconds * 1000);
+            }
+            scheduleRender();
+        }
+
+        // ── Firebase ─────────────────────────────────────────────────────────
+        async function initFirebase() {
+            try {
+                const res = await fetch("/api/firebase-client-config");
+                const cfg = await res.json();
+                if (!cfg.projectId) throw new Error("Firebase not configured");
+                firebase.initializeApp(cfg);
+                fsDb = firebase.firestore();
+            } catch (err) {
+                console.error(err);
+                showOverlay("Match data is unavailable (Firebase config could not be loaded).");
+                return;
+            }
+            try {
+                rtdb = firebase.database(); // needs databaseURL in the client config
+                rtdb.ref(".info/serverTimeOffset").on("value", snap => { serverOffsetMs = snap.val() || 0; });
+            } catch (err) {
+                console.error("Realtime Database unavailable — live scores off", err);
+                rtdb = null;
+            }
+        }
+
+        function syncSubscriptions() {
+            const wanted = new Map(config.tournaments.map(e => [e.id, e]));
+            subs.forEach((s, id) => {
+                const e = wanted.get(id);
+                if (!e || e.sport !== s.entry.sport || e.discipline !== s.entry.discipline) {
+                    unsubscribe(s);
+                    subs.delete(id);
+                }
+            });
+            wanted.forEach((e, id) => {
+                const s = subs.get(id);
+                if (s) { s.entry = e; ensureCourts(s); } else subscribe(e);
+            });
+            setConn();
+        }
+
+        function subscribe(entry) {
+            const s = {
+                entry, matches: new Map(), labels: {}, labelsAt: 0, unsub: null, ready: false, error: null,
+                courts: new Map(), // courtId -> {live: {path: value}, method, offs: []}
+            };
+            subs.set(entry.id, s);
+
+            s.unsub = fsDb
+                .collection("sports").doc(entry.sport)
+                .collection("disciplines").doc(entry.discipline)
+                .collection("matches")
+                .where("tournamentId", "==", entry.id)
+                .limit(2000)
+                .onSnapshot(
+                    snap => {
+                        snap.docChanges().forEach(ch => {
+                            if (ch.type === "removed") s.matches.delete(ch.doc.id);
+                            else s.matches.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() });
+                        });
+                        s.ready = true;
+                        s.error = null;
+                        ensureCourts(s);
+                        setConn();
+                        scheduleRender();
+                    },
+                    err => {
+                        console.error("Match listener failed for", entry.id, err);
+                        s.error = err;
+                        setConn();
+                    }
+                );
+            ensureCourts(s);
+            loadLabels(s);
+        }
+
+        function unsubscribe(s) {
+            if (s.unsub) s.unsub();
+            s.courts.forEach(c => c.offs.forEach(off => off()));
+            s.courts.clear();
+        }
+
+        // Courts worth watching in RTDB: 1..courtNum, every courtId in the
+        // schedule, and the court filter. A listener on an empty node is free.
+        function ensureCourts(s) {
+            const ids = new Set();
+            const n = parseInt(s.entry.courtNum, 10) || 0;
+            for (let i = 1; i <= Math.min(n, 32); i++) ids.add(String(i));
+            s.matches.forEach(m => { if (m.courtId != null && m.courtId !== "") ids.add(String(m.courtId)); });
+            (s.entry.courts || []).forEach(c => ids.add(String(c)));
+            ids.forEach(cid => { if (!s.courts.has(cid)) watchCourt(s, cid); });
+        }
+
+        function watchCourt(s, cid) {
+            const court = { live: {}, method: null, offs: [] };
+            s.courts.set(cid, court);
+            if (!rtdb) return;
+            const base = `tournaments/${s.entry.id}/courts/${cid}`;
+            const listen = (path, onValue) => {
+                const ref = rtdb.ref(`${base}/${path}`);
+                const cb = snap => { onValue(snap.val()); scheduleRender(); };
+                ref.on("value", cb, err => console.warn("RTDB listener failed", base, path, err));
+                court.offs.push(() => ref.off("value", cb));
+            };
+            LIVE_PATHS.forEach(p => listen(p, v => { court.live[p] = v; }));
+            if (s.entry.discipline.includes("poomsae")) {
+                listen("poomsae_settings/scoring_method", v => { court.method = v; });
+            }
+        }
+
+        async function loadLabels(s) {
+            s.labelsAt = Date.now();
+            try {
+                const snap = await fsDb.collection("tournaments").doc(s.entry.id).collection("brackets").get();
+                snap.forEach(doc => {
+                    const d = doc.data();
+                    if (d.categoryCode) s.labels[d.categoryCode] = d.categoryLabel || d.categoryCode;
+                });
+                scheduleRender();
+            } catch (err) {
+                console.warn("Category labels not loaded", err);
+            }
+        }
+
+        function setConn() {
+            const el = document.getElementById("conn");
+            const all = [...subs.values()];
+            el.className = "conn " + (all.some(s => s.error) ? "err" : all.length && all.every(s => s.ready) ? "ok" : "");
+        }
+
+        // ── Generic helpers ──────────────────────────────────────────────────
+        function isDone(m) { return DONE_STATUSES.has(m.status) || !!m.winnerEntryId; }
+        function isPoomsae(entry) { return (entry.discipline || "").includes("poomsae"); }
+
+        // Firebase returns a map with keys "1","2",… as an array — normalize.
+        function asMap(v) {
+            if (Array.isArray(v)) { const o = {}; v.forEach((x, i) => { if (x != null) o[String(i)] = x; }); return o; }
+            return v && typeof v === "object" ? v : {};
+        }
+
+        function titleFromCode(code) {
+            return String(code || "").split("_").filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+        }
+
+        function categoryLabel(s, m) {
+            if (m.categoryLabel) return m.categoryLabel;
+            if (m.categoryCode && !(m.categoryCode in s.labels) && Date.now() - s.labelsAt > LABEL_REFETCH_MS) loadLabels(s);
+            return s.labels[m.categoryCode] || titleFromCode(m.categoryCode);
+        }
+
+        function shortCategory(label) {
+            const parts = String(label || "").split("·").map(p => p.trim()).filter(Boolean);
+            return parts.length ? parts[parts.length - 1] : "";
+        }
+
+        function weightOf(label) {
+            const m = String(label || "").match(/[-+]\s?\d+(\.\d+)?\s?(kg)?/i);
+            if (!m) return "";
+            const w = m[0].replace(/\s/g, "");
+            return /kg$/i.test(w) ? w : `${w}kg`;
+        }
+
+        const PHASES = { F: "Final", SF: "Semi Final", QF: "Quarter Final", PR: "Preliminary", EXH: "Exhibition" };
+        function phaseLong(p) {
+            if (!p) return "";
+            if (PHASES[p]) return PHASES[p];
+            let m = /^RR(\d+)$/.exec(p);
+            if (m) return `Round Robin ${m[1]}`;
+            m = /^R(\d+)$/.exec(p);
+            return m ? `Round of ${m[1]}` : p;
+        }
+
+        function numStr(c, m) {
+            if (m.displayNumber == null) return "—";
+            const n = m.displayNumber;
+            if (Number.isInteger(n) && isPoomsae(c.entry)) return String(n).padStart(3, "0");
+            return String(n);
+        }
+
+        function participantLabel(s, corner) {
+            if (!corner) return "—";
+            if (corner.name) return corner.name;
+            if (corner.source && corner.source.matchId) {
+                const f = s.matches.get(corner.source.matchId);
+                return f ? `Winner of ${f.displayNumber ?? "?"}` : "Winner TBD";
+            }
+            if (corner.pendingAdvancement) return "To be decided";
+            return "BYE";
+        }
+
+        function clubOf(corner) { return (corner && (corner.clubName || corner.club)) || ""; }
+
+        function fmtScore(v) { return v == null || Number.isNaN(v) ? "" : Number(v).toFixed(3); }
+
+        function winnerSide(m) {
+            if (m.win === "blue" || m.win === "red") return m.win;
+            if (m.winnerCorner === "blue" || m.winnerCorner === "red") return m.winnerCorner;
+            if (m.winnerEntryId && m.blue && m.blue.entryId === m.winnerEntryId) return "blue";
+            if (m.winnerEntryId && m.red && m.red.entryId === m.winnerEntryId) return "red";
+            return null;
+        }
+
+        function drawnPoomsae(m) {
+            return Array.isArray(m.poomsae) ? m.poomsae.map(p => p && (p.name || titleFromCode(p.key || p))).filter(Boolean).join(" + ") : "";
+        }
+
+        function groupKey(m) { return `${m.categoryCode || ""}|${m.roundPhase || ""}`; }
+
+        // ── Flags ────────────────────────────────────────────────────────────
+        const IOC_TO_ISO2 = {
+            AFG: "af", ALB: "al", ALG: "dz", AND: "ad", ANG: "ao", ARG: "ar", ARM: "am", AUS: "au", AUT: "at", AZE: "az",
+            BAH: "bs", BAN: "bd", BAR: "bb", BEL: "be", BEN: "bj", BIH: "ba", BLR: "by", BOL: "bo", BOT: "bw", BRA: "br",
+            BRN: "bh", BUL: "bg", BUR: "bf", CAN: "ca", CHI: "cl", CHN: "cn", CIV: "ci", CMR: "cm", COD: "cd", COL: "co",
+            CRC: "cr", CRO: "hr", CUB: "cu", CYP: "cy", CZE: "cz", DEN: "dk", DOM: "do", ECU: "ec", EGY: "eg", ESA: "sv",
+            ESP: "es", EST: "ee", ETH: "et", FIN: "fi", FRA: "fr", GAB: "ga", GBR: "gb", GEO: "ge", GER: "de", GHA: "gh",
+            GRE: "gr", GUA: "gt", HKG: "hk", HON: "hn", HUN: "hu", INA: "id", IND: "in", IRI: "ir", IRL: "ie", IRQ: "iq",
+            ISL: "is", ISR: "il", ITA: "it", JAM: "jm", JOR: "jo", JPN: "jp", KAZ: "kz", KEN: "ke", KGZ: "kg", KOR: "kr",
+            KOS: "xk", KSA: "sa", KUW: "kw", LAT: "lv", LBN: "lb", LIE: "li", LTU: "lt", LUX: "lu", MAC: "mo", MAR: "ma",
+            MAS: "my", MDA: "md", MEX: "mx", MGL: "mn", MKD: "mk", MLT: "mt", MNE: "me", MON: "mc", NCA: "ni", NED: "nl",
+            NEP: "np", NGR: "ng", NOR: "no", NZL: "nz", PAK: "pk", PAN: "pa", PAR: "py", PER: "pe", PHI: "ph", POL: "pl",
+            POR: "pt", PRK: "kp", PUR: "pr", QAT: "qa", ROU: "ro", RSA: "za", RUS: "ru", SEN: "sn", SGP: "sg", SLO: "si",
+            SMR: "sm", SRB: "rs", SRI: "lk", SUI: "ch", SVK: "sk", SWE: "se", THA: "th", TJK: "tj", TPE: "tw", TUN: "tn",
+            TUR: "tr", UAE: "ae", UKR: "ua", URU: "uy", USA: "us", UZB: "uz", VEN: "ve", VIE: "vn",
+            CHE: "ch", DEU: "de", DNK: "dk", GRC: "gr", NLD: "nl", PRT: "pt", SVN: "si", ZAF: "za",
+        };
+
+        function flagBlock(corner, right) {
+            if (!corner) return "";
+            const code = String(corner.country || corner.countryCode || corner.nationality || corner.flag3 || "")
+                .toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3);
+            if (!code) return "";
+            const iso = corner.flag2 && corner.flag2 !== "un" ? corner.flag2 : (code.length === 2 ? code.toLowerCase() : IOC_TO_ISO2[code]);
+            const img = iso ? `<img class="flag" src="https://flagcdn.com/w80/${iso}.png" alt="" onerror="this.style.visibility='hidden'">` : "";
+            return `<span class="flag-box${right ? " flag-box--right" : ""}">${img}<span class="noc">${code}</span></span>`;
+        }
+
+        function esc(str) {
+            if (str === null || str === undefined) return "";
+            return String(str).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        // LIVE STATE FROM RTDB
+        // ══════════════════════════════════════════════════════════════════
+        function rtOf(court) {
+            if (!court) return null;
+            for (const p of LIVE_PATHS) { if (court.live[p] && typeof court.live[p] === "object") return court.live[p]; }
+            return null;
+        }
+
+        // → { current, live } for one court, or {} when nothing usable is live.
+        function resolveLive(s, cid, list, court) {
+            const r = rtOf(court);
+            if (!r) return {};
+            if (r.stage || r.corners) return resolvePoomsae(s, r, court);
+            if (r.match_id != null || r.blue) return resolveKyorugi(s, cid, list, r);
+            return {};
+        }
+
+        // KYORUGI — FirebaseSyncPlugin pushes the TkStrike state on every
+        // stable update. match_id is the TkStrike fight number; the Firestore
+        // doc is "{tournamentId}_{match_id}" (same id _archive_match uses).
+        // Note: clk in RTDB is NOT live (clock ticks aren't pushed), so no clock.
+        function resolveKyorugi(s, cid, list, r) {
+            const mid = r.match_id;
+            if (mid == null || mid === "" || mid === 0 || mid === "0") return {};
+            const doc = s.matches.get(`${s.entry.id}_${mid}`) || list.find(m => String(m.displayNumber) === String(mid));
+            const won = r.win === "blue" || r.win === "red";
+            const st = r.state || "init";
+
+            if (doc && isDone(doc) && !won) return {};            // stale RTDB — Firestore already has the result
+            if (!doc && !won && st === "init") return {};          // nothing loaded on the scoreboard
+
+            const live = {
+                kind: "kyorugi",
+                status: won ? "win" : r.doctor ? "medical" : st,
+                round: r.round || 1,
+                win: won ? r.win : null,
+                winScore: r.win_score || "",
+                winType: r.win_type || "",
+                blue: r.blue || {},
+                red: r.red || {},
+            };
+            const current = doc || {
+                id: `live_${cid}`, synthetic: true,
+                displayNumber: mid,
+                categoryLabel: r.title || titleFromCode(r.category),
+                blue: { name: r.blue && r.blue.name, flag2: r.blue && r.blue.flag2, flag3: r.blue && r.blue.flag3 },
+                red: { name: r.red && r.red.name, flag2: r.red && r.red.flag2, flag3: r.red && r.red.flag3 },
+            };
+            return { current, live };
+        }
+
+        // POOMSAE — PoomsaeControlPlugin's match_data. Only the match the
+        // operator put on the floor (Preparation) is there.
+        function resolvePoomsae(s, r, court) {
+            if (!r.matchId || !r.stage) return {};
+            const doc = s.matches.get(r.matchId);
+            if (!doc) return {};
+            return {
+                current: doc,
+                live: {
+                    kind: "poomsae",
+                    stage: r.stage,
+                    stageLabel: r.stageLabel || "",
+                    resultsRoundKey: r.resultsRoundKey || null,
+                    poomsaeCount: r.poomsaeCount || (Array.isArray(r.poomsae) && r.poomsae.length) || 1,
+                    corners: r.corners || {},
+                    method: court.method || "sum_all",
+                    timer: {
+                        running: !!r.timerRunning,
+                        base: r.timerRemainingSeconds != null ? r.timerRemainingSeconds : r.stageDurationSeconds,
+                        startedMs: typeof r.timerStartedAtMs === "number" ? r.timerStartedAtMs : null,
+                        startedIso: r.timerStartedAt || null,
+                    },
+                },
+            };
+        }
+
+        // ── Poomsae score maths (mirrors the panel: average of the judges'
+        // totals — highest and lowest dropped with trim_high_low — plus that
+        // poomsae's restart and penalty deductions). ───────────────────────
+        function poomsaeRoundScore(corner, key, method) {
+            if (!corner || !key) return null;
+            const totals = [];
+            Object.values(asMap(corner.judges)).forEach(j => {
+                const r = j && j[key];
+                if (!r || r.submitted !== true) return;
+                const t = r.total != null ? Number(r.total) : Number(r.accuracy || 0) + Number(r.presentation || 0);
+                if (!Number.isNaN(t)) totals.push(t);
+            });
+            if (!totals.length) return null;
+            totals.sort((a, b) => a - b);
+            const used = method === "trim_high_low" && totals.length >= 3 ? totals.slice(1, -1) : totals;
+            const adj = asMap(asMap(corner.roundAdjustments)[key]);
+            const value = used.reduce((a, b) => a + b, 0) / used.length + (Number(adj.restart) || 0) + (Number(adj.penalty) || 0);
+            return Math.max(0, value);
+        }
+
+        // Score shown for a live poomsae corner: only in result stages —
+        // never while the athlete is performing (judges still adjusting).
+        function poomsaeLiveScore(live, side) {
+            const c = live.corners[side];
+            if (!c) return null;
+            if (typeof c.finalScore === "number") return c.finalScore;
+            const st = live.stage;
+            if (st === "results_1" || st === "results_2") {
+                return poomsaeRoundScore(c, live.resultsRoundKey || (st === "results_1" ? "poomsae1" : "poomsae2"), live.method);
+            }
+            if (st === "final_results" || st === "category_results") {
+                const scores = POOMSAE_KEYS.slice(0, Math.max(1, live.poomsaeCount)).map(k => poomsaeRoundScore(c, k, live.method)).filter(v => v != null);
+                return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+            }
+            return null;
+        }
+
+        function docScore(m, side) {
+            const c = m && m[side];
+            if (!c) return null;
+            for (const k of ["finalScore", "score", "totalScore"]) {
+                if (c[k] != null && !Number.isNaN(Number(c[k]))) return Number(c[k]);
+            }
+            return null;
+        }
+
+        // Live timer: remaining = value at start − (server now − server start).
+        function timerRemaining(t) {
+            if (!t || t.base == null) return null;
+            if (!t.running) return Number(t.base);
+            let startMs = t.startedMs;
+            let nowMs = Date.now() + serverOffsetMs;
+            if (startMs == null && t.startedIso) { startMs = Date.parse(t.startedIso); nowMs = Date.now(); }
+            if (startMs == null || Number.isNaN(startMs)) return Number(t.base);
+            return Number(t.base) - (nowMs - startMs) / 1000;
+        }
+
+        function fmtTimer(sec) {
+            if (sec == null) return "";
+            const neg = sec < 0;
+            const s = Math.ceil(Math.abs(sec));
+            return `${neg ? "-" : ""}${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+        }
+
+        function timerHtml(t) {
+            if (!t || t.base == null) return "";
+            const data = `data-base="${t.base}" data-running="${t.running ? 1 : 0}" data-start-ms="${t.startedMs ?? ""}" data-start-iso="${esc(t.startedIso || "")}"`;
+            const rem = timerRemaining(t);
+            return `<span class="tmr${rem < 0 ? " over" : ""}" ${data}>${fmtTimer(rem)}</span>`;
+        }
+
+        // Updates only the timer text — no full re-render every second.
+        function tickTimers() {
+            document.querySelectorAll(".tmr[data-running='1']").forEach(el => {
+                const rem = timerRemaining({
+                    base: Number(el.dataset.base), running: true,
+                    startedMs: el.dataset.startMs ? Number(el.dataset.startMs) : null,
+                    startedIso: el.dataset.startIso || null,
+                });
+                el.textContent = fmtTimer(rem);
+                el.classList.toggle("over", rem < 0);
+            });
+        }
+
+        // Status chip for the current match of a court.
+        function chipHtml(c) {
+            const live = c.live;
+            if (!live) return `<div class="cell chip">NEXT</div>`;
+            if (live.kind === "kyorugi") {
+                switch (live.status) {
+                    case "fight": return `<div class="cell chip chip--live">R${live.round} LIVE</div>`;
+                    case "brk": return `<div class="cell chip chip--hold">BREAK</div>`;
+                    case "medical": return `<div class="cell chip chip--alert">MEDICAL</div>`;
+                    case "ready": return `<div class="cell chip chip--hold">READY</div>`;
+                    case "win": return `<div class="cell chip chip--done">RESULT</div>`;
+                    default: return `<div class="cell chip">NEXT</div>`;
+                }
+            }
+            switch (live.stage) {
+                case "preparation": return `<div class="cell chip chip--hold">PREP</div>`;
+                case "poomsae_1": case "poomsae_2": return `<div class="cell chip chip--live">LIVE</div>`;
+                case "results_1": case "results_2": return `<div class="cell chip chip--done">RESULTS</div>`;
+                case "final_results": return `<div class="cell chip chip--done">FINAL</div>`;
+                case "category_results": return `<div class="cell chip chip--done">RANKING</div>`;
+                default: return `<div class="cell chip">NEXT</div>`;
+            }
+        }
+
+        function isPerforming(live) { return live && live.kind === "poomsae" && (live.stage === "poomsae_1" || live.stage === "poomsae_2"); }
+
+        // ══════════════════════════════════════════════════════════════════
+        // COURT MODEL
+        // ══════════════════════════════════════════════════════════════════
+        function resolveMode(entry, m) {
+            if (entry.view === "duel" || entry.view === "cutoff") return entry.view;
+            if (m) return m.red ? "duel" : "cutoff";
+            return isPoomsae(entry) ? "cutoff" : "duel";
+        }
+
+        function buildCourts() {
+            const out = [];
+            config.tournaments.forEach(entry => {
+                const s = subs.get(entry.id);
+                if (!s) return;
+                const filter = (entry.courts || []).map(String);
+                const byCourt = {};
+                s.matches.forEach(m => {
+                    if (m.courtId == null || m.courtId === "") return;
+                    const cid = String(m.courtId);
+                    (byCourt[cid] = byCourt[cid] || []).push(m);
+                });
+                const ids = new Set([...Object.keys(byCourt), ...s.courts.keys()]);
+                [...ids]
+                    .filter(cid => !filter.length || filter.includes(cid))
+                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                    .forEach(cid => {
+                        const list = (byCourt[cid] || []).sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
+                        const { current: liveCurrent, live } = resolveLive(s, cid, list, s.courts.get(cid));
+                        if (!list.length && !live) return; // nothing on this court at all
+                        const open = list.filter(m => !isDone(m));
+                        const current = liveCurrent || open[0] || null;
+                        out.push({
+                            key: `${entry.id}|${cid}`,
+                            courtId: cid,
+                            label: `${entry.prefix || ""}${cid}`,
+                            entry, s, list, current, live: live || null,
+                            upcoming: open.filter(m => m !== current),
+                            done: list.filter(isDone),
+                            mode: resolveMode(entry, current || list[list.length - 1]),
+                        });
+                    });
+            });
+            return out;
+        }
+
+        // ── Render loop (throttled — a burst of updates = one repaint) ───────
+        function scheduleRender() {
+            if (renderQueued) return;
+            renderQueued = true;
+            const wait = Math.max(0, 300 - (Date.now() - lastRenderAt));
+            setTimeout(() => { renderQueued = false; lastRenderAt = Date.now(); render(); }, wait);
+        }
+
+        function render() {
+            if (!config) return;
+            const main = document.getElementById("main");
+            const pagesEl = document.getElementById("hd-pages");
+
+            const tickerOn = !!(config.showMessage && config.message);
+            const ticker = document.getElementById("ticker");
+            ticker.textContent = config.message || "";
+            ticker.classList.toggle("hidden", !tickerOn);
+
+            const courts = buildCourts();
+            if (courts.length === 0) {
+                pagesEl.innerHTML = "";
+                const loading = [...subs.values()].some(s => !s.ready);
+                main.innerHTML = `<div class="empty-state">${loading ? "Loading schedule…" : "No matches scheduled yet"}</div>`;
+                return;
+            }
+
+            if (config.layout === "focus") {
+                pagesEl.innerHTML = "";
+                const c = courts.find(x => x.key === config.focusCourt) || courts[0];
+                main.innerHTML = c.mode === "cutoff" ? renderFocusCutoff(c) : renderFocusDuel(c);
+                return;
+            }
+
+            const per = config.courtsPerPage;
+            const pageCount = Math.ceil(courts.length / per);
+            pageIndex = pageIndex % pageCount;
+            const pageCourts = courts.slice(pageIndex * per, pageIndex * per + per);
+
+            // Same row height on every page, based on courtsPerPage.
+            const lines = Math.max(3, config.upcomingCount);
+            const available = 1080 - 76 - 16 - (tickerOn ? 72 : 0);
+            const rowH = (available - 10 * (per - 1)) / per;
+            main.style.setProperty("--line-h", `${Math.min(90, rowH / lines)}px`);
+
+            pagesEl.innerHTML = pageCount > 1
+                ? Array.from({ length: pageCount }, (_, i) => `<span class="dot${i === pageIndex ? " on" : ""}"></span>`).join("")
+                : "";
+            main.innerHTML = `<div class="grid" style="grid-template-rows: repeat(${per}, 1fr);">${pageCourts.map(renderCourtRow).join("")}</div>`;
+        }
+
+        // ── Grid row: [current match] [court no.] [upcoming] ────────────────
+        function renderCourtRow(c) {
+            const lines = config.upcomingCount;
+            const ups = c.upcoming.slice(0, lines);
+            const upHtml = ups.map(m => (m.red ? duelUpLine(c, m) : cutUpLine(c, m))).join("")
+                + Array.from({ length: lines - ups.length }, () => `<div class="up up--blank"></div>`).join("");
+            const tag = c.entry.label ? `<small>${esc(c.entry.label)}</small>` : "";
+            return `
+                <section class="row">
+                    ${c.mode === "cutoff" ? cutCurrent(c) : duelCurrent(c)}
+                    <div class="court-no">${tag}${esc(c.label)}</div>
+                    <div class="ups" style="grid-template-rows: repeat(${lines}, 1fr);">${upHtml}</div>
+                </section>`;
+        }
+
+        function emptyCurrent(c) {
+            return `<div class="cur cur--empty">${c.list.length ? "All matches finished" : "No matches scheduled"}</div>`;
+        }
+
+        function titleOf(c, m) {
+            return [phaseLong(m.roundPhase), categoryLabel(c.s, m)].filter(Boolean).join(" · ");
+        }
+
+        function duelCurrent(c) {
+            const m = c.current;
+            if (!m) return emptyCurrent(c);
+            const live = c.live;
+            const w = live && live.kind === "kyorugi" ? live.win : winnerSide(m);
+            const sideCls = side => (w ? (w === side ? " won" : " lost") : "");
+
+            if (isPoomsae(c.entry)) {
+                const scoreCell = side => {
+                    if (isPerforming(live)) return timerHtml(live.timer);
+                    const v = live && live.kind === "poomsae" ? poomsaeLiveScore(live, side) : docScore(m, side);
+                    return esc(fmtScore(v));
+                };
+                const head = live && live.kind === "poomsae" && live.stageLabel ? `${titleOf(c, m)} — ${live.stageLabel}` : titleOf(c, m);
+                const side = sideKey => `
+                    <div class="cell name ${sideKey}${sideCls(sideKey)}">${flagBlock(m[sideKey])}<span class="nm">${esc(participantLabel(c.s, m[sideKey]))}</span><span class="sub">${esc(clubOf(m[sideKey]))}</span></div>
+                    <div class="cell pt score ${sideKey}">${scoreCell(sideKey)}</div>`;
+                return `
+                    <div class="cur duel--simple">
+                        ${chipHtml(c)}
+                        <div class="cell hdr hdr-title"><span>${esc(head)}</span></div>
+                        <div class="cell hdr">${isPerforming(live) ? "Time" : "Score"}</div>
+                        <div class="cell num">${esc(numStr(c, m))}</div>
+                        ${side("blue")}${side("red")}
+                    </div>`;
+            }
+
+            // Kyorugi: round points from RTDB while live, else the archived doc.
+            const src = live && live.kind === "kyorugi" ? live : m;
+            const pts = side => ((src[side] && src[side].points) || []);
+            const kLive = live && live.kind === "kyorugi" ? live : null;
+            const played = kLive ? Math.min(kLive.round, 3) : Math.min(pts("blue").length, pts("red").length, m.round || 3);
+            // TkStrike keeps 3 round slots from the start — rounds not reached yet stay blank.
+            const roundCell = (side, i) => {
+                const p = pts(side)[i];
+                if (!p || i >= played) return "";
+                return p.points != null && p.points !== "" ? p.points : "";
+            };
+            const roundsWon = side => {
+                const b = pts("blue"), r = pts("red");
+                let won = 0, any = false;
+                for (let i = 0; i < played; i++) {
+                    if (!b[i] || !r[i]) continue;
+                    const x = Number(b[i].points) || 0, y = Number(r[i].points) || 0;
+                    // The round still being fought isn't "won" yet (it is once the break starts).
+                    if (kLive && !kLive.win && kLive.status !== "brk" && i === played - 1) continue;
+                    any = true;
+                    if ((side === "blue" ? x > y : y > x)) won++;
+                }
+                return any ? won : "";
+            };
+            const result = live && live.kind === "kyorugi" && live.win
+                ? [live.winScore, (live.winType || "").toUpperCase()].filter(Boolean).join(" ")
+                : !live && isDone(m) ? [m.win_score, (m.win_type || "").toUpperCase()].filter(Boolean).join(" ") : "";
+            const head = result ? `${titleOf(c, m)} — ${result}` : titleOf(c, m);
+            const side = sideKey => `
+                <div class="cell name ${sideKey}${sideCls(sideKey)}">${flagBlock(m[sideKey])}<span class="nm">${esc(participantLabel(c.s, m[sideKey]))}</span></div>
+                ${[0, 1, 2].map(i => `<div class="cell pt ${sideKey}">${esc(roundCell(sideKey, i))}</div>`).join("")}
+                <div class="cell pt score ${sideKey}">${esc(roundsWon(sideKey))}</div>`;
+            return `
+                <div class="cur duel">
+                    ${chipHtml(c)}
+                    <div class="cell hdr hdr-title"><span>${esc(head)}</span></div>
+                    <div class="cell hdr">R1</div><div class="cell hdr">R2</div><div class="cell hdr">R3</div><div class="cell hdr">Score</div>
+                    <div class="cell num">${esc(numStr(c, m))}</div>
+                    ${side("blue")}${side("red")}
+                </div>`;
+        }
+
+        function cutCurrent(c) {
+            const m = c.current;
+            if (!m) return emptyCurrent(c);
+            const live = c.live && c.live.kind === "poomsae" ? c.live : null;
+            const group = c.list.filter(x => groupKey(x) === groupKey(m));
+            const remain = group.filter(x => !isDone(x)).length;
+            const score = live ? poomsaeLiveScore(live, "blue") : docScore(m, "blue");
+            const lastDone = group.filter(x => isDone(x) && x !== m).pop();
+
+            let right = "";
+            if (isPerforming(live) && live.timer.base != null) right = timerHtml(live.timer);
+            else if (score != null) right = esc(fmtScore(score));
+
+            const stageInfo = live && live.stageLabel ? `<span><b>${esc(live.stageLabel)}</b></span>` : "";
+            const poomsae = !live && drawnPoomsae(m) ? `<span>Poomsae <b>${esc(drawnPoomsae(m))}</b></span>` : "";
+            const last = lastDone ? `<span>Last <b>${esc(participantLabel(c.s, lastDone.blue))}</b> ${esc(fmtScore(docScore(lastDone, "blue")))}</span>` : "";
+            const info = [stageInfo, poomsae, last].filter(Boolean).join("") || `<span>${esc(clubOf(m.blue))}</span>`;
+
+            return `
+                <div class="cur cut">
+                    ${chipHtml(c)}
+                    <div class="cell hdr hdr-title"><span>${esc(titleOf(c, m))}</span></div>
+                    <div class="cell hdr">Remain ${remain} / ${group.length}</div>
+                    <div class="cell num">${esc(numStr(c, m))}</div>
+                    <div class="cell blue ${right ? "cut-name" : "cut-name--wide"}">${flagBlock(m.blue)}<span class="nm">${esc(participantLabel(c.s, m.blue))}</span><span class="sub">${esc(clubOf(m.blue))}</span></div>
+                    ${right ? `<div class="cell blue cut-score">${right}</div>` : ""}
+                    <div class="cell cut-info">${info}</div>
+                </div>`;
+        }
+
+        function upPhase(c, m) {
+            const label = categoryLabel(c.s, m);
+            const sub = isPoomsae(c.entry) ? shortCategory(label) : (weightOf(label) || shortCategory(label));
+            return `<div class="cell u-ph"><b>${esc(m.roundPhase || "")}</b><small>${esc(sub)}</small></div>`;
+        }
+
+        function duelUpLine(c, m, extraClass) {
+            return `
+                <div class="up duel-up ${extraClass || ""}">
+                    <div class="cell u-num">${esc(numStr(c, m))}</div>
+                    ${upPhase(c, m)}
+                    <div class="cell blue">${flagBlock(m.blue)}<span class="nm">${esc(participantLabel(c.s, m.blue))}</span></div>
+                    <div class="cell red u-red"><span class="nm">${esc(participantLabel(c.s, m.red))}</span>${flagBlock(m.red, true)}</div>
+                </div>`;
+        }
+
+        function cutUpLine(c, m, extraClass) {
+            return `
+                <div class="up cut-up ${extraClass || ""}">
+                    <div class="cell u-num">${esc(numStr(c, m))}</div>
+                    ${upPhase(c, m)}
+                    <div class="cell blue">${flagBlock(m.blue)}<span class="nm">${esc(participantLabel(c.s, m.blue))}</span></div>
+                    <div class="cell u-club"><span class="nm">${esc(clubOf(m.blue))}</span></div>
+                </div>`;
+        }
+
+        // ── Focus: duel ──────────────────────────────────────────────────────
+        function focusHeader(c) {
+            const sub = c.entry.label || c.entry.title || "";
+            return `<div class="f-court">Court ${esc(c.label)}<small>${esc(sub)}</small></div>`;
+        }
+
+        function renderFocusDuel(c) {
+            const upcoming = c.upcoming.slice(0, 9);
+            const recent = c.done.filter(m => m !== c.current)
+                .sort((a, b) => (b.queuePosition ?? 0) - (a.queuePosition ?? 0)).slice(0, 9);
+
+            const upRows = upcoming.map(m => (m.red ? duelUpLine(c, m, "f-row") : cutUpLine(c, m, "f-row"))).join("");
+
+            const resultRows = recent.map(m => {
+                const w = winnerSide(m);
+                const winner = w ? m[w] : null;
+                let result = [m.win_score, (m.win_type || "").toUpperCase()].filter(Boolean).join(" ");
+                if (!result && isPoomsae(c.entry) && w) result = `${fmtScore(docScore(m, "blue"))} – ${fmtScore(docScore(m, "red"))}`;
+                return `
+                    <div class="f-row rs-row">
+                        <div class="cell u-num">${esc(numStr(c, m))}</div>
+                        <div class="cell ${w || "neutral"}">${flagBlock(winner)}<span class="nm">${esc(winner ? participantLabel(c.s, winner) : m.status === "walkover" ? "Walkover" : "—")}</span></div>
+                        <div class="cell so-status done">${esc(result)}</div>
+                    </div>`;
+            }).join("");
+
+            return `
+                <div class="focus">
+                    ${focusHeader(c)}
+                    <div class="f-main">${duelCurrent(c)}</div>
+                    <div class="f-cols">
+                        <div class="f-panel">
+                            <div class="f-ph">Up next<span>${c.upcoming.length} remaining</span></div>
+                            <div class="f-list">${upRows || `<div class="f-muted">No more matches on this court.</div>`}</div>
+                        </div>
+                        <div class="f-panel">
+                            <div class="f-ph">Recent results</div>
+                            <div class="f-list">${resultRows || `<div class="f-muted">No results yet.</div>`}</div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        // ── Focus: cut-off (Starting Order · Current Rank · Up Next) ─────────
+        function scoreInGroup(c, m) {
+            if (c.live && c.live.kind === "poomsae" && m === c.current) return poomsaeLiveScore(c.live, "blue");
+            return docScore(m, "blue");
+        }
+
+        function startingOrderRows(c, group, current, maxRows) {
+            let start = 0;
+            const idx = current ? group.indexOf(current) : -1;
+            if (idx > 2) start = Math.min(idx - 2, Math.max(0, group.length - maxRows));
+            return group.slice(start, start + maxRows).map(m => {
+                const isCurrent = m === current;
+                const done = isDone(m) && !isCurrent;
+                let status;
+                if (isCurrent && c.live && c.live.kind === "poomsae") {
+                    status = isPerforming(c.live)
+                        ? `<div class="cell so-status running">${timerHtml(c.live.timer) || "Running"}</div>`
+                        : scoreInGroup(c, m) != null
+                            ? `<div class="cell so-status done">${esc(fmtScore(scoreInGroup(c, m)))}</div>`
+                            : `<div class="cell so-status running">${c.live.stage === "preparation" ? "Ready" : "Running"}</div>`;
+                } else if (isCurrent) {
+                    status = `<div class="cell so-status running">Next</div>`;
+                } else if (done) {
+                    status = `<div class="cell so-status done">${esc(fmtScore(docScore(m, "blue"))) || "Done"}</div>`;
+                } else {
+                    status = `<div class="cell so-status">Waiting</div>`;
+                }
+                return `
+                    <div class="f-row so-row${isCurrent ? " is-current" : ""}${done ? " is-done" : ""}">
+                        <div class="cell u-num">${esc(numStr(c, m))}</div>
+                        <div class="cell blue">${flagBlock(m.blue)}<span class="nm">${esc(participantLabel(c.s, m.blue))}</span></div>
+                        ${status}
+                    </div>`;
+            }).join("");
+        }
+
+        function renderFocusCutoff(c) {
+            const m = c.current || c.list[c.list.length - 1];
+            const group = c.list.filter(x => groupKey(x) === groupKey(m));
+            const remain = group.filter(x => !isDone(x)).length;
+
+            const ranked = group
+                .map(x => ({ m: x, score: scoreInGroup(c, x) }))
+                .filter(x => x.score != null)
+                .sort((a, b) => b.score - a.score);
+            let place = 0;
+            const rankRows = ranked.slice(0, 9).map((r, i) => {
+                if (i === 0 || r.score !== ranked[i - 1].score) place = i + 1; // ties share a place
+                return `
+                    <div class="f-row rk-row${r.m === c.current && c.live ? " is-live" : ""}">
+                        <div class="cell rk-pos">${place}</div>
+                        <div class="cell blue">${flagBlock(r.m.blue)}<span class="nm">${esc(participantLabel(c.s, r.m.blue))}</span></div>
+                        <div class="cell rk-score">${esc(fmtScore(r.score))}</div>
+                    </div>`;
+            }).join("");
+
+            const nextFirst = c.upcoming.find(x => groupKey(x) !== groupKey(m));
+            const nextGroup = nextFirst ? c.list.filter(x => groupKey(x) === groupKey(nextFirst)) : [];
+            const nextLabel = nextFirst ? [phaseLong(nextFirst.roundPhase), shortCategory(categoryLabel(c.s, nextFirst))].filter(Boolean).join(" · ") : "";
+            const extra = c.live && c.live.kind === "poomsae" && c.live.stageLabel ? c.live.stageLabel : drawnPoomsae(m);
+
+            return `
+                <div class="focus">
+                    ${focusHeader(c)}
+                    <div class="f-bar">${esc([phaseLong(m.roundPhase), categoryLabel(c.s, m)].filter(Boolean).join(" / "))}${extra ? ` — ${esc(extra)}` : ""}</div>
+                    <div class="f-3">
+                        <div class="f-panel">
+                            <div class="f-ph">Starting Order<span>Remain ${remain} / Total ${group.length}</span></div>
+                            <div class="f-list">${startingOrderRows(c, group, c.current, 11)}</div>
+                        </div>
+                        <div class="f-panel">
+                            <div class="f-ph">Current Rank</div>
+                            <div class="f-list">${rankRows || `<div class="f-muted">No scores yet.</div>`}</div>
+                        </div>
+                        <div class="f-panel">
+                            <div class="f-ph">Up Next<span>${esc(nextLabel)}</span></div>
+                            <div class="f-list">${nextGroup.length ? startingOrderRows(c, nextGroup, null, 11) : `<div class="f-muted">Nothing else on this court.</div>`}</div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+    </script>
+</body>
+
+</html>

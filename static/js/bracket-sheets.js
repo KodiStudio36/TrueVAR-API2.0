@@ -28,13 +28,18 @@
  *
  * BRACKET SHAPE the renderers accept:
  *   {
- *     categoryLabel, entries: [{entryId, name, country, clubName}],
+ *     categoryLabel, entries: [{entryId, name, country, clubName, associationIds?}],
  *     rounds: [[match]], bracketSize,
  *     system?:     "single_elimination" (default) | "cut_off",
  *     placements?: { entryId: 1 | 2 | 3 | 5 ... }   // fills Classification
  *   }
  *   match: { matchId, status, blue, red, winnerCorner?, displayNumber,
  *            roundPhase, win?, win_score?, win_type? }
+ *
+ * ASSOCIATION ID: when an entry carries associationIds (one per member),
+ * the last 4 characters of each are printed small and light on top of the
+ * bracket line, on the bracket side of the name — after it on the left
+ * half, before it on the right half — e.g. "(2345/6789)" for a pair.
  *
  * OPTIONS (every public call):
  *   { title, date, location,
@@ -47,6 +52,7 @@
 
     const PX_MM = 25.4 / 96;                 // layout is in CSS px @ 96dpi
     const INK = "#1e293b", TEXT = "#0f172a", MUTED = "#64748b";
+    const SUBTLE = "#94a3b8";                // association-ID tag next to names
     const ELIM_W = 1123, ELIM_H = 794;       // A4 landscape
     const CUT_W = 794, CUT_H = 1123;         // A4 portrait
     const BOX_HALF_W = 15;
@@ -353,6 +359,27 @@
         return (e && e.clubName) || "";
     }
 
+    // Last 4 characters of each member's association ID (the whole ID if
+    // it's shorter), e.g. "(K-12)" or "(2345/6789)" for a pair. Empty when
+    // nobody has one.
+    function assocTag(ids) {
+        const list = (Array.isArray(ids) ? ids : [ids])
+            .map(id => (id == null ? "" : String(id).trim()))
+            .filter(Boolean)
+            .map(id => id.slice(-4));
+        return list.length ? `(${list.join("/")})` : "";
+    }
+
+    function entryAssocTag(entry) {
+        return entry ? assocTag(entry.associationIds || entry.associationId) : "";
+    }
+
+    function participantAssocTag(bracket, p) {
+        if (!p || !p.entryId) return "";
+        const e = findEntry(bracket, p.entryId);
+        return assocTag((e && (e.associationIds || e.associationId)) || p.associationIds || p.associationId);
+    }
+
     function fitFontSize(s, str, start, min, maxWidth, bold) {
         let size = start;
         while (size > min && s.measure(str, size, bold) > maxWidth) size -= 0.5;
@@ -387,6 +414,7 @@
         const lookup = matchLookup(bracket);
         const label = p => participantLabel(bracket, p, lookup, o.formatNumber);
         const club = p => participantClub(bracket, p);
+        const assoc = p => participantAssocTag(bracket, p);
 
         // Header
         s.image(assets.left, 10, 0, 72, 64);
@@ -402,22 +430,33 @@
             const result = o.resultLabel(m);
             if (result) s.text(x, y + 25, result, { anchor: "middle", size: 9, color: MUTED });
         }
-        // Name (+ club underneath), both aligned to the page's OUTER edge:
-        // left half → left-aligned at the left margin, right half →
-        // right-aligned at the right margin. (Anchoring the club at the
-        // name's start pushed long club names off the right edge.) A club
-        // wider than the name column is shrunk to fit.
-        // Returns the x where the feed line starts.
+        // Name (+ club underneath), aligned to the page's OUTER edge: left
+        // half → left-aligned at the left margin, right half →
+        // right-aligned at the right margin. A club wider than the name
+        // column is shrunk to fit.
+        //
+        // The feed line starts right where the name ends, and the small
+        // association-ID tag sits ON TOP of that line, on the bracket side
+        // of the name: left half "Name (SVK) (2345)───", right half
+        // "───(2345) Name (SVK)". Returns the x where the feed line starts.
         function nameBlock(nameX, y, dir, p, nameSize, clubSize, maxClubW) {
-            const name = label(p), clubName = club(p);
+            const name = label(p), clubName = club(p), tag = assoc(p);
             const anchor = dir === 1 ? "start" : "end";
-            s.text(nameX, y - 1.5, name, { anchor, size: nameSize });
+            const tagSize = Math.max(5, nameSize * 0.7);
             const w = s.measure(name, nameSize);
+            const lineStartX = dir === 1 ? nameX + w + 2 : nameX - w - 2;
+
+            s.text(nameX, y - 1.5, name, { anchor, size: nameSize });
+            if (tag) {
+                // Raised slightly so it clears the line drawn underneath it.
+                s.text(lineStartX + dir * 1.5, y - 3, tag, { anchor, size: tagSize, color: SUBTLE });
+            }
+
             if (clubName) {
                 const size = fitFontSize(s, clubName, clubSize, 5, maxClubW || NAME_W - 6);
                 s.text(nameX, y + clubSize + 0.5, clubName, { anchor, size, color: MUTED });
             }
-            return dir === 1 ? nameX + w + 4 : nameX - w - 4;
+            return lineStartX;
         }
         function merge(xFeed1, y1, xFeed2, y2, xOut) {
             s.line(xFeed1, y1, xOut, y1);
@@ -614,13 +653,22 @@
                     no: String(i + 1), matchNo: o.formatNumber(m),
                     competitor: entry ? entry.name : "", org: entry && entry.clubName ? entry.clubName : "",
                 };
+                const tag = entryAssocTag(entry);
                 let cx = tableX;
                 cols.forEach(c => {
                     s.rect(cx, y, c.w, ROW_H, { strokeWidth: 0.75 });
                     const v = values[c.key];
-                    if (v) {
+                    const baseY = y + ROW_H / 2 + 3.5;
+                    if (v && c.key === "competitor" && tag) {
+                        // Name, then the small association-ID tag right after it.
+                        const tagSize = 6;
+                        const tagW = s.measure(tag, tagSize) + 3;
+                        const size = fitFontSize(s, v, 8, 6, c.w - 10 - tagW);
+                        s.text(cx + 6, baseY, v, { size });
+                        s.text(cx + 6 + s.measure(v, size) + 3, baseY - 2, tag, { size: tagSize, color: SUBTLE });
+                    } else if (v) {
                         const size = fitFontSize(s, v, 8, 6, c.w - 10);
-                        s.text(c.center ? cx + c.w / 2 : cx + 6, y + ROW_H / 2 + 3.5, v, { anchor: c.center ? "middle" : "start", size });
+                        s.text(c.center ? cx + c.w / 2 : cx + 6, baseY, v, { anchor: c.center ? "middle" : "start", size });
                     }
                     cx += c.w;
                 });
@@ -742,7 +790,7 @@
     global.BracketSheets = {
         configure, prepareAssets, applyPdfFont, pdfText, getLogoAssets,
         toSVG, toSVGPages, buildPdf, downloadPdf, print,
-        isPrintable, matchResultLabel,
+        isPrintable, matchResultLabel, assocTag,
         PAGE: { ELIMINATION: { width: ELIM_W, height: ELIM_H }, CUT_OFF: { width: CUT_W, height: CUT_H } },
     };
 })(typeof window !== "undefined" ? window : globalThis);

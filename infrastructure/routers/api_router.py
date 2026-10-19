@@ -29,6 +29,12 @@ from usecases.tournament_usecase import DeleteTournamentUseCase
 
 from domain.ports.tournament_port import TournamentPort
 
+from infrastructure.athlete_roles import (
+    ROLE_COACH, ROLE_REFEREE, ROLE_LABELS,
+    TOURNAMENT_OFFICIAL_ROLES, CLUB_REGISTRABLE_ROLES,
+    sport_data_of, roles_of, has_role, role_details_of, apply_roles,
+)
+
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-app-key-change-in-production")
 JWT_ALGORITHM = "HS256"
 
@@ -136,6 +142,10 @@ class CreateAthleteRequest(BaseModel):
     associationId: Optional[str] = None  # optional, sport-scoped national/association federation ID
     isPara: bool = False
     paraCategory: Optional[str] = None   # required (one of PARA_CATEGORIES) when isPara is True
+    # Extra sport-scoped roles on top of competing (see
+    # infrastructure/athlete_roles.py). Clubs can only set "coach" here.
+    roles: List[str] = []
+    roleDetails: Dict[str, Dict[str, str]] = {}  # {role: {licenseId, level}}
 
 
 class UpdateAthleteRequest(BaseModel):
@@ -148,6 +158,8 @@ class UpdateAthleteRequest(BaseModel):
     associationId: Optional[str] = None
     isPara: bool = False
     paraCategory: Optional[str] = None
+    roles: List[str] = []
+    roleDetails: Dict[str, Dict[str, str]] = {}
 
 VALID_STATUSES = {"active", "archived"}
 
@@ -336,6 +348,7 @@ def _sport_club_fields(a: dict, sport_key: Optional[str]) -> dict:
         "rank": sport_data.get("rank"),
         "isPara": bool(sport_data.get("isPara")),
         "paraCategory": sport_data.get("paraCategory"),
+        "roles": roles_of(sport_data),
     }
 
 
@@ -343,6 +356,7 @@ def _sport_club_fields(a: dict, sport_key: Optional[str]) -> dict:
 def search_athletes(
     q: str = Query(..., min_length=1),
     limit: int = Query(8, ge=1, le=20),
+    role: Optional[str] = Query(None, description="Only people holding this role (coach/referee)"),
     user: Optional[dict] = Depends(get_current_user),
 ):
     admin_club_id = get_admin_club_id(user)
@@ -371,6 +385,10 @@ def search_athletes(
                 continue
             seen_ids.add(doc.id)
             data = doc.to_dict()
+            # Filtered here, not in the query, so docs without a roles
+            # field need no index or migration.
+            if role and not has_role(sport_data_of(data, club_sport), role):
+                continue
             candidates.append({"id": doc.id, **data, "birthYear": _birth_year(data)})
 
     candidates.sort(key=lambda a: (a.get("lastName", ""), a.get("firstName", "")))
@@ -393,6 +411,7 @@ def search_athletes_admin(
     q: str = Query(..., min_length=1),
     sport: str = Query(..., description="Which sport's club membership to surface"),
     limit: int = Query(8, ge=1, le=20),
+    role: Optional[str] = Query(None, description="Only people holding this role (coach/referee)"),
 ):
     """
     Staff-only athlete search. Backs both the category manager's "+ Add
@@ -415,6 +434,8 @@ def search_athletes_admin(
                 continue
             seen_ids.add(doc.id)
             data = doc.to_dict()
+            if role and not has_role(sport_data_of(data, sport_key), role):
+                continue
             candidates.append({"id": doc.id, **data, "birthYear": _birth_year(data)})
 
     candidates.sort(key=lambda a: (a.get("lastName", ""), a.get("firstName", "")))
@@ -769,6 +790,8 @@ def get_athlete_endpoint(athlete_id: str, user: Optional[dict] = Depends(get_cur
         "rank": sport_data.get("rank"),
         "isPara": sport_data.get("isPara", False),
         "paraCategory": sport_data.get("paraCategory"),
+        "roles": roles_of(sport_data),
+        "roleDetails": sport_data.get("roleDetails") or {},
     }
 
 
@@ -823,6 +846,9 @@ async def update_athlete_endpoint(
         updated_sport_entry["associationId"] = association_id
     else:
         updated_sport_entry.pop("associationId", None)
+
+    # Only "coach" follows the form; referee (granted elsewhere) is kept.
+    apply_roles(updated_sport_entry, payload.roles, payload.roleDetails)
 
     athlete_ref.update({
         "firstName": normalize_name(payload.firstName),
@@ -1629,6 +1655,7 @@ def get_firebase_client_config():
         "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET", ""),
         "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID", ""),
         "appId": os.getenv("FIREBASE_APP_ID", ""),
+        "databaseURL": "https://easytkd-default-rtdb.europe-west1.firebasedatabase.app/"
     }
 
 
@@ -1873,11 +1900,13 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
     Single source of truth for the client-generated weigh-in sheet and
     backup registration sheet. Fresh read of active registrations,
     grouped by club. Registrations with no clubId are returned separately
-    under "unassigned".
+    under "unassigned". Birth year and rank are read straight from each
+    athlete doc (birthday, sports.{sport}.rank).
     """
     tournament = repo.getTournament(tournament_id)
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
+    sport = (tournament.sport or "").lower()
 
     tournament_ref = db.collection("tournaments").document(tournament_id)
     regs = [
@@ -1903,16 +1932,19 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
         })
         for athlete_id in r.get("athleteIds", []):
             a = athletes.get(athlete_id, {})
+            sport_data = (a.get("sports") or {}).get(sport) or {}
             club["entries"].append({
                 "athleteId": athlete_id,
-                "lastName": (a.get("lastName") or "").title(),
-                "firstName": (a.get("firstName") or "").title(),
+                "lastName": a.get("lastNameDisplay") or (a.get("lastName") or "").title(),
+                "firstName": a.get("firstNameDisplay") or (a.get("firstName") or "").title(),
                 "gender": r.get("genderCode"),
                 "categoryLabel": r.get("categoryLabel"),
+                "birthYear": _birth_year(a),
+                "rank": sport_data.get("rank"),
             })
 
     for club in by_club.values():
-        club["entries"].sort(key=lambda e: (e["lastName"], e["firstName"]))
+        club["entries"].sort(key=lambda e: (e["lastName"].lower(), e["firstName"].lower()))
 
     real_clubs = sorted(
         (c for c in by_club.values() if c["clubId"]),
@@ -1924,7 +1956,7 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
         "tournamentId": tournament_id,
         "tournamentTitle": tournament.title,
         "clubs": real_clubs,
-        "unassigned": unassigned,  # null if every registration has a real club
+        "unassigned": unassigned,
     }
 
 
@@ -2206,6 +2238,8 @@ async def create_athlete_endpoint(payload: CreateAthleteRequest, user: Optional[
     if association_id:
         sport_entry["associationId"] = association_id
 
+    apply_roles(sport_entry, payload.roles, payload.roleDetails)
+
     athlete_data = {
         "firstName": normalize_name(payload.firstName),
         "lastName": normalize_name(payload.lastName),
@@ -2284,3 +2318,361 @@ def list_tokens_paginated(
         "has_more": len(tokens) == limit,
         "next_offset": offset + len(tokens),
     }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TOURNAMENT OFFICIALS — coaches / referees
+# ═══════════════════════════════════════════════════════════════════════════
+# Registering coaches/referees on a tournament, putting them on matches,
+# and their coaching/refereeing stats. Roles themselves live on the
+# athlete profile (infrastructure/athlete_roles.py).
+#
+# DATA MODEL
+# ──────────
+# tournaments/{tid}/official_registrations/{role}_{athleteId}
+#     tournamentId, role ("coach" | "referee"), athleteId, name,
+#     clubId, clubName, country, associationId, licenseId, level,
+#     status ("active" | "withdrawn"), registeredBy ("club" | "staff"),
+#     registeredAt, withdrawnAt
+#
+# One collection for every official role, so adding e.g. "doctor" or
+# "team_manager" later is a new entry in athlete_roles.VALID_ROLES, not a new
+# collection. Kept separate from `registrations` on purpose: officials are not
+# category entries and must never show up in brackets, categoryCounts or
+# weigh-in sheets.
+#
+# Match docs (sports/{s}/disciplines/{d}/matches/{id}) gain:
+#     blue.coach / red.coach = {athleteId, name, clubId, clubName}
+#     coachIds   = [athleteId, ...]          ← flat, for array_contains stats
+#     referees   = [{athleteId, name, ...}]  ← [0] is the centre referee
+#     refereeIds = [athleteId, ...]
+#
+# INDEXES: the stats endpoints use collection-group queries on "matches".
+# Enable collection-group scope for the single-field indexes on
+# `coachIds` and `refereeIds` (array-contains) in the Firestore console —
+# the first call logs a link that creates them.
+
+OFFICIALS = "official_registrations"
+OFFICIAL_DECIDED_STATUSES = ("done", "walkover", "completed")
+
+def _tournament_ref(tournament_id: str):
+    return db.collection("tournaments").document(tournament_id)
+
+
+def _official_ref(tournament_id: str, role: str, athlete_id: str):
+    return _tournament_ref(tournament_id).collection(OFFICIALS).document(f"{role}_{athlete_id}")
+
+
+def _display_name(a: dict) -> str:
+    return a.get("displayName") or f"{a.get('firstName', '')} {a.get('lastName', '')}".strip()
+
+
+def _check_role(role: str, club_facing: bool) -> str:
+    role = (role or "").strip().lower()
+    if role not in TOURNAMENT_OFFICIAL_ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of {list(TOURNAMENT_OFFICIAL_ROLES)}")
+    if club_facing and role not in CLUB_REGISTRABLE_ROLES:
+        raise HTTPException(status_code=403, detail=f"{ROLE_LABELS[role]}s are assigned by tournament staff.")
+    return role
+
+
+# ── TOURNAMENT OFFICIAL REGISTRATION ─────────────────────────────────────
+
+class RegisterOfficialRequest(BaseModel):
+    athleteId: str
+    role: str = ROLE_COACH
+
+
+def _execute_official_register(
+    tournament_id: str, role: str, athlete_id: str,
+    requesting_club_id: Optional[str], enforce_club: bool,
+) -> None:
+    t_doc = _tournament_ref(tournament_id).get()
+    if not t_doc.exists:
+        raise HTTPException(status_code=404, detail="Tournament not found.")
+    sport = (t_doc.to_dict() or {}).get("sport")
+
+    a_doc = db.collection("athletes").document(athlete_id).get()
+    if not a_doc.exists:
+        raise HTTPException(status_code=404, detail=f"Athlete {athlete_id} not found.")
+    athlete = a_doc.to_dict() or {}
+    sport_data = sport_data_of(athlete, sport)
+
+    if enforce_club and sport_data.get("clubId") != requesting_club_id:
+        raise HTTPException(status_code=403, detail="You can only register people from your own club.")
+    # Role check applies to staff too: a referee slot must point at someone
+    # who actually holds referee status on their profile.
+    if not has_role(sport_data, role):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{_display_name(athlete)} does not have {ROLE_LABELS[role]} status on their profile.",
+        )
+
+    details = role_details_of(sport_data, role)
+    reg_ref = _official_ref(tournament_id, role, athlete_id)
+    doc = {
+        "tournamentId": tournament_id,
+        "role": role,
+        "athleteId": athlete_id,
+        "name": _display_name(athlete),
+        "clubId": sport_data.get("clubId"),
+        "clubName": sport_data.get("clubName"),
+        "country": athlete.get("country"),
+        "associationId": sport_data.get("associationId"),
+        "licenseId": details.get("licenseId"),
+        "level": details.get("level"),
+        "status": "active",
+        "registeredBy": "club" if enforce_club else "staff",
+        "registeredAt": firestore.SERVER_TIMESTAMP,
+    }
+
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _register(tx):
+        existing = reg_ref.get(transaction=tx)
+        if existing.exists and existing.to_dict().get("status", "active") == "active":
+            raise HTTPException(status_code=409, detail=f"Already registered as {ROLE_LABELS[role].lower()}.")
+        tx.set(reg_ref, doc)
+
+    try:
+        _register(transaction)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
+
+
+def _execute_official_remove(
+    tournament_id: str, role: str, athlete_id: str,
+    requesting_club_id: Optional[str], enforce_club: bool,
+) -> None:
+    reg_ref = _official_ref(tournament_id, role, athlete_id)
+    transaction = db.transaction()
+
+    @firestore.transactional
+    def _remove(tx):
+        snap = reg_ref.get(transaction=tx)
+        if not snap.exists or snap.to_dict().get("status", "active") != "active":
+            raise HTTPException(status_code=404, detail="Registration not found.")
+        if enforce_club and snap.to_dict().get("clubId") != requesting_club_id:
+            raise HTTPException(status_code=403, detail="You can only remove people from your own club.")
+        tx.set(reg_ref, {"status": "withdrawn", "withdrawnAt": firestore.SERVER_TIMESTAMP}, merge=True)
+
+    try:
+        _remove(transaction)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Remove failed: {exc}")
+
+
+@router.get("/tournaments/{tournament_id}/officials")
+def list_tournament_officials(tournament_id: str, role: Optional[str] = Query(None)):
+    """Public list (same visibility as division rosters)."""
+    out = []
+    for d in _tournament_ref(tournament_id).collection(OFFICIALS).stream():
+        o = d.to_dict() or {}
+        if o.get("status", "active") != "active":
+            continue
+        if role and o.get("role") != role:
+            continue
+        out.append({k: o.get(k) for k in (
+            "athleteId", "role", "name", "clubId", "clubName", "country", "licenseId", "level",
+        )})
+    out.sort(key=lambda o: ((o.get("clubName") or "").lower(), (o.get("name") or "").lower()))
+    return {"tournamentId": tournament_id, "officials": out}
+
+
+@router.post("/tournaments/{tournament_id}/officials", status_code=status.HTTP_201_CREATED)
+def register_official_endpoint(
+    tournament_id: str,
+    payload: RegisterOfficialRequest,
+    user: Optional[dict] = Depends(get_current_user),
+):
+    admin_club_id = get_admin_club_id(user)
+    if not admin_club_id:
+        raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
+    role = _check_role(payload.role, club_facing=True)
+    _check_registration_window(tournament_id)
+    _execute_official_register(tournament_id, role, payload.athleteId, admin_club_id, enforce_club=True)
+    return {"message": f"{ROLE_LABELS[role]} registered"}
+
+
+@router.post("/tournaments/{tournament_id}/officials/admin-add", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_operator("registrations:manage"))])
+def admin_register_official_endpoint(tournament_id: str, payload: RegisterOfficialRequest):
+    role = _check_role(payload.role, club_facing=False)
+    _execute_official_register(tournament_id, role, payload.athleteId, None, enforce_club=False)
+    return {"message": f"{ROLE_LABELS[role]} registered"}
+
+
+@router.delete("/tournaments/{tournament_id}/officials/{role}/{athlete_id}")
+def remove_official_endpoint(
+    tournament_id: str, role: str, athlete_id: str,
+    user: Optional[dict] = Depends(get_current_user),
+):
+    admin_club_id = get_admin_club_id(user)
+    if not admin_club_id:
+        raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
+    role = _check_role(role, club_facing=True)
+    _check_tournament_not_started(tournament_id)
+    _execute_official_remove(tournament_id, role, athlete_id, admin_club_id, enforce_club=True)
+    return {"message": "Registration removed"}
+
+
+@router.delete("/tournaments/{tournament_id}/officials/admin-remove/{role}/{athlete_id}",
+               dependencies=[Depends(require_operator("registrations:manage"))])
+def admin_remove_official_endpoint(tournament_id: str, role: str, athlete_id: str):
+    role = _check_role(role, club_facing=False)
+    _execute_official_remove(tournament_id, role, athlete_id, None, enforce_club=False)
+    return {"message": "Registration removed"}
+
+
+# ── MATCH OFFICIALS ──────────────────────────────────────────────────────
+# Fields you leave out are untouched; fields sent as null are cleared.
+
+class MatchOfficialsRequest(BaseModel):
+    blueCoachId: Optional[str] = None
+    redCoachId: Optional[str] = None
+    refereeIds: Optional[List[str]] = None  # [0] = centre referee
+
+
+def _active_official(tournament_id: str, role: str, athlete_id: str) -> dict:
+    snap = _official_ref(tournament_id, role, athlete_id).get()
+    if not snap.exists or snap.to_dict().get("status", "active") != "active":
+        raise HTTPException(
+            status_code=400,
+            detail=f"{athlete_id} is not registered as {ROLE_LABELS[role].lower()} for this tournament.",
+        )
+    return snap.to_dict()
+
+
+def _official_ref_payload(o: dict) -> dict:
+    return {"athleteId": o.get("athleteId"), "name": o.get("name"),
+            "clubId": o.get("clubId"), "clubName": o.get("clubName")}
+
+
+@router.patch("/matches/{sport}/{discipline}/{match_id}/officials",
+              dependencies=[Depends(require_operator("matches:manage"))])
+def set_match_officials_endpoint(sport: str, discipline: str, match_id: str, payload: MatchOfficialsRequest):
+    match_ref = (
+        db.collection("sports").document(sport)
+        .collection("disciplines").document(discipline)
+        .collection("matches").document(match_id)
+    )
+    snap = match_ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Match not found")
+    m = snap.to_dict() or {}
+    tournament_id = m.get("tournamentId")
+    sent = getattr(payload, "model_fields_set", None) or getattr(payload, "__fields_set__", set())
+
+    update: Dict = {}
+    coaches = {c: (m.get(c) or {}).get("coach") for c in ("blue", "red")}
+
+    for corner, field in (("blue", "blueCoachId"), ("red", "redCoachId")):
+        if field not in sent:
+            continue
+        athlete_id = getattr(payload, field)
+        if m.get(corner) is None:
+            if athlete_id:
+                raise HTTPException(status_code=400, detail=f"This match has no {corner} corner.")
+            continue
+        if athlete_id:
+            coach = _official_ref_payload(_active_official(tournament_id, ROLE_COACH, athlete_id))
+            update[f"{corner}.coach"] = coach
+        else:
+            coach = None
+            update[f"{corner}.coach"] = firestore.DELETE_FIELD
+        coaches[corner] = coach
+
+    if {"blueCoachId", "redCoachId"} & set(sent):
+        update["coachIds"] = list(dict.fromkeys(c["athleteId"] for c in coaches.values() if c))
+
+    if "refereeIds" in sent:
+        ids = list(dict.fromkeys(payload.refereeIds or []))
+        update["referees"] = [_official_ref_payload(_active_official(tournament_id, ROLE_REFEREE, a)) for a in ids]
+        update["refereeIds"] = ids
+
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update.")
+    match_ref.update(update)
+    return {"message": "Match officials updated"}
+
+
+# ── STATS ────────────────────────────────────────────────────────────────
+
+def _official_stats(athlete_id: str) -> dict:
+    coaching = {"matches": 0, "decided": 0, "wins": 0, "losses": 0, "rankedMatches": 0}
+    refereeing = {"matches": 0, "asCentreReferee": 0, "rankedMatches": 0}
+    by_tournament: Dict[str, dict] = {}
+
+    def _t(m: dict) -> dict:
+        tid = m.get("tournamentId") or "unknown"
+        return by_tournament.setdefault(tid, {
+            "tournamentId": tid, "tournamentName": m.get("tournamentName"),
+            "coached": 0, "wins": 0, "losses": 0, "refereed": 0,
+        })
+
+    for d in db.collection_group("matches").where("coachIds", "array_contains", athlete_id).stream():
+        m = d.to_dict() or {}
+        t = _t(m)
+        coaching["matches"] += 1
+        t["coached"] += 1
+        if m.get("isRanked", True):
+            coaching["rankedMatches"] += 1
+        winner = m.get("winnerEntryId")
+        if m.get("status") not in OFFICIAL_DECIDED_STATUSES or not winner:
+            continue
+        coaching["decided"] += 1
+        for corner in ("blue", "red"):
+            c = m.get(corner) or {}
+            if (c.get("coach") or {}).get("athleteId") != athlete_id:
+                continue
+            key = "wins" if c.get("entryId") == winner else "losses"
+            coaching[key] += 1
+            t[key] += 1
+
+    for d in db.collection_group("matches").where("refereeIds", "array_contains", athlete_id).stream():
+        m = d.to_dict() or {}
+        refereeing["matches"] += 1
+        _t(m)["refereed"] += 1
+        if m.get("isRanked", True):
+            refereeing["rankedMatches"] += 1
+        if (m.get("refereeIds") or [None])[0] == athlete_id:
+            refereeing["asCentreReferee"] += 1
+
+    played = coaching["wins"] + coaching["losses"]
+    coaching["winRate"] = round(coaching["wins"] / played, 3) if played else None
+    coaching["tournaments"] = sum(1 for t in by_tournament.values() if t["coached"])
+    refereeing["tournaments"] = sum(1 for t in by_tournament.values() if t["refereed"])
+
+    return {
+        "athleteId": athlete_id,
+        "coaching": coaching,
+        "refereeing": refereeing,
+        "tournaments": sorted(by_tournament.values(), key=lambda t: (t["tournamentName"] or "")),
+    }
+
+
+@router.get("/athletes/{athlete_id}/official-stats")
+def athlete_official_stats_endpoint(athlete_id: str, user: Optional[dict] = Depends(get_current_user)):
+    """Club admins: stats for people in their own club."""
+    admin_club_id = get_admin_club_id(user)
+    if not admin_club_id:
+        raise HTTPException(status_code=403, detail="Requires an ADMIN role in a club.")
+    club_doc = db.collection("clubs").document(admin_club_id).get()
+    club_sport = (club_doc.to_dict() or {}).get("sport") if club_doc.exists else None
+
+    a_doc = db.collection("athletes").document(athlete_id).get()
+    if not a_doc.exists:
+        raise HTTPException(status_code=404, detail="Athlete not found.")
+    if sport_data_of(a_doc.to_dict(), club_sport).get("clubId") != admin_club_id:
+        raise HTTPException(status_code=403, detail="You can only view people from your own club.")
+    return _official_stats(athlete_id)
+
+
+@router.get("/admin/athletes/{athlete_id}/official-stats",
+            dependencies=[Depends(require_operator("registrations:manage"))])
+def admin_athlete_official_stats_endpoint(athlete_id: str):
+    return _official_stats(athlete_id)

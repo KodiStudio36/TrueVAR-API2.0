@@ -308,6 +308,37 @@
     {% endif %}
 
     {# ═══════════════════════════════════════════════════════════════════════════
+    SCHEDULE BOARD CARD — venue big-screen running order. Can combine several
+    tournaments of one event (e.g. Kyorugi + Poomsae) on one screen.
+    ═══════════════════════════════════════════════════════════════════════════ #}
+    <div class="card-panel">
+        <div class="panel-header" style="margin-bottom:1rem">
+            <div class="panel-title-group">
+                <span class="panel-eyebrow">Display</span>
+                <h2 class="panel-title" style="font-size:1.4rem">Schedule Board</h2>
+            </div>
+        </div>
+        <p class="text-muted" style="margin-bottom:1.25rem;">
+            Auto-updating big-screen running order for the venue — every court's live match with scores
+            and its upcoming matches, blue vs red for elimination brackets and starting order for cut-off.
+            Add other tournaments of the same event so one screen shows all disciplines.
+        </p>
+        <div style="display:flex; gap:.5rem; flex-wrap:wrap;">
+            <a href="/dashboard/tournaments/{{ tournament.id }}/schedule-board" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="3" width="20" height="14" rx="2" />
+                    <path d="M8 21h8M12 17v4" />
+                </svg>
+                Manage Board
+            </a>
+            <a href="/dashboard/tournaments/{{ tournament.id }}/schedule-board/screen" target="_blank"
+                class="btn btn-ghost">
+                Open Screen ↗
+            </a>
+        </div>
+    </div>
+
+    {# ═══════════════════════════════════════════════════════════════════════════
     YOUTUBE STREAMING CARD (only shown if isStream is enabled)
     ═══════════════════════════════════════════════════════════════════════════ #}
     {% if tournament.settings.get('isStream') %}

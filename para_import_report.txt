@@ -1,0 +1,51 @@
+Para athletes in sheet: 19
+  will be set para        : 17
+  class will change       : 0
+  already correct         : 1
+  NOT FOUND               : 1
+  MORE THAN ONE MATCH     : 0
+  BIRTH YEAR DIFFERS      : 0
+  no taekwondo profile    : 0
+  CLASS UNCLEAR           : 0
+  (picked by birth year   : 1)
+
+=== NOT FOUND (not updated) ===
+- Moravanský Markus [P23 → P23; ILYO TKD Trenčín; born 2014]
+    similar in database: Marcus Moravanský (RVT4WOHW49hviBv8VmiS, born 2014)
+
+=== MORE THAN ONE MATCH (not updated) ===
+
+=== NAME MATCHES BUT BIRTH YEAR DIFFERS (not updated) ===
+
+=== NO TAEKWONDO PROFILE (not updated) ===
+
+=== CLASS UNCLEAR — set it in MANUAL_CLASSES (not updated) ===
+
+=== SEVERAL MATCHES, PICKED BY BIRTH YEAR (updated — double-check) ===
+- Mravec Tomáš [P20 II1 → P21; TKD KLUB Hnúšťa; born 2004]
+    → Tomáš Mravec | id CZ6KjxJvr1M5stk0HGWm | club TAEKWONDO KLUB Hnúšťa | born 2004 | para P21
+    · Tomáš Mravec | id cgeXUwPElhCz1TBrNwLf | club TAEKWONDO KLUB Hnúšťa | born 1971 | not para
+
+=== CLASS CHANGES (updated — double-check) ===
+
+=== SET PARA ===
+- Bérešová Adriána → P22   (Adriana Bérešová | id HJ8dKFPfI3GXx8NwscjP | club Športový klub polície - ILYO Taekwondo Košice | born 2002 | not para)
+- Kovács Tóbiás → P23   (Tóbiás Kovács | id F9HpFuhH6RbCRAxwj2s9 | club Športový klub polície - ILYO Taekwondo Košice | born 2006 | not para)
+- Kuchtová Dominika → P34   (Dominika Kuchtová | id 6mLBYJ9Nfe0mIe6DopXB | club Športový klub polície Ryong Bratislava | born 2009 | not para)
+- Hlavinka Oliver → P72   (Oliver Hlavinka | id ZofcNqkLqplBqECUVqX1 | club Športový klub polície Ryong Bratislava | born 2009 | not para)
+- Farkaš Roman → P22   (Roman Farkaš | id 4QsuJsn21iNSjFPpFInO | club Falcon Taekwondo klub Rimavská Sobota | born 1977 | not para)
+- Bičkoš Peter → P22   (Peter Bičkoš | id F3SbMSqELO25fs0g4sN6 | club Športový klub polície - ILYO Taekwondo Košice | born 1992 | not para)
+- Dugasová Martina → P31   (Martina Dugasová | id WSEGy8T5rRYp5zGhJMZB | club Haneul Taekwondo Trenčín | born 2012 | not para)
+- Čuřík Dominik → P22   (Dominik Čuřík | id UYw6EkKvcOvOYx7r02uO | club ILYO - TAEKWONDO TRENČÍN | born 2000 | not para)
+- Marcinková Bianka → P60   (Bianka Marcinkova | id kIJM43tyxLkYXrjcr6UV | club TAEKWONDO HAKIMI Rožňava | born 2012 | not para)
+- Krupáš Miloš → P22   (Miloš Krupáš | id lHwnyTMWNUV2MRLW3kye | club Športový klub polície - ILYO Taekwondo Košice | born 2000 | not para)
+- Pienták Miroslav → P33   (Miroslav Pienták | id URdR97ttT508FVCz9ub1 | club ILYO - TAEKWONDO TRENČÍN | born 2003 | not para)
+- Kundrát Lukáš Marek → P22   (Lukáš Marek Kundrát | id XzbdfApdK5wL51D1zgow | club Športový klub polície - ILYO Taekwondo Košice | born 2010 | not para)
+- Orosi Ján → P23   (Ján Orosi | id 2Ytc29Q1vN10EOebwnZq | club Športový klub polície - ILYO Taekwondo Košice | born 2000 | not para)
+- Hudák Adam → P21   (Adam Hudák | id WV0s14yAg8JUOqI824Uo | club Športový klub polície - ILYO Taekwondo Košice | born 1997 | not para)
+- Bariš Erik → P23   (Erik Bariš | id 70gmYjw5A6Kz97C7dsRd | club ILYO - TAEKWONDO TRENČÍN | born 2008 | not para)
+- Szilágyi Daniel → P22   (Daniel Szilágyi | id lpLey0ojLhHOSejfgTEe | club Športový klub polície - ILYO Taekwondo Košice | born 2004 | not para)
+- Feher Eduard → P23   (Eduard Feher | id wbHc3pClcktCFOAuUEFc | club Športový klub polície - ILYO Taekwondo Košice | born 1991 | not para)
+
+=== ALREADY CORRECT (unchanged) ===
+- Mravec Tomáš → P21

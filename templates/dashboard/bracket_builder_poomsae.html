@@ -30,13 +30,24 @@ mismatch here is why a court-side server would see no matches at all, with no er
         <h2 class="panel-title" style="font-size:1.05rem;">Poomsae Timing</h2>
     </div>
     <p class="text-muted" style="font-size: 0.82rem; margin: 0 0 0.75rem;">
-        Poomsae has no PSS vests or plexi helmets to track — courts are balanced by total running time.
-        One estimate covers every match, whether it's a solo cut-off performance or a head-to-head duel
-        (both take about the same time on the floor).
+        Round time per poomsae type. Each match gets its type's value written to Firebase as
+        <code>roundSeconds</code> — the court's round timer starts from it — and courts are balanced by
+        the same running time. Solo cut-off performances and head-to-head duels take about the same time
+        on the floor, so one value per type covers both.
     </p>
     <label class="bb-field">
-        <span>Estimated seconds per match</span>
+        <span>Poomsae — round seconds</span>
         <input type="number" min="10" id="poomsaeSecondsInput" value="90" onchange="setSecondsPerMatch(this.value)">
+    </label>
+    <label class="bb-field" style="margin-top: 0.6rem;">
+        <span>Para poomsae — round seconds</span>
+        <input type="number" min="10" id="poomsaeParaSecondsInput" value="120"
+            onchange="setParaSecondsPerMatch(this.value)">
+    </label>
+    <label class="bb-field" style="margin-top: 0.6rem;">
+        <span>Freestyle poomsae — round seconds</span>
+        <input type="number" min="10" id="poomsaeFreestyleSecondsInput" value="100"
+            onchange="setFreestyleSecondsPerMatch(this.value)">
     </label>
 </div>
 {% endblock %}
@@ -54,7 +65,8 @@ mismatch here is why a court-side server would see no matches at all, with no er
         One system applies to every category; exceptions override it. "Any" matches everything in that column.
         When several exceptions fit a category, the most specific one wins (type + age beats type only); on a
         tie, the lower one in the list wins. Cut-off automatically adds a Preliminary Round (20+ entrants) and
-        Semi-Final (9+) — pick "Final only" to skip them.
+        Semi-Final (9+) — pick "Final only" to skip them. Freestyle categories are always a cut-off Final
+        only, whatever is set here.
     </p>
     <div class="bb-rule-default">
         <strong>All categories</strong>

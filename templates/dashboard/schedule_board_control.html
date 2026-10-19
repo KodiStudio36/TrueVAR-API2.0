@@ -1,0 +1,792 @@
+{% extends "dashboard/base.html" %}
+{% block content %}
+{#
+templates/dashboard/schedule_board_control.html — staff control for the
+venue schedule board. CLIENT ONLY: everything is saved to a cookie in this
+browser ("truevar_sb_{tournamentId}") — no API, nothing in Firebase.
+
+Every change is written to the cookie immediately; a screen open in this
+same browser re-reads the cookie every second, so it follows within ~1 s.
+A screen on ANOTHER device gets the settings once, through the
+"link for another device" (settings packed into the URL #cfg=…), and keeps
+them in its own cookie from then on.
+
+Context from the dashboard route:
+tournament — the host tournament
+candidates — [{id, title, sport, discipline, courtNum, dateTime}] active
+tournaments that can be added to the board
+#}
+
+<div class="sb-wrap">
+
+    <div class="sb-head">
+        <div>
+            <a href="/dashboard/tournaments/{{ tournament.id }}" class="sb-back">&larr; {{ tournament.title }}</a>
+            <h1 class="sb-title">Schedule Board</h1>
+        </div>
+        <div class="sb-head-actions">
+            <button type="button" class="btn btn-ghost" onclick="copyDeviceLink()">Copy link for another device</button>
+            <button type="button" class="btn btn-primary" onclick="openScreen()">Open Screen ↗</button>
+        </div>
+    </div>
+
+    <div id="sb-flash" class="sb-flash hidden"></div>
+
+    {# ── ON AIR ─────────────────────────────────────────────────────────── #}
+    <div class="card-panel">
+        <div class="sb-card-head">
+            <div>
+                <span class="panel-eyebrow">On air</span>
+                <h2 class="sb-card-title">Live control</h2>
+            </div>
+            <span id="saved-status" class="sb-status ok"></span>
+        </div>
+        <p class="text-muted sb-hint">Every change here applies to screens open in this browser within a second.</p>
+
+        <div class="sb-grid-2">
+            <div class="form-field">
+                <label>Layout</label>
+                <div class="sb-seg">
+                    <label><input type="radio" name="layout" value="grid" onchange="setField('layout', this.value)"> All
+                        courts</label>
+                    <label><input type="radio" name="layout" value="focus" onchange="setField('layout', this.value)">
+                        One court (full screen)</label>
+                </div>
+            </div>
+            <div class="form-field" id="focus-court-field">
+                <label for="focus-court">Court on screen</label>
+                <select id="focus-court" onchange="setField('focusCourt', this.value)"></select>
+            </div>
+            <div class="form-field sb-span-2">
+                <label for="message">Announcement banner</label>
+                <input type="text" id="message" maxlength="200" placeholder="e.g. Medal ceremony at 15:30 — Court 1"
+                    oninput="setField('message', this.value)">
+                <label class="checkbox-label" style="margin-top:.4rem;">
+                    <input type="checkbox" id="show-message" onchange="setField('showMessage', this.checked)">
+                    <span>Show banner on screen</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    {# ── PREVIEW ────────────────────────────────────────────────────────── #}
+    <div class="card-panel">
+        <div class="sb-card-head">
+            <div>
+                <span class="panel-eyebrow">Preview</span>
+                <h2 class="sb-card-title">What the screen shows</h2>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="reloadPreview()">Reload</button>
+        </div>
+        <div class="sb-preview" id="preview-box">
+            <iframe id="preview-frame" title="Schedule board preview" tabindex="-1"></iframe>
+        </div>
+    </div>
+
+    {# ── TOURNAMENTS ────────────────────────────────────────────────────── #}
+    <div class="card-panel">
+        <div class="sb-card-head">
+            <div>
+                <span class="panel-eyebrow">Content</span>
+                <h2 class="sb-card-title">Tournaments on this board</h2>
+            </div>
+        </div>
+        <p class="text-muted sb-hint">
+            Add every tournament of the event that should share the screen — e.g. Kyorugi and Poomsae.
+            <strong>View</strong>: <em>Auto</em> shows blue&nbsp;vs&nbsp;red when a match has two corners and the
+            cut-off starting order for a solo performance. <strong>Court prefix</strong> tells courts apart when
+            two tournaments both use court "1" (e.g. "P" → P1). Leave <strong>Courts</strong> empty to show all.
+        </p>
+
+        <div id="tournament-list" class="sb-t-list"></div>
+
+        <div class="sb-add-row">
+            <select id="add-tournament-select"></select>
+            <button type="button" class="btn btn-ghost" id="add-tournament-btn" onclick="addTournament()">+ Add
+                tournament</button>
+        </div>
+    </div>
+
+    {# ── DISPLAY SETTINGS ───────────────────────────────────────────────── #}
+    <div class="card-panel">
+        <div class="sb-card-head">
+            <div>
+                <span class="panel-eyebrow">Settings</span>
+                <h2 class="sb-card-title">Display</h2>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="resetBoard()">Reset to defaults</button>
+        </div>
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="board-title">Screen title</label>
+                <input type="text" id="board-title" maxlength="120" oninput="setField('title', this.value)">
+            </div>
+            <div class="form-field">
+                <label for="upcoming-count">Upcoming matches per court</label>
+                <input type="number" id="upcoming-count" min="1" max="6"
+                    onchange="setNumber('upcomingCount', this, 1, 6)">
+            </div>
+            <div class="form-field">
+                <label for="courts-per-page">Courts per page</label>
+                <input type="number" id="courts-per-page" min="1" max="12"
+                    onchange="setNumber('courtsPerPage', this, 1, 12)">
+            </div>
+            <div class="form-field">
+                <label for="rotate-seconds">Seconds per page</label>
+                <input type="number" id="rotate-seconds" min="5" max="120"
+                    onchange="setNumber('rotateSeconds', this, 5, 120)">
+            </div>
+        </div>
+        <p class="text-muted sb-hint" style="margin-top:.75rem;">
+            With more courts than fit on one page, the screen rotates through pages automatically.
+            Settings are stored in this browser only.
+        </p>
+    </div>
+
+</div>
+
+<style>
+    :root {
+        --green: #16a34a;
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --muted: #64748b;
+        --text: #0f172a;
+        --accent: #4f46e5;
+        --radius: 14px;
+    }
+
+    .sb-wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .sb-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .sb-head-actions {
+        display: flex;
+        gap: .5rem;
+        flex-wrap: wrap;
+    }
+
+    .sb-back {
+        font-size: .8rem;
+        color: var(--muted);
+        text-decoration: none;
+        font-weight: 600;
+    }
+
+    .sb-back:hover {
+        color: var(--text);
+    }
+
+    .sb-title {
+        margin: .25rem 0 0;
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+
+    .card-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.75rem;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .04);
+    }
+
+    .sb-card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        margin-bottom: .5rem;
+    }
+
+    .panel-eyebrow {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--muted);
+        display: block;
+        margin-bottom: .25rem;
+    }
+
+    .sb-card-title {
+        margin: 0;
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+
+    .sb-hint {
+        font-size: .85rem;
+        margin: 0 0 1rem;
+        line-height: 1.5;
+    }
+
+    .text-muted {
+        color: var(--muted) !important;
+    }
+
+    .sb-grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+
+    .sb-span-2 {
+        grid-column: span 2;
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+    }
+
+    .form-field {
+        display: flex;
+        flex-direction: column;
+        gap: .35rem;
+    }
+
+    .form-field>label {
+        font-size: .75rem;
+        font-weight: 600;
+        color: var(--muted);
+        letter-spacing: .04em;
+    }
+
+    .form-field input[type="text"],
+    .form-field input[type="number"],
+    .form-field select,
+    .sb-t-row input,
+    .sb-t-row select,
+    .sb-add-row select {
+        padding: .5rem .7rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: .88rem;
+        color: var(--text);
+        background: #fff;
+        outline: none;
+        box-sizing: border-box;
+        min-width: 0;
+    }
+
+    .form-field input:focus,
+    .form-field select:focus,
+    .sb-t-row input:focus,
+    .sb-t-row select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
+    }
+
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        cursor: pointer;
+        font-size: .88rem;
+    }
+
+    .checkbox-label input {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+    }
+
+    .sb-seg {
+        display: flex;
+        gap: .5rem;
+        flex-wrap: wrap;
+    }
+
+    .sb-seg label {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: .45rem .75rem;
+        font-size: .85rem;
+        cursor: pointer;
+    }
+
+    .sb-seg label:has(input:checked) {
+        border-color: var(--accent);
+        background: #eef2ff;
+        color: var(--accent);
+        font-weight: 600;
+    }
+
+    .sb-seg input {
+        accent-color: var(--accent);
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .5rem 1rem;
+        border-radius: 8px;
+        font-size: .875rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+    .btn:disabled {
+        opacity: .5;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #4338ca;
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+        background: #f8fafc;
+        color: var(--text);
+    }
+
+    .btn-sm {
+        font-size: .78rem;
+        padding: .32rem .75rem;
+    }
+
+    .icon-btn {
+        width: 30px;
+        height: 30px;
+        justify-content: center;
+        padding: 0;
+    }
+
+    .sb-status {
+        font-size: .82rem;
+        font-weight: 600;
+    }
+
+    .sb-status.ok {
+        color: var(--green);
+    }
+
+    .sb-status.err {
+        color: #dc2626;
+    }
+
+    .sb-flash {
+        padding: .75rem 1rem;
+        border-radius: 10px;
+        font-size: .875rem;
+        font-weight: 600;
+    }
+
+    .sb-flash.ok {
+        background: #dcfce7;
+        color: var(--green);
+        border: 1px solid #bbf7d0;
+    }
+
+    .sb-flash.err {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fca5a5;
+    }
+
+    .sb-preview {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border-radius: 10px;
+        overflow: hidden;
+    }
+
+    .sb-preview iframe {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 1080px;
+        border: 0;
+        transform-origin: 0 0;
+        pointer-events: none;
+    }
+
+    .sb-t-list {
+        display: flex;
+        flex-direction: column;
+        gap: .6rem;
+    }
+
+    .sb-t-row {
+        display: grid;
+        grid-template-columns: 1.6fr 1fr .9fr .6fr .9fr auto;
+        gap: .5rem;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: .6rem .75rem;
+    }
+
+    .sb-t-name {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+
+    .sb-t-name strong {
+        font-size: .9rem;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sb-t-name span {
+        font-size: .72rem;
+        color: var(--muted);
+        text-transform: capitalize;
+    }
+
+    .sb-t-actions {
+        display: flex;
+        gap: .25rem;
+    }
+
+    .sb-t-head {
+        font-size: .68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        color: var(--muted);
+        border: none;
+        padding: 0 .75rem;
+    }
+
+    .sb-host {
+        font-size: .62rem;
+        font-weight: 700;
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: .05em;
+    }
+
+    .sb-add-row {
+        display: flex;
+        gap: .5rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .sb-add-row select {
+        flex: 1;
+        min-width: 220px;
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    @media (max-width: 760px) {
+        .sb-grid-2 {
+            grid-template-columns: 1fr;
+        }
+
+        .sb-span-2 {
+            grid-column: span 1;
+        }
+
+        .sb-t-row {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .sb-t-name {
+            grid-column: span 2;
+        }
+
+        .sb-t-head {
+            display: none;
+        }
+    }
+</style>
+
+<script>
+    "use strict";
+
+    const HOST = {{ host | tojson }};               // {id, title, sport, discipline, courtNum}
+    const CANDIDATES = {{ candidates | tojson }};   // active tournaments that can be added
+    const COOKIE_NAME = "truevar_sb_" + HOST.id;
+    const COOKIE_MAX_CHARS = 3800;                  // browsers cap a cookie at ~4 KB
+    const MAX_TOURNAMENTS = 6;
+    const SCREEN_PATH = `/dashboard/tournaments/${encodeURIComponent(HOST.id)}/schedule-board/screen`;
+    const VIEW_LABELS = { auto: "Auto", duel: "Blue vs Red", cutoff: "Cut-off" };
+
+    let board = loadBoard();
+
+    renderAll();
+    reloadPreview();
+    window.addEventListener("resize", fitPreview);
+
+    // ── Cookie storage ───────────────────────────────────────────────────
+    function readCookie(name) {
+        const hit = document.cookie.split("; ").find(c => c.startsWith(name + "="));
+        if (!hit) return null;
+        try { return decodeURIComponent(hit.slice(name.length + 1)); } catch (e) { return null; }
+    }
+
+    function tournamentEntry(t) {
+        return {
+            id: t.id, title: String(t.title || "").slice(0, 60),
+            sport: String(t.sport || "").toLowerCase(), discipline: String(t.discipline || "").toLowerCase(),
+            courtNum: parseInt(t.courtNum, 10) || 0,
+            view: "auto", label: "", prefix: "", courts: [],
+        };
+    }
+
+    function defaultBoard() {
+        return {
+            v: 1, title: HOST.title || "",
+            tournaments: [tournamentEntry(HOST)],
+            layout: "grid", focusCourt: "", upcomingCount: 3, courtsPerPage: 7, rotateSeconds: 15,
+            message: "", showMessage: false,
+        };
+    }
+
+    function loadBoard() {
+        try {
+            const raw = readCookie(COOKIE_NAME);
+            const saved = raw ? JSON.parse(raw) : null;
+            if (saved && Array.isArray(saved.tournaments) && saved.tournaments.length) return { ...defaultBoard(), ...saved };
+        } catch (e) { console.warn("Board cookie unreadable — starting from defaults", e); }
+        return defaultBoard();
+    }
+
+    let saveTimer = null;
+    function saveSoon() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(save, 250);
+    }
+
+    function save() {
+        const json = JSON.stringify(board);
+        const encoded = encodeURIComponent(json);
+        const status = document.getElementById("saved-status");
+        if (encoded.length > COOKIE_MAX_CHARS) {
+            status.textContent = "⚠ Too much to store — shorten labels or remove a tournament";
+            status.className = "sb-status err";
+            return false;
+        }
+        document.cookie = `${COOKIE_NAME}=${encoded}; path=/; max-age=31536000; SameSite=Lax`;
+        status.textContent = "✓ Applied";
+        status.className = "sb-status ok";
+        return true;
+    }
+
+    // ── Field setters (each one saves) ───────────────────────────────────
+    function setField(field, value) {
+        board[field] = value;
+        if (field === "layout") onLayoutChange();
+        saveSoon();
+    }
+
+    function setNumber(field, input, min, max) {
+        const n = parseInt(input.value, 10);
+        board[field] = Number.isNaN(n) ? board[field] : Math.min(max, Math.max(min, n));
+        input.value = board[field];
+        saveSoon();
+    }
+
+    function resetBoard() {
+        if (!confirm("Reset the board to just this tournament with default settings?")) return;
+        board = defaultBoard();
+        save();
+        renderAll();
+    }
+
+    // ── Render ───────────────────────────────────────────────────────────
+    function renderAll() {
+        document.querySelectorAll('input[name="layout"]').forEach(r => { r.checked = r.value === (board.layout || "grid"); });
+        document.getElementById("message").value = board.message || "";
+        document.getElementById("show-message").checked = !!board.showMessage;
+        document.getElementById("board-title").value = board.title || "";
+        document.getElementById("upcoming-count").value = board.upcomingCount;
+        document.getElementById("courts-per-page").value = board.courtsPerPage;
+        document.getElementById("rotate-seconds").value = board.rotateSeconds;
+        onLayoutChange();
+        renderTournaments();
+        renderCourtOptions();
+    }
+
+    function onLayoutChange() {
+        document.getElementById("focus-court-field").style.opacity = board.layout === "focus" ? "1" : ".45";
+    }
+
+    function renderTournaments() {
+        const list = board.tournaments;
+        const el = document.getElementById("tournament-list");
+        el.innerHTML = `
+            <div class="sb-t-row sb-t-head">
+                <span>Tournament</span><span>Screen label</span><span>View</span><span>Court prefix</span><span>Courts</span><span></span>
+            </div>` + list.map((t, i) => `
+            <div class="sb-t-row">
+                <div class="sb-t-name">
+                    ${t.id === HOST.id ? `<span class="sb-host">This tournament</span>` : ""}
+                    <strong title="${escapeHtml(t.title)}">${escapeHtml(t.title || t.id)}</strong>
+                    <span>${escapeHtml(t.sport)} · ${escapeHtml(t.discipline)}</span>
+                </div>
+                <input type="text" value="${escapeHtml(t.label || "")}" placeholder="e.g. Kyorugi" maxlength="24"
+                    oninput="updateEntry(${i}, 'label', this.value)">
+                <select onchange="updateEntry(${i}, 'view', this.value)">
+                    ${Object.entries(VIEW_LABELS).map(([v, l]) => `<option value="${v}" ${t.view === v ? "selected" : ""}>${l}</option>`).join("")}
+                </select>
+                <input type="text" value="${escapeHtml(t.prefix || "")}" placeholder="—" maxlength="4"
+                    oninput="updateEntry(${i}, 'prefix', this.value)">
+                <input type="text" value="${escapeHtml((t.courts || []).join(", "))}" placeholder="all"
+                    title="Comma-separated court IDs to show, e.g. 1, 2, 3"
+                    onchange="updateEntry(${i}, 'courts', this.value.split(',').map(s => s.trim()).filter(Boolean))">
+                <div class="sb-t-actions">
+                    <button type="button" class="btn btn-ghost icon-btn" title="Show earlier" onclick="moveEntry(${i}, -1)" ${i === 0 ? "disabled" : ""}>↑</button>
+                    <button type="button" class="btn btn-ghost icon-btn" title="Show later" onclick="moveEntry(${i}, 1)" ${i === list.length - 1 ? "disabled" : ""}>↓</button>
+                    <button type="button" class="btn btn-ghost icon-btn" title="Remove from board" style="color:#dc2626;" onclick="removeEntry(${i})" ${list.length === 1 ? "disabled" : ""}>✕</button>
+                </div>
+            </div>
+        `).join("");
+
+        const included = new Set(list.map(t => t.id));
+        const available = CANDIDATES.filter(c => c.id && !included.has(c.id));
+        const sel = document.getElementById("add-tournament-select");
+        sel.innerHTML = available.length
+            ? available.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.title)} — ${escapeHtml(c.discipline)}${c.dateTime ? " · " + escapeHtml(c.dateTime.slice(0, 10)) : ""}</option>`).join("")
+            : `<option value="">No other active tournaments</option>`;
+        const full = list.length >= MAX_TOURNAMENTS;
+        sel.disabled = available.length === 0 || full;
+        document.getElementById("add-tournament-btn").disabled = available.length === 0 || full;
+    }
+
+    // Focus-court choices: per tournament, its court filter or 1..courtNum.
+    // Value = "<tournamentId>|<courtId>", what the screen matches on.
+    function renderCourtOptions() {
+        const sel = document.getElementById("focus-court");
+        const options = [`<option value="">First court</option>`];
+        board.tournaments.forEach(t => {
+            const ids = (t.courts && t.courts.length)
+                ? t.courts
+                : Array.from({ length: Math.min(t.courtNum || 0, 32) }, (_, i) => String(i + 1));
+            ids.forEach(cid => {
+                options.push(`<option value="${escapeHtml(`${t.id}|${cid}`)}">${escapeHtml(t.label || t.title)} · Court ${escapeHtml((t.prefix || "") + cid)}</option>`);
+            });
+        });
+        sel.innerHTML = options.join("");
+        if (board.focusCourt && ![...sel.options].some(o => o.value === board.focusCourt)) board.focusCourt = "";
+        sel.value = board.focusCourt || "";
+    }
+
+    function updateEntry(i, field, value) {
+        board.tournaments[i][field] = value;
+        if (field !== "view") renderCourtOptions();
+        saveSoon();
+    }
+
+    function moveEntry(i, delta) {
+        const list = board.tournaments;
+        const j = i + delta;
+        if (j < 0 || j >= list.length) return;
+        [list[i], list[j]] = [list[j], list[i]];
+        renderTournaments();
+        renderCourtOptions();
+        saveSoon();
+    }
+
+    function removeEntry(i) {
+        if (board.tournaments.length <= 1) return;
+        board.tournaments.splice(i, 1);
+        renderTournaments();
+        renderCourtOptions();
+        saveSoon();
+    }
+
+    function addTournament() {
+        const id = document.getElementById("add-tournament-select").value;
+        const c = CANDIDATES.find(x => x.id === id);
+        if (!c || board.tournaments.length >= MAX_TOURNAMENTS) return;
+        board.tournaments.push(tournamentEntry(c));
+        if (!save()) { board.tournaments.pop(); return; }
+        renderTournaments();
+        renderCourtOptions();
+    }
+
+    // ── Screen ───────────────────────────────────────────────────────────
+    function openScreen() {
+        save();
+        window.open(SCREEN_PATH, "_blank");
+    }
+
+    // Settings packed into the URL, for a TV / PC with its own browser.
+    // That screen keeps them in its own cookie; later changes made here
+    // won't reach it — copy a new link after changing things.
+    async function copyDeviceLink() {
+        save();
+        const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(board))))
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        const url = `${location.origin}${SCREEN_PATH}#cfg=${b64}`;
+        try {
+            await navigator.clipboard.writeText(url);
+            flash("Link copied. Open it on the other device (log in there first). Copy a new link after changing settings.");
+        } catch (err) {
+            prompt("Copy this link:", url);
+        }
+    }
+
+    function reloadPreview() {
+        document.getElementById("preview-frame").src = SCREEN_PATH;
+        fitPreview();
+    }
+
+    function fitPreview() {
+        const box = document.getElementById("preview-box");
+        document.getElementById("preview-frame").style.transform = `scale(${box.clientWidth / 1920})`;
+    }
+
+    // ── Utils ────────────────────────────────────────────────────────────
+    let flashTimer = null;
+    function flash(text, isError) {
+        const el = document.getElementById("sb-flash");
+        el.textContent = text;
+        el.className = "sb-flash " + (isError ? "err" : "ok");
+        clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => { el.className = "sb-flash hidden"; }, 7000);
+    }
+
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return "";
+        return String(str).replace(/[&<>"']/g, s => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[s]));
+    }
+</script>
+
+{% endblock %}

@@ -165,6 +165,55 @@ async def live_queue_page(request: Request, tournament_id: str, repo=Depends(get
     })
 
 
+def _schedule_board_tournament(t, tournament_id=None) -> dict:
+    """What the board needs to know about a tournament — which Firestore
+    matches collection / RTDB courts to read, and how many courts it has."""
+    dt = _field(t, "dateTime")
+    return {
+        "id": tournament_id or _field(t, "id"),
+        "title": _field(t, "title") or "",
+        "sport": str(_field(t, "sport") or "").lower(),
+        "discipline": str(_field(t, "discipline") or "").lower(),
+        "courtNum": int(_field(t, "courtNum") or 0),
+        "dateTime": dt.isoformat() if hasattr(dt, "isoformat") else None,
+    }
+
+
+@router.get("/tournaments/{tournament_id}/schedule-board",
+            dependencies=[Depends(require_operator("matches:manage"))])
+async def schedule_board_control_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
+    """TCO and TOS only — same permission as the live queue. The board's
+    settings live in a cookie in the operator's browser, not on the server."""
+    tournament = GetTournamentUseCase(repo).execute(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    try:
+        active = repo.getTournamentsPaginated(status="active", limit=50, offset=0)
+    except Exception:
+        active = []
+    candidates = [_schedule_board_tournament(t) for t in active if _field(t, "id") != tournament_id]
+
+    return templates.TemplateResponse(request, "dashboard/schedule_board_control.html", {
+        "request": request,
+        "tournament": tournament,
+        "host": _schedule_board_tournament(tournament, tournament_id),
+        "candidates": candidates,
+    })
+
+
+@router.get("/tournaments/{tournament_id}/schedule-board/screen")
+async def schedule_board_screen_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
+    """The venue TV screen. Any operator role can open it (dashboard:view)."""
+    tournament = GetTournamentUseCase(repo).execute(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    return templates.TemplateResponse(request, "dashboard/schedule_board_screen.html", {
+        "request": request,
+        "host": _schedule_board_tournament(tournament, tournament_id),
+    })
+
+
 @router.get("/stream-keys", dependencies=[Depends(require_operator("stream_keys:manage"))])
 async def stream_keys_page(request: Request):
     """TOS only."""
