@@ -1,6 +1,17 @@
 {% extends "dashboard/base.html" %}
 {% block content %}
 
+{# ISO timestamps handed to the JS, which shows and edits them in the viewer's
+own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
+{% macro iso_utc(dt) -%}
+{%- if dt and dt.isoformat is defined -%}
+{{ dt.isoformat() ~ ("" if dt.tzinfo else "Z") }}
+{%- elif dt -%}
+{{ dt }}
+{%- endif -%}
+{%- endmacro %}
+{% set tournament_iso = iso_utc(tournament.dateTime) %}
+
 {# ── Flash banner (driven by ?msg= query param) ─────────────────────────────── #}
 <div id="flash" class="flash-banner hidden"></div>
 
@@ -69,9 +80,9 @@
                     <dd>{{ tournament.location }}</dd>
                 </div>
                 <div class="info-cell">
-                    <dt>Date &amp; Time (UTC)</dt>
-                    <dd>{{ tournament.dateTime.strftime("%d %b %Y — %H:%M") ~ " UTC" if tournament.dateTime else "TBD"
-                        }}</dd>
+                    <dt>Date &amp; Time</dt>
+                    <dd><time class="js-local-time" data-iso="{{ tournament_iso }}">{{ "TBD" if not tournament_iso
+                            }}</time></dd>
                 </div>
                 <div class="info-cell">
                     <dt>Courts</dt>
@@ -140,12 +151,9 @@
                     <input id="f-location" type="text" name="location" value="{{ tournament.location }}" required>
                 </div>
                 <div class="form-field">
-                    <label for="f-datetime">Date &amp; Time (UTC)</label>
-                    <input id="f-datetime" type="datetime-local" name="dateTime"
-                        value="{{ tournament.dateTime.strftime('%Y-%m-%dT%H:%M') }}" required>
-                    <small class="text-muted" style="font-size: 0.75rem;">
-                        UTC, not your local time zone — see the ⓘ note below the form.
-                    </small>
+                    <label for="f-datetime">Date &amp; Time</label>
+                    <input id="f-datetime" type="datetime-local" name="dateTime" required>
+                    <small class="text-muted js-tz-name" style="font-size: 0.75rem;"></small>
                 </div>
                 <div class="form-field">
                     <label for="f-courts">Number of Courts</label>
@@ -194,11 +202,6 @@
                     </label>
                 </div>
             </div>
-            <p class="text-muted" style="font-size: 0.8rem; margin-top: 1rem;">
-                ⓘ Date &amp; Time above is UTC, matching how it's stored and shown everywhere else in this app —
-                not a conversion of your browser's local time. If you don't change it, saving leaves it exactly
-                as it was.
-            </p>
             <div class="form-actions">
                 <button type="submit" class="btn btn-primary" id="save-btn">Save Changes</button>
                 <button type="button" class="btn btn-ghost" onclick="toggleEdit(false)">Cancel</button>
@@ -257,9 +260,8 @@
         {% set deadline_raw = tournament.settings.get('registrationDeadline') %}
         {% if deadline_raw %}
         <p class="text-muted" style="margin-bottom: 0.5rem; font-size: 0.85rem;">
-            Deadline: <strong>{{ deadline_raw }}</strong>
-            <span style="color:#b45309;">— stored as raw text (see note in chat); not guaranteed to parse as UTC
-                everywhere it's read.</span>
+            Registration deadline: <strong><time class="js-local-time" data-iso="{{ iso_utc(deadline_raw) }}">{{
+                    deadline_raw }}</time></strong>
         </p>
         {% endif %}
         <p class="text-muted" style="margin-bottom:1.25rem;">
@@ -383,9 +385,10 @@
                     <span class="yt-info-value">{{ tournament.courtNum }}</span>
                 </div>
                 <div class="yt-info-item">
-                    <span class="yt-info-label">Stream date &amp; time (UTC)</span>
+                    <span class="yt-info-label">Stream date &amp; time</span>
                     <span class="yt-info-value">
-                        {{ tournament.dateTime.strftime("%d %b %Y, %H:%M") ~ " UTC" if tournament.dateTime else "TBD" }}
+                        <time class="js-local-time" data-iso="{{ tournament_iso }}">{{ "TBD" if not tournament_iso
+                            }}</time>
                     </span>
                 </div>
                 <div class="yt-info-item">
@@ -422,9 +425,9 @@
             </div>
 
             <div id="schedule-error" class="alert alert-error hidden"></div>
-            {% endif %}
 
         </div>
+        {% endif %}
 
         {# Scheduled broadcasts table #}
         <div id="broadcasts-panel" class="hidden">
@@ -992,22 +995,12 @@ JAVASCRIPT
     const COURT_PREFIX = "{{ tournament.settings.get('numbering', 'Court') }}";
 
     // ── Sport → Discipline → Provider → Mode cascade config ──────────────
-    // ★ marks the default at each level (most-used option, pre-selected).
-    //
-    // ⚠ NOTE: this list is NOT the same as tournament_create.html's
-    // SPORT_DATA (different modes for DAEDO/Kyorugi: "Integrated
-    // TkStrike"/"External TkStrike" here vs. "...Gen2"/"...Gen3" there;
-    // Boxing's provider key is "Custom" here vs. "Bout Cntrl" there).
-    // A tournament created via tournament_create.html with e.g.
-    // provider "TrueVAR" or mode "External TkStrike Gen3" won't be
-    // found in THIS list, so the edit-form fallback below silently
-    // substitutes this page's own default instead of preserving the
-    // real stored value — editing could quietly change the scoring
-    // provider/mode even if you don't touch those fields. Worth
-    // reconciling into one shared list (same pattern as this app's
-    // country/belt data already living in truevar-lib.js) rather than
-    // patching further here blind, since I don't know which list is
-    // meant to be authoritative.
+    // ★ default at each level is pre-selected for NEW choices only. When
+    // editing, the tournament's stored values always win: sport/discipline
+    // are stored lowercase ("taekwondo", "poomsae") and are matched without
+    // regard to case, and a stored provider/mode that isn't in this list
+    // (e.g. one created on tournament_create.html) is kept as an extra
+    // option instead of being replaced by a default.
     const SPORT_DATA = {
         "Taekwondo": {
             defaultDiscipline: "Kyorugi",
@@ -1038,7 +1031,7 @@ JAVASCRIPT
                 "Olympic Boxing": {
                     defaultProvider: "Bout Cntrl",
                     providers: {
-                        "Custom": {
+                        "Bout Cntrl": {
                             defaultMode: "Integrated Bout Cntrl",
                             modes: ["Integrated Bout Cntrl", "External Bout Cntrl"],
                         },
@@ -1056,8 +1049,17 @@ JAVASCRIPT
     const TOURNAMENT_PROVIDER = "{{ tournament.settings.get('provider', '') }}";
     const TOURNAMENT_MODE = "{{ tournament.settings.get('mode', '') }}";
 
+    // Case-insensitive key lookup: "poomsae" → "Poomsae".
+    function findKey(obj, value) {
+        const v = String(value || "").toLowerCase();
+        return Object.keys(obj).find(k => k.toLowerCase() === v) || null;
+    }
+
     function fillSelect(selectEl, options, selectedValue) {
         selectEl.innerHTML = "";
+        // Keep a stored value this page doesn't know about, so saving
+        // without touching the field never changes it.
+        if (selectedValue && !options.includes(selectedValue)) options = [selectedValue, ...options];
         options.forEach(opt => {
             const o = document.createElement("option");
             o.value = opt;
@@ -1083,7 +1085,9 @@ JAVASCRIPT
 
     function populateModes(sport, discipline, provider, selectedMode) {
         const providerData = SPORT_DATA[sport].disciplines[discipline].providers[provider];
-        fillSelect(document.getElementById("f-mode"), providerData.modes, selectedMode || providerData.defaultMode);
+        // Unknown (stored) provider: offer only its stored mode.
+        const modes = providerData ? providerData.modes : [];
+        fillSelect(document.getElementById("f-mode"), modes, selectedMode || (providerData && providerData.defaultMode));
     }
 
     function cascadeFromSport(sport) {
@@ -1111,20 +1115,52 @@ JAVASCRIPT
     // to sport/discipline/provider/mode defaults if a value is missing or
     // no longer valid (e.g. a doc created before this feature existed). ──
     (function initCascade() {
-        const sport = SPORT_DATA[TOURNAMENT_SPORT] ? TOURNAMENT_SPORT : DEFAULT_SPORT;
+        const sport = findKey(SPORT_DATA, TOURNAMENT_SPORT) || DEFAULT_SPORT;
         populateSports(sport);
 
         const sportData = SPORT_DATA[sport];
-        const discipline = sportData.disciplines[TOURNAMENT_DISCIPLINE] ? TOURNAMENT_DISCIPLINE : sportData.defaultDiscipline;
+        const discipline = findKey(sportData.disciplines, TOURNAMENT_DISCIPLINE) || sportData.defaultDiscipline;
         populateDisciplines(sport, discipline);
 
         const disciplineData = sportData.disciplines[discipline];
-        const provider = disciplineData.providers[TOURNAMENT_PROVIDER] ? TOURNAMENT_PROVIDER : disciplineData.defaultProvider;
+        const provider = findKey(disciplineData.providers, TOURNAMENT_PROVIDER) || TOURNAMENT_PROVIDER || disciplineData.defaultProvider;
         populateProviders(sport, discipline, provider);
 
-        const providerData = disciplineData.providers[provider];
-        const mode = providerData.modes.includes(TOURNAMENT_MODE) ? TOURNAMENT_MODE : providerData.defaultMode;
-        populateModes(sport, discipline, provider, mode);
+        populateModes(sport, discipline, provider, TOURNAMENT_MODE || null);
+    })();
+
+    // ── Dates: stored UTC, shown and edited in the viewer's time zone ─────
+    const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const DATE_FMT = new Intl.DateTimeFormat("en-GB", {
+        weekday: "short", day: "numeric", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+    });
+
+    function parseIso(iso) {
+        if (!iso) return null;
+        const d = new Date(iso);
+        return isNaN(d) ? null : d;
+    }
+
+    // Date → "2026-10-20T09:00" in local time, for <input type="datetime-local">.
+    function toLocalInput(d) {
+        const pad = n => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    (function initDates() {
+        document.querySelectorAll(".js-local-time").forEach(el => {
+            const d = parseIso(el.dataset.iso);
+            if (d) {
+                el.textContent = DATE_FMT.format(d);
+                el.title = d.toISOString().replace(".000", "") + " (UTC)";
+            }
+        });
+        document.querySelectorAll(".js-tz-name").forEach(el => {
+            el.textContent = `Your time zone (${TIME_ZONE}).`;
+        });
+        const start = parseIso("{{ tournament_iso }}");
+        if (start) document.getElementById("f-datetime").value = toLocalInput(start);
     })();
 
     // ── Flash message from ?msg= ───────────────────────────────────────────────
@@ -1178,7 +1214,7 @@ JAVASCRIPT
 
     async function deleteTournament() {
         const title = document.getElementById("view-title").textContent;
-        const typed = prompt(`This permanently deletes "${title}" and all its scheduled broadcasts. This cannot be undone.\n\nType the tournament title to confirm:`);
+        const typed = prompt(`This permanently deletes "${title}" with everything in it: registrations, coaches, brackets, matches, categories, poomsae draw and scheduled broadcasts. This cannot be undone.\n\nType the tournament title to confirm:`);
         if (typed !== title) {
             if (typed !== null) alert("Title didn't match — nothing was deleted.");
             return;
@@ -1195,13 +1231,11 @@ JAVASCRIPT
             } else {
                 const err = await res.json();
                 alert("Failed to delete: " + (err.detail || "Unknown error"));
-                btn.disabled = false;
-                btn.textContent = "Delete";
+                window.location.reload();
             }
         } catch (e) {
             alert("Network error.");
-            btn.disabled = false;
-            btn.textContent = "Delete";
+            window.location.reload();
         }
     }
 
@@ -1220,6 +1254,13 @@ JAVASCRIPT
         const form = evt.target;
         const fd = new FormData(form);
 
+        const start = new Date(fd.get("dateTime") || "");
+        if (isNaN(start)) {
+            status.textContent = "⚠ Please pick a date and time.";
+            status.className = "save-status err";
+            return;
+        }
+
         btn.disabled = true;
         btn.textContent = "Saving…";
         status.textContent = "";
@@ -1228,15 +1269,10 @@ JAVASCRIPT
         const payload = {
             title: fd.get("title"),
             location: fd.get("location"),
-            // The f-datetime field is pre-filled with the tournament's raw
-            // UTC digits (see the value= attribute on #f-datetime above,
-            // rendered from tournament.dateTime.strftime) — NOT the browser's local time. Converting it with
-            // `new Date(...).toISOString()` would silently reinterpret those
-            // UTC digits as local time and shift the stored instant by the
-            // editor's UTC offset on every save, even with nothing changed.
-            // TrueVAR.utcInputToIso() treats the digits as UTC on the way
-            // back out too, matching how they were filled in.
-            dateTime: TrueVAR.utcInputToIso(fd.get("dateTime")),
+            // Field holds local time (filled by initDates); a datetime-local
+            // string without offset is parsed as local time by Date, so this
+            // round-trips exactly and is stored as UTC.
+            dateTime: start.toISOString(),
             courtNum: parseInt(fd.get("courtNum"), 10),
             sport: fd.get("sport"),
             discipline: fd.get("discipline"),

@@ -2138,6 +2138,23 @@ def update_tournament_endpoint(
     payload: UpdateTournamentRequest,
     repo=Depends(get_tournament_repo),
 ):
+    # Start from the stored settings so fields the edit form doesn't send
+    # (registrationDeadline, externalRegistrationUrl, …) survive the save.
+    t_doc = db.collection("tournaments").document(tournament_id).get()
+    if not t_doc.exists:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    settings = dict((t_doc.to_dict() or {}).get("settings") or {})
+    settings.update({
+        "isStream": payload.isStream,
+        "venueName": payload.venueName,
+        "numbering": payload.numbering,
+        "provider": payload.provider,
+        "mode": payload.mode,
+    })
+    sent = getattr(payload, "model_fields_set", None) or getattr(payload, "__fields_set__", set())
+    if "externalRegistrationUrl" in sent:
+        settings["externalRegistrationUrl"] = (payload.externalRegistrationUrl or "").strip() or None
+
     use_case = UpdateTournamentUseCase(repo)
     try:
         use_case.execute(
@@ -2149,14 +2166,7 @@ def update_tournament_endpoint(
             sport=payload.sport.lower(),
             discipline=payload.discipline.lower(),
             isExternalPublic=payload.isExternalPublic,
-            settings={
-                "isStream": payload.isStream,
-                "venueName": payload.venueName,
-                "numbering": payload.numbering,
-                "provider": payload.provider,
-                "mode": payload.mode,
-                "externalRegistrationUrl": (payload.externalRegistrationUrl or "").strip() or None,
-            },
+            settings=settings,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -2190,12 +2200,89 @@ def delete_tournament_endpoint(
     broadcast_repo=Depends(get_broadcast_repo),
     stream_key_repo=Depends(get_stream_key_repo),
 ):
+    t_ref = db.collection("tournaments").document(tournament_id)
+    t_doc = t_ref.get()
+    if not t_doc.exists:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    # Linked data first, the tournament doc last: if anything fails part-way
+    # the tournament still exists and the delete can simply be run again.
+    try:
+        removed = _delete_tournament_data(tournament_id, t_doc.to_dict() or {})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Deleting the tournament's data failed part-way. The tournament itself was kept, so you can run the delete again. ({exc})")
+
+    # Broadcasts, stream-key dates and the tournament doc itself.
     use_case = DeleteTournamentUseCase(repo, broadcast_repo, stream_key_repo)
     try:
         use_case.execute(tournament_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return {"message": "Tournament deleted."}
+    return {"message": "Tournament deleted.", "removed": removed}
+
+
+def _delete_doc_tree(doc_ref) -> int:
+    """Deletes a document and every subcollection under it. Returns docs deleted."""
+    count = 0
+    for sub in doc_ref.collections():
+        count += _delete_collection_tree(sub)
+    doc_ref.delete()
+    return count + 1
+
+
+def _delete_collection_tree(col_ref) -> int:
+    """
+    Deletes every document in a collection, recursively. list_documents()
+    also returns "missing" parents that only hold subcollections, which
+    stream() would skip.
+    """
+    count = 0
+    batch, pending = db.batch(), 0
+    for doc_ref in col_ref.list_documents():
+        for sub in doc_ref.collections():
+            count += _delete_collection_tree(sub)
+        batch.delete(doc_ref)
+        pending += 1
+        if pending >= 400:
+            batch.commit()
+            count += pending
+            batch, pending = db.batch(), 0
+    if pending:
+        batch.commit()
+        count += pending
+    return count
+
+
+def _delete_tournament_data(tournament_id: str, data: dict) -> Dict[str, int]:
+    """
+    Everything a tournament owns besides its own doc and broadcasts:
+      - all subcollections of tournaments/{id} (registrations,
+        division_rosters, official_registrations, brackets, meta, … —
+        found dynamically, so new ones are covered automatically)
+      - tournament_categories/{id}
+      - its matches in sports/{sport}/disciplines/{discipline}/matches
+    """
+    t_ref = db.collection("tournaments").document(tournament_id)
+    removed: Dict[str, int] = {}
+
+    for sub in t_ref.collections():
+        removed[sub.id] = _delete_collection_tree(sub)
+
+    cat_ref = db.collection("tournament_categories").document(tournament_id)
+    if cat_ref.get().exists or list(cat_ref.collections()):
+        removed["tournament_categories"] = _delete_doc_tree(cat_ref)
+
+    sport = (data.get("sport") or "").lower()
+    discipline = (data.get("discipline") or "").lower()
+    if sport and discipline:
+        matches = (
+            db.collection("sports").document(sport)
+            .collection("disciplines").document(discipline)
+            .collection("matches")
+            .where("tournamentId", "==", tournament_id)
+        )
+        removed["matches"] = sum(_delete_doc_tree(d.reference) for d in matches.stream())
+    return removed
 
 def normalize_name(value: str) -> str:
     """Lowercase and strip diacritics, e.g. 'Vidinská' -> 'vidinska'."""
