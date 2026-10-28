@@ -149,7 +149,7 @@ const POOMSAE_NAMES = {
 
 // "SF: Koryo · F: Taebaek + Jitae" for the court view block.
 function drawSummaryOf(bracket) {
-    if (!drawRowFor(bracket)) return "";
+    if (bracket.isFreestyle || !drawRowFor(bracket)) return "";
     return bracket.rounds.map((r, ri) => {
         const m = r.find(x => x.status !== "walkover");
         const keys = m && drawnPoomsaeFor(m);
@@ -282,8 +282,62 @@ function entryTypeOptions() {
 
 function ageOptions() {
     return uniqueBy(flatCategories, "ageCode")
-        .sort((a, b) => (a.ageMin ?? a.ageIndex) - (b.ageMin ?? b.ageIndex) || a.ageIndex - b.ageIndex)
+        .sort((a, b) => ageSortValue(a) - ageSortValue(b))
         .map(c => ({ code: c.ageCode, label: c.ageLabel }));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// AGE ORDER — youngest → oldest rank of every age division
+// ══════════════════════════════════════════════════════════════════
+// The category schema's ageMin / ageMax can be AGES (12, 14) or BIRTH
+// YEARS (2012, 2014) — the kyorugi builder reads them as birth years. The
+// old sort here compared them as ages, so with birth years "youngest
+// first" ran oldest first; and a division without numbers fell back to
+// ageIndex, compared straight against ages / years. Now:
+//   • every value becomes an age first: a birth year (≥ 1900) is
+//     AGE_REFERENCE_YEAR − year (only the order matters, so any fixed
+//     reference year works);
+//   • a division's age = the youngest age it allows;
+//   • divisions are ranked once, youngest first; one without numbers is
+//     slotted in by its schema position (ageIndex) among the others.
+const AGE_REFERENCE_YEAR = new Date().getFullYear();
+
+function categoryAge(cat) {
+    const ages = [cat.ageMin, cat.ageMax]
+        .map(Number)
+        .filter(v => Number.isFinite(v) && v > 0)
+        .map(v => (v >= 1900 ? AGE_REFERENCE_YEAR - v : v));
+    return ages.length ? Math.min(...ages) : null;
+}
+
+let ageRankCache = { source: null, size: -1, rank: {} };
+
+// 0 = youngest division. Brackets carry ageCode too, so this works for
+// both categories and generated brackets.
+function ageSortValue(cat) {
+    if (ageRankCache.source !== flatCategories || ageRankCache.size !== flatCategories.length) {
+        const divisions = new Map();
+        flatCategories.forEach(c => {
+            const d = divisions.get(c.ageCode) || { code: c.ageCode, age: null, index: c.ageIndex ?? 0 };
+            const age = categoryAge(c);
+            if (age != null && (d.age == null || age < d.age)) d.age = age;
+            divisions.set(c.ageCode, d);
+        });
+        const order = [...divisions.values()].filter(d => d.age != null)
+            .sort((a, b) => a.age - b.age || a.index - b.index);
+        [...divisions.values()].filter(d => d.age == null)
+            .sort((a, b) => a.index - b.index)
+            .forEach(u => {
+                let at = 0;
+                order.forEach((d, i) => { if (d.index <= u.index) at = i + 1; });
+                order.splice(at, 0, u);
+            });
+        const rank = {};
+        order.forEach((d, i) => { rank[d.code] = i; });
+        ageRankCache = { source: flatCategories, size: flatCategories.length, rank };
+    }
+    const r = ageRankCache.rank[cat.ageCode];
+    return r == null ? Number.MAX_SAFE_INTEGER : r;
 }
 
 function beltOptions() {
@@ -314,12 +368,10 @@ function ruleSpecificity(rule) {
     return RULE_FIELDS.filter(f => rule[f.key] !== ANY).length;
 }
 
-// -> { key, ruleIndex, forced } — ruleIndex is null when the default
-// applies. Most specific matching rule wins; ties go to the later rule.
-// Freestyle is always a cut-off Final only (one round, no Preliminary or
-// Semi-Final), whatever the default or the exceptions say.
+// -> { key, ruleIndex } — ruleIndex is null when the default applies.
+// Most specific matching rule wins; ties go to the later rule. Freestyle
+// follows the same rules as every other type.
 function resolveSystem(cat) {
-    if (isFreestyleCategory(cat)) return { key: "cut_off_final", ruleIndex: null, forced: true };
     let best = null;
     poomsaeConfig.systemRules.forEach((rule, i) => {
         if (!ruleMatches(rule, cat)) return;
@@ -414,7 +466,7 @@ function renderResolvedSystems() {
         .map(r => `
             <div class="bb-vest-row">
                 <span>${escapeHtml(r.cat.groupLabel)} · ${escapeHtml(r.cat.label)}</span>
-                <span>${escapeHtml(POOMSAE_SYSTEMS[r.key].label)}<span class="bb-rule-source">${r.forced ? "freestyle" : r.ruleIndex == null ? "default" : `exception ${r.ruleIndex + 1}`}</span></span>
+                <span>${escapeHtml(POOMSAE_SYSTEMS[r.key].label)}<span class="bb-rule-source">${r.ruleIndex == null ? "default" : `exception ${r.ruleIndex + 1}`}</span></span>
             </div>`)
         .join("");
 
@@ -559,13 +611,12 @@ function renderCourtsList() {
     renderAgeCourts();
 }
 
-// Running order within a court: type priority → age → belt → para class → gender.
+// Running order within a court: type priority → age (see AGE ORDER) →
+// belt → para class → gender.
 function categorySortKey(a, b) {
-    const ageA = a.ageMin ?? a.ageIndex, ageB = b.ageMin ?? b.ageIndex;
     const ageDir = poomsaeConfig.ageOrder === "oldest_first" ? -1 : 1;
     return typeRank(a.entryTypeCode) - typeRank(b.entryTypeCode)
-        || ageDir * (ageA - ageB)
-        || ageDir * ((a.ageIndex ?? 0) - (b.ageIndex ?? 0))
+        || ageDir * (ageSortValue(a) - ageSortValue(b))
         || (a.beltIndex ?? 0) - (b.beltIndex ?? 0)
         || (a.paraIndex ?? 0) - (b.paraIndex ?? 0)
         || (a.genderIndex ?? 0) - (b.genderIndex ?? 0)
@@ -793,7 +844,8 @@ async function generateEverything() {
         const label = b.system === "cut_off" && b.cutOffStructure === "final_only" ? "cut-off (final only)" : b.system.replace(/_/g, " ").replace("cut off", "cut-off");
         systemsUsed[label] = (systemsUsed[label] || 0) + 1;
     });
-    const undrawn = generatedBrackets.filter(b => !drawRowFor(b));
+    // Freestyle performs its own routine — never drawn, so not "missing".
+    const undrawn = generatedBrackets.filter(b => !b.isFreestyle && !drawRowFor(b));
     const drawNote = !poomsaeDrawLoaded
         ? `<span style="color:#b45309;">poomsae draw couldn't be loaded — matches will have no poomsae</span>`
         : undrawn.length === 0

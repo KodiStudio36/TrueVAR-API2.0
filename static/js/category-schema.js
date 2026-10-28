@@ -20,6 +20,15 @@
  *   para_class_options            → para-only
  *   para_class_options: [...]     → split by those classes ([] = no split)
  *   otherwise, for a para type    → DEFAULT_PARA_CLASS_OPTIONS (P11 … P72)
+ *   same_para_class: "class"/true → every member of a pair/team shares the
+ *                                   exact paraCategory; "group" → same family
+ *                                   (P21 + P23). Doesn't change any code.
+ *
+ * CLASS → AGE (mirror parseCategories in tournament.html and
+ * _validate_class_age in the API): a belt class may list `age_codes`, the
+ * only age divisions it exists in (Individual Class A: seniors under
+ * 30/40/50 and over 50; Classes B–D: under 30 and over 30). A class without
+ * age_codes exists in every age division.
  * ════════════════════════════════════════════════════════════════════ */
 (function (global) {
     "use strict";
@@ -49,7 +58,23 @@
             || String(opt.code || "").toLowerCase().startsWith("para_")
             || !!(explicit && explicit.length > 0);
         if (!requiresPara) return { requiresPara: false, classes: [] };
-        return { requiresPara: true, classes: explicit !== null ? explicit : DEFAULT_PARA_CLASS_OPTIONS };
+        return {
+            requiresPara: true,
+            classes: explicit !== null ? explicit : DEFAULT_PARA_CLASS_OPTIONS,
+            sameParaClass: sameParaClassMode(opt.same_para_class),
+        };
+    }
+
+    // same_para_class → null (off), "class" (exact P21) or "group" (P2x).
+    function sameParaClassMode(raw) {
+        if (raw === true || raw === "class") return "class";
+        if (raw === "group") return "group";
+        return null;
+    }
+
+    // Does this belt class exist in this age division?
+    function classAllowsAge(beltOpt, ageOpt) {
+        return !Array.isArray(beltOpt.age_codes) || beltOpt.age_codes.includes(ageOpt.code);
     }
 
     // dimensions: the discipline's `dimensions` array from the schema.
@@ -78,6 +103,7 @@
 
             ageOptions.forEach((ageOpt, ageIndex) => {
                 beltOptions.forEach((beltOpt, beltIndex) => {
+                    if (!classAllowsAge(beltOpt, ageOpt)) return;
                     paraOptions.forEach((paraOpt, paraIndex) => {
                         genderOptions.forEach((genderOpt, genderIndex) => {
                             const codeBase = [ageOpt.code, beltOpt.code, paraOpt.code, genderOpt.code].filter(Boolean).join("_");
@@ -105,6 +131,7 @@
                                     paraMatchValue: paraOpt.code ? (paraOpt.match_value || paraOpt.label || paraOpt.code) : null,
                                     genderCode: genderOpt.code,
                                     requiresPara: para.requiresPara,
+                                    sameParaClass: para.sameParaClass || null,
                                     ageMin: ageOpt.min, ageMax: ageOpt.max, weightIndex,
                                     // Round/break length varies by age division.
                                     roundTime: ageOpt.roundTime || "02:00",
@@ -138,5 +165,5 @@
         return disciplineKey ? (disciplines[disciplineKey].dimensions || []) : [];
     }
 
-    global.TrueVARCategories = { flatten, dimensionsFor, paraRules, PARA_CATEGORIES, DEFAULT_PARA_CLASS_OPTIONS };
+    global.TrueVARCategories = { flatten, dimensionsFor, paraRules, sameParaClassMode, classAllowsAge, PARA_CATEGORIES, DEFAULT_PARA_CLASS_OPTIONS };
 })(typeof window !== "undefined" ? window : globalThis);

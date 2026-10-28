@@ -299,6 +299,7 @@ each browser's own print-to-PDF engine. #}
                 return `${flag ? flag + " " : ""}${escapeHtml(m.name)}${rankLabel ? ` <span class="text-muted">(${escapeHtml(rankLabel)})</span>` : ""}`;
             }).join(" &amp; ");
             const club = members[0] ? members[0].club : "";
+            const paraWarning = paraClassWarning(cat, members);
             const athleteIds = members.map(m => m.athleteId).join(",");
 
             return `
@@ -321,9 +322,24 @@ each browser's own print-to-PDF engine. #}
                         </button>
                     </div>
                     ${club ? `<div class="text-muted cm-athlete-club">${escapeHtml(club)}</div>` : ""}
+                    ${paraWarning ? `<div class="cm-athlete-warn">⚠ ${escapeHtml(paraWarning)}</div>` : ""}
                 </div>
             `;
         }).join("");
+    }
+
+    // Para pairs / teams (same_para_class in the schema): every member must
+    // share one para class. This page never blocks anything (staff tool),
+    // but an entry that breaks the rule gets a visible warning on its card.
+    // Clubs can't create such entries — tournament.html and the API refuse.
+    function paraClassWarning(cat, members) {
+        const mode = cat.sameParaClass;
+        if (!mode || members.length < 2) return null;
+        const classes = members.map(m => String(m.paraCategory || "").trim().toUpperCase());
+        if (classes.some(c => !c)) return "A member has no para class";
+        const keys = classes.map(c => (mode === "group" ? c.slice(0, 2) : c));
+        if (keys.every(k => k === keys[0])) return null;
+        return `Different para ${mode === "group" ? "groups" : "classes"}: ${classes.join(", ")}`;
     }
 
     async function removeEntry(event, categoryCode, ageCode, entryId) {
@@ -1308,6 +1324,13 @@ each browser's own print-to-PDF engine. #}
         font-weight: 600;
         font-size: 0.9rem;
         word-break: break-word;
+    }
+
+    .cm-athlete-warn {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #b45309;
+        margin-top: 0.25rem;
     }
 
     .cm-athlete-club {

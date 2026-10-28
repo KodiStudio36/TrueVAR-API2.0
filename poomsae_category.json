@@ -28,25 +28,59 @@
                                                 "code": "class_d",
                                                 "label": "Class D",
                                                 "min": 0,
-                                                "max": 3
+                                                "max": 3,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_c",
                                                 "label": "Class C",
                                                 "min": 4,
-                                                "max": 6
+                                                "max": 6,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_b",
                                                 "label": "Class B",
                                                 "min": 7,
-                                                "max": 9
+                                                "max": 9,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_a",
                                                 "label": "Class A",
                                                 "min": 10,
-                                                "max": null
+                                                "max": null,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_under_40",
+                                                    "seniors_under_50",
+                                                    "seniors_over_50"
+                                                ]
                                             }
                                         ]
                                     },
@@ -62,25 +96,59 @@
                                                 "code": "class_d",
                                                 "label": "Class D",
                                                 "min": 0,
-                                                "max": 3
+                                                "max": 3,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_c",
                                                 "label": "Class C",
                                                 "min": 4,
-                                                "max": 6
+                                                "max": 6,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_b",
                                                 "label": "Class B",
                                                 "min": 7,
-                                                "max": 9
+                                                "max": 9,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_a",
                                                 "label": "Class A",
                                                 "min": 10,
-                                                "max": null
+                                                "max": null,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_under_40",
+                                                    "seniors_under_50",
+                                                    "seniors_over_50"
+                                                ]
                                             }
                                         ],
                                         "gender_options": [
@@ -108,25 +176,59 @@
                                                 "code": "class_d",
                                                 "label": "Class D",
                                                 "min": 0,
-                                                "max": 3
+                                                "max": 3,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_c",
                                                 "label": "Class C",
                                                 "min": 4,
-                                                "max": 6
+                                                "max": 6,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_b",
                                                 "label": "Class B",
                                                 "min": 7,
-                                                "max": 9
+                                                "max": 9,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_over_30"
+                                                ]
                                             },
                                             {
                                                 "code": "class_a",
                                                 "label": "Class A",
                                                 "min": 10,
-                                                "max": null
+                                                "max": null,
+                                                "age_codes": [
+                                                    "pupils",
+                                                    "younger_cadets",
+                                                    "cadets",
+                                                    "juniors",
+                                                    "seniors_under_30",
+                                                    "seniors_under_40",
+                                                    "seniors_under_50",
+                                                    "seniors_over_50"
+                                                ]
                                             }
                                         ],
                                         "gender_options": [
@@ -318,7 +420,8 @@
                                                 "min": null,
                                                 "max": null
                                             }
-                                        ]
+                                        ],
+                                        "same_para_class": "class"
                                     },
                                     {
                                         "code": "para_teams",
@@ -362,7 +465,8 @@
                                                 "min": null,
                                                 "max": null
                                             }
-                                        ]
+                                        ],
+                                        "same_para_class": "class"
                                     },
                                     {
                                         "code": "freestyle_individual",

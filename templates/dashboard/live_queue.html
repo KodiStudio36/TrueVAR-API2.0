@@ -27,6 +27,9 @@
         <button type="button" class="btn btn-ghost" onclick="openBulkEditModal()">⚙ Bulk Edit Category</button>
         <button type="button" class="btn btn-ghost" onclick="openComputeResultsModal()">🏅 Compute Results</button>
         <button type="button" class="btn btn-ghost" onclick="openBracketPdfModal()">📄 Bracket PDFs</button>
+        <button type="button" class="btn btn-primary" id="print-new-results-btn" onclick="printNewResults()"
+            title="Prints every category finished since the last time this button was used — and any whose result was corrected since">🖨
+            Print New Results</button>
     </div>
 
     {# ═══════════════════════════════════════════════════════════════════════
@@ -1389,10 +1392,25 @@ JAVASCRIPT
             liveMatchByKey[`${m.bracketRound}_${m.bracketMatchNumber}`] = m;
         });
 
+        // The athlete in a slot can change after commit: Match Details'
+        // corner replacement writes a different athlete (and entryId) onto
+        // the match doc, and a corrected name lands there too. The live
+        // match doc is the truth — `replaced` (old entryId → live corner)
+        // and `liveNames` (entryId → current name) carry that back into
+        // `entries` below, so nothing on the sheet that looks names up by
+        // entryId still shows the athlete as committed.
+        const replaced = {};
+        const liveNames = {};
         built.rounds.forEach(round => round.forEach(m => {
             if (m.status === "walkover") return;
             const live = liveMatchByKey[`${m.round}_${m.matchNumber}`];
             if (!live) { m.notInDatabase = true; return; } // structurally real, but no match doc currently exists for it
+            ["blue", "red"].forEach(side => {
+                const was = m[side], now = live[side];
+                if (!now || !now.entryId) return;
+                if (now.name) liveNames[now.entryId] = now;
+                if (was && was.entryId && was.entryId !== now.entryId) replaced[was.entryId] = now;
+            });
             m.status = live.status;
             m.winnerEntryId = live.winnerEntryId || null;
             m.blue = live.blue || m.blue;
@@ -1411,6 +1429,23 @@ JAVASCRIPT
             m.win_type = live.win_type || null;
         }));
 
+        // Same seed and slot, current athlete: a replaced entry becomes the
+        // new athlete; a kept one gets its current name / club / country.
+        const currentEntries = entries.map(e => {
+            const now = replaced[e.entryId] || liveNames[e.entryId];
+            if (!now) return e;
+            return {
+                ...e,
+                entryId: now.entryId,
+                athleteIds: now.athleteIds || e.athleteIds,
+                name: now.name || e.name,
+                clubId: now.clubId ?? e.clubId,
+                clubName: now.clubName ?? e.clubName,
+                country: now.country ?? e.country,
+                replacedEntryId: replaced[e.entryId] ? e.entryId : undefined,
+            };
+        });
+
         const ageCode = ageCodeForCategoryCode(bracketDoc.categoryCode);
         const rosterEntries = (ageCode && rostersByAgeCode[ageCode] && rostersByAgeCode[ageCode][bracketDoc.categoryCode]) || {};
         const placements = {}; // entryId -> placement (1/2/3/5/...), only for entries Compute Results has actually placed
@@ -1418,10 +1453,17 @@ JAVASCRIPT
             if (entry && entry.placement != null) placements[entryId] = entry.placement;
         });
 
+        // A placement computed for the athlete that was replaced moves with
+        // the slot to the athlete who actually competed.
+        Object.entries(replaced).forEach(([oldId, now]) => {
+            if (placements[oldId] != null && placements[now.entryId] == null) placements[now.entryId] = placements[oldId];
+            delete placements[oldId];
+        });
+
         return {
             categoryCode: bracketDoc.categoryCode,
             categoryLabel: bracketDoc.categoryLabel || bracketDoc.categoryCode,
-            entries,
+            entries: currentEntries,
             rounds: built.rounds,
             bracketSize: built.bracketSize,
             placements,
@@ -1674,6 +1716,284 @@ JAVASCRIPT
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = "🖨 Print Bracket PDFs (with Results)"; }
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PRINT NEW RESULTS — the "🖨 Print New Results" toolbar button.
+    // Partial results during the day with one click: prints every
+    // category whose result is FINISHED and hasn't been printed yet — and
+    // reprints one whose result changed since it was printed (a corrected
+    // score, a replaced athlete). Everything already printed and unchanged
+    // is skipped.
+    //
+    //   single elimination  the bracket sheet with results + Classification
+    //                       (same sheet as 📄 Bracket PDFs), once its Final
+    //                       is decided. Placements are recomputed first
+    //                       (same call as 🏅 Compute Results).
+    //   cut-off (poomsae)   a results table — Final ranking first, then the
+    //                       Semi-Final and Preliminary athletes who didn't
+    //                       go through, each with their score per round —
+    //                       once every Final performance is in.
+    //   round robin         not printed here (no finished-result sheet).
+    //
+    // MEMORY: tournaments/{id}/meta/printedResults →
+    //   { categories: { categoryCode: { fingerprint, printedAt } } }
+    // shared by every computer running this page. A fingerprint is a hash
+    // of everything printed for that category, so a correction changes it.
+    // If Firestore refuses the write (rules), this browser's localStorage
+    // is used instead and the summary says so.
+    // ═══════════════════════════════════════════════════════════════════
+
+    const PRINTED_RESULTS_LOCAL_KEY = `truevar.printedResults.${TOURNAMENT_ID}`;
+    const NOT_PERFORMED = new Set(["withdrawn", "dns", "dsq", "disqualified", "cancelled", "walkover"]);
+
+    function printedResultsRef() {
+        return fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("meta").doc("printedResults");
+    }
+
+    async function loadPrintedResults() {
+        let remote = {}, local = {};
+        try {
+            const doc = await printedResultsRef().get();
+            remote = (doc.exists && doc.data().categories) || {};
+        } catch (err) {
+            console.warn("printedResults not readable from Firestore — using this browser's memory", err);
+        }
+        try { local = JSON.parse(localStorage.getItem(PRINTED_RESULTS_LOCAL_KEY) || "{}") || {}; } catch (e) { /* none */ }
+        return { ...local, ...remote };
+    }
+
+    // -> "firestore" | "local"
+    async function savePrintedResults(updates) {
+        try {
+            const merged = { ...JSON.parse(localStorage.getItem(PRINTED_RESULTS_LOCAL_KEY) || "{}"), ...updates };
+            localStorage.setItem(PRINTED_RESULTS_LOCAL_KEY, JSON.stringify(merged));
+        } catch (e) { /* storage unavailable */ }
+        try {
+            await printedResultsRef().set({ categories: updates }, { merge: true });
+            return "firestore";
+        } catch (err) {
+            console.warn("printedResults not writable in Firestore — remembered in this browser only", err);
+            return "local";
+        }
+    }
+
+    // Small, stable string hash (djb2) — only used to notice change.
+    function fingerprintOf(value) {
+        const str = JSON.stringify(value);
+        let h = 5381;
+        for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+        return (h >>> 0).toString(36);
+    }
+
+    // ── single elimination ───────────────────────────────────────────────
+    function isBracketFinished(bracket) {
+        const lastRound = bracket.rounds[bracket.rounds.length - 1] || [];
+        const final = lastRound[0];
+        if (!final) return false;
+        if (final.status === "walkover") return true;
+        return isDone(final) && !final.notInDatabase;
+    }
+
+    function bracketFingerprint(bracket) {
+        return fingerprintOf({
+            placements: bracket.placements,
+            rounds: bracket.rounds.map(r => r.map(m => [
+                m.matchId, m.status, m.winnerEntryId || null, m.win || null, m.win_score || null, m.win_type || null,
+                m.blue && m.blue.name || null, m.red && m.red.name || null,
+            ])),
+        });
+    }
+
+    // ── cut-off ──────────────────────────────────────────────────────────
+    const CUT_OFF_PHASES = ["F", "SF", "PR"]; // print order: Final first
+
+    function cutOffScore(m) {
+        const s = m.blue && m.blue.finalScore;
+        return typeof s === "number" && m.status === "completed" ? s : null;
+    }
+
+    // Classification of a cut-off category: Final ranking, then Semi-Final
+    // athletes who didn't go through, then Preliminary ones. Inside a group
+    // by that round's rank (written by processMatchResult) or score; equal
+    // rank = equal place. null while the Final isn't fully in.
+    function buildCutOffResult(categoryCode) {
+        const matches = [...matchesById.values()].filter(m => m.categoryCode === categoryCode && !m.red);
+        const byPhase = {};
+        matches.forEach(m => { (byPhase[m.roundPhase] = byPhase[m.roundPhase] || []).push(m); });
+        const final = byPhase.F || [];
+        if (final.length === 0) return null;
+        const finalOver = final.every(m => m.status === "completed" || NOT_PERFORMED.has(m.status) || (m.blue && m.blue.empty));
+        if (!finalOver) return null;
+
+        // entryId -> { name, club, country, scores: {phase: score} }
+        const athletes = {};
+        matches.forEach(m => {
+            const b = m.blue || {};
+            if (!b.entryId) return;
+            const a = athletes[b.entryId] || (athletes[b.entryId] = { entryId: b.entryId, name: b.name, club: b.clubName || "", country: b.country || "", scores: {} });
+            a.name = b.name || a.name;
+            a.scores[m.roundPhase] = cutOffScore(m);
+        });
+
+        const rows = [];
+        const placed = new Set();
+        let offset = 0;
+        CUT_OFF_PHASES.forEach(phase => {
+            const group = (byPhase[phase] || [])
+                .filter(m => m.blue && m.blue.entryId && !placed.has(m.blue.entryId))
+                .map(m => ({ m, score: cutOffScore(m) }))
+                .sort((x, y) => (x.m.rank ?? Infinity) - (y.m.rank ?? Infinity)
+                    || (y.score ?? -1) - (x.score ?? -1)
+                    || (x.m.matchNumber ?? 0) - (y.m.matchNumber ?? 0));
+            group.forEach((g, i) => {
+                const prev = group[i - 1];
+                const same = prev && prev.score != null && g.score != null
+                    && (g.m.rank != null ? g.m.rank === prev.m.rank : g.score === prev.score);
+                const place = g.score == null ? null : (same ? rows[rows.length - 1].place : offset + i + 1);
+                rows.push({ ...athletes[g.m.blue.entryId], place, phase });
+                placed.add(g.m.blue.entryId);
+            });
+            offset += group.length;
+        });
+        const phases = CUT_OFF_PHASES.filter(p => byPhase[p] && byPhase[p].length);
+        return { categoryCode, rows, phases };
+    }
+
+    function cutOffResultHtml(result, label) {
+        const phaseName = { F: "Final", SF: "Semi-Final", PR: "Preliminary" };
+        const fmt = v => (typeof v === "number" ? v.toFixed(3) : "—");
+        const td = (c, extra) => `<td style="border:1px solid #111; padding:5px 7px; ${extra || "text-align:center;"}">${c}</td>`;
+        const th = (c, extra) => `<th style="border:1px solid #111; padding:5px 7px; font-weight:700; ${extra || "text-align:center;"}">${escapeHtml(c)}</th>`;
+        const body = result.rows.map(r => `<tr>
+                ${td(r.place == null ? "—" : escapeHtml(String(r.place)))}
+                ${td(`<strong>${escapeHtml(r.name || "—")}</strong>`, "text-align:left;")}
+                ${td(escapeHtml(r.club || ""), "text-align:left;")}
+                ${td(escapeHtml(r.country || ""))}
+                ${result.phases.map(p => td(fmt(r.scores[p]), p === r.phase ? "text-align:center; font-weight:700;" : "text-align:center; color:#555;")).join("")}
+            </tr>`).join("");
+        return `
+            <div style="font-family: Arial, Helvetica, sans-serif; padding: 24px; box-sizing: border-box; color: #111; page-break-after: always;">
+                <div style="font-size: 20px; font-weight: 700;">${escapeHtml(TOURNAMENT_TITLE || "Tournament")}</div>
+                <div style="font-size: 16px; font-weight: 700; margin: 4px 0 16px;">${escapeHtml(label)} — Results</div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <thead><tr>
+                        ${th("Place")}${th("Athlete", "text-align:left;")}${th("Club", "text-align:left;")}${th("NOC")}
+                        ${result.phases.map(p => th(phaseName[p] || p)).join("")}
+                    </tr></thead>
+                    <tbody>${body}</tbody>
+                </table>
+                <div style="font-size: 10px; color: #555; margin-top: 8px;">Printed ${escapeHtml(new Date().toLocaleString())}</div>
+            </div>`;
+    }
+
+    // ── the button ───────────────────────────────────────────────────────
+    async function collectFinishedResults() {
+        // Fresh placements for single-elimination categories.
+        let computeNote = null;
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/results/compute`, { method: "POST" });
+            if (!res.ok) computeNote = `Placements not recomputed (${res.status}) — printed as last computed.`;
+        } catch (err) {
+            computeNote = "Placements not recomputed (offline?) — printed as last computed.";
+        }
+        await prepareBracketPdfData(); // bracket docs + rosters + live matches → reconstructedBrackets
+
+        const finished = [];
+        reconstructedBrackets.filter(isBracketFinished).forEach(b => {
+            finished.push({ kind: "bracket", code: b.categoryCode, label: b.categoryLabel, bracket: b, fingerprint: bracketFingerprint(b) });
+        });
+        Object.values(bracketDocsByCategoryCode)
+            .filter(doc => doc.system === "cut_off")
+            .forEach(doc => {
+                const result = buildCutOffResult(doc.categoryCode);
+                if (!result) return;
+                finished.push({
+                    kind: "cutoff", code: doc.categoryCode, label: doc.categoryLabel || resolveCategoryLabel(doc.categoryCode),
+                    result, fingerprint: fingerprintOf(result.rows),
+                });
+            });
+        finished.sort((a, b) => a.label.localeCompare(b.label));
+        return { finished, computeNote };
+    }
+
+    async function printResultItems(items) {
+        const brackets = items.filter(i => i.kind === "bracket").map(i => i.bracket);
+        const cutOffs = items.filter(i => i.kind === "cutoff");
+        if (brackets.length) await BracketSheets.print(brackets, BRACKET_SHEET_OPTIONS);
+        if (cutOffs.length) await printHtmlInFrame(cutOffs.map(i => cutOffResultHtml(i.result, i.label)).join(""));
+    }
+
+    async function printNewResults() {
+        const btn = document.getElementById("print-new-results-btn");
+        const label = btn ? btn.textContent : "";
+        if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+        try {
+            const [{ finished, computeNote }, printed] = await Promise.all([collectFinishedResults(), loadPrintedResults()]);
+            const fresh = finished.filter(i => !printed[i.code]);
+            const changed = finished.filter(i => printed[i.code] && printed[i.code].fingerprint !== i.fingerprint);
+            const toPrint = [...fresh, ...changed];
+
+            if (toPrint.length === 0) {
+                showNewResultsSummary({ printed: [], finished, printedBefore: printed, computeNote, storage: null });
+                return;
+            }
+            if (btn) btn.textContent = "Printing…";
+            await printResultItems(toPrint);
+            const now = new Date().toISOString();
+            const storage = await savePrintedResults(Object.fromEntries(toPrint.map(i => [i.code, { fingerprint: i.fingerprint, printedAt: now, label: i.label }])));
+            showNewResultsSummary({ printed: toPrint, changedCodes: new Set(changed.map(i => i.code)), finished, printedBefore: printed, computeNote, storage });
+        } catch (err) {
+            console.error("Print new results failed", err);
+            alert(err.message || "Failed to print — try again.");
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = label; }
+        }
+    }
+
+    // "Print everything again" — prints every finished category and
+    // refreshes the memory, for a lost or jammed printout.
+    async function reprintAllResults(btnEl) {
+        if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Printing…"; }
+        try {
+            const { finished } = await collectFinishedResults();
+            if (finished.length === 0) { alert("No finished categories yet."); return; }
+            await printResultItems(finished);
+            const now = new Date().toISOString();
+            await savePrintedResults(Object.fromEntries(finished.map(i => [i.code, { fingerprint: i.fingerprint, printedAt: now, label: i.label }])));
+            closeModal();
+        } catch (err) {
+            console.error("Reprint failed", err);
+            alert(err.message || "Failed to print — try again.");
+        } finally {
+            if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Print everything again"; }
+        }
+    }
+
+    function showNewResultsSummary({ printed, changedCodes, finished, printedBefore, computeNote, storage }) {
+        const last = Object.values(printedBefore).map(p => p.printedAt).filter(Boolean).sort().pop();
+        const list = printed.map(i => `
+            <div style="display:flex; justify-content:space-between; gap:.5rem; padding:.3rem 0; border-bottom:1px solid var(--lq-border); font-size:.85rem;">
+                <span>${escapeHtml(i.label)}</span>
+                <span style="color:${changedCodes && changedCodes.has(i.code) ? "var(--lq-amber)" : "var(--lq-green)"}; font-weight:700;">
+                    ${changedCodes && changedCodes.has(i.code) ? "CORRECTED" : "NEW"}</span>
+            </div>`).join("");
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>${printed.length ? `Printed ${printed.length} result${printed.length === 1 ? "" : "s"}` : "No new results"}</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                ${printed.length ? `<div style="max-height:260px; overflow-y:auto; margin-bottom:.75rem;">${list}</div>`
+                : `<p class="lq-field-hint">Nothing finished since the last print${last ? ` (${escapeHtml(new Date(last).toLocaleString())})` : ""}. ${finished.length} finished categor${finished.length === 1 ? "y has" : "ies have"} already been printed.</p>`}
+                ${computeNote ? `<div class="lq-alert-error" style="margin-bottom:.5rem;">${escapeHtml(computeNote)}</div>` : ""}
+                ${storage === "local" ? `<div class="lq-alert-error" style="margin-bottom:.5rem;">Couldn't save to Firestore — only THIS browser remembers what was printed.</div>` : ""}
+                <div class="lq-modal-actions">
+                    <button class="btn btn-ghost" onclick="reprintAllResults(this)">Print everything again</button>
+                    <button class="btn btn-primary" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        `);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2272,7 +2592,11 @@ JAVASCRIPT
     }
 
     // ── Grouping / rendering ─────────────────────────────────────────────────
-    function isDone(m) { return m.status === "done" || m.status === "walkover" || !!m.winnerEntryId; }
+    // "completed" is what the Firebase Sync plugin writes when it saves a
+    // result (kyorugi on WIN, poomsae on Final Results) — a poomsae cut-off
+    // performance never gets a winnerEntryId, so without it a finished
+    // performance would still show as not done.
+    function isDone(m) { return m.status === "done" || m.status === "completed" || m.status === "walkover" || !!m.winnerEntryId; }
 
     function groupByCourtSorted() {
         const byCourt = {};

@@ -1,3 +1,4 @@
+import copy
 import unicodedata
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
@@ -514,6 +515,56 @@ def _para_rules(opt: Optional[dict], entry_type_code: str) -> Tuple[bool, List[d
     return True, (explicit if explicit is not None else DEFAULT_PARA_CLASS_OPTIONS)
 
 
+def _same_para_class_mode(opt: Optional[dict]) -> Optional[str]:
+    """
+    same_para_class on an entry type: true / "class" → every member of the
+    pair/team must have the exact same paraCategory (P21 + P21); "group" →
+    the same family (P21 + P23 → "P2"). Anything else → no check. Mirrors
+    sameParaClassMode in tournament.html.
+    """
+    raw = (opt or {}).get("same_para_class")
+    if raw is True or raw == "class":
+        return "class"
+    if raw == "group":
+        return "group"
+    return None
+
+
+def _para_class_key(para_category: Optional[str], mode: str) -> Optional[str]:
+    c = str(para_category or "").strip().upper()
+    if not c:
+        return None
+    return c[:2] if mode == "group" else c
+
+
+def _validate_class_age(
+    tournament_id: str,
+    entry_type_code: str,
+    belt_class_code: Optional[str],
+    age_code: str,
+) -> None:
+    """
+    A belt class can declare `age_codes` — the only age divisions it exists
+    in (Individual Class A: seniors under 30/40/50 and over 50; Classes
+    B–D: under 30 and over 30). Rejects a club registration/edit into an
+    age × class combination the schema doesn't offer. Classes without
+    age_codes exist in every age division.
+    """
+    if not belt_class_code:
+        return
+    opt = _find_entry_type_option(tournament_id, entry_type_code) or {}
+    for b in opt.get("belt_class_options") or []:
+        if b.get("code") != belt_class_code:
+            continue
+        allowed = b.get("age_codes")
+        if isinstance(allowed, list) and age_code not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{b.get('label') or belt_class_code} is not offered in this age division.",
+            )
+        return
+
+
 def _validate_para_eligibility(
     tournament_id: str,
     entry_type_code: str,
@@ -552,6 +603,25 @@ def _validate_para_eligibility(
             raise HTTPException(
                 status_code=400,
                 detail=f"{_name(a)} is not registered as a para athlete. Only para athletes can enter this category.",
+            )
+
+    # Pairs / teams: the category may be mixed (gender, and no class split
+    # in the code), but every member must share one para class.
+    same_mode = _same_para_class_mode(opt)
+    if same_mode and len(athletes) > 1:
+        keys = [_para_class_key(_sport_data(a).get("paraCategory"), same_mode) for _, a in athletes]
+        missing = [_name(a) for (_, a), k in zip(athletes, keys) if not k]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{', '.join(missing)} {'has' if len(missing) == 1 else 'have'} no para class set on their athlete profile.",
+            )
+        if len(set(keys)) > 1:
+            got = ", ".join(sorted({str(_sport_data(a).get('paraCategory')).upper() for _, a in athletes}))
+            what = "para group" if same_mode == "group" else "para class"
+            raise HTTPException(
+                status_code=400,
+                detail=f"All members must have the same {what} (got {got}).",
             )
 
     if not para_opts:
@@ -612,6 +682,7 @@ def _execute_registration_create(
     # non-para athlete into a para category, or a class the athlete isn't
     # classified as — so the check is skipped entirely on that path.
     if enforce_club_match:
+        _validate_class_age(tournament_id, payload.entryTypeCode, payload.beltClassCode, payload.ageCode)
         _validate_para_eligibility(
             tournament_id, payload.entryTypeCode, payload.paraClassCode,
             payload.categoryCode, athlete_docs, sport,
@@ -930,6 +1001,7 @@ def _execute_registration_move(
         # Para rules bind club edits only; staff (admin-move) are
         # unrestricted (see _execute_registration_create).
         if enforce_ownership:
+            _validate_class_age(tournament_id, payload.newEntryTypeCode, payload.newBeltClassCode, payload.newAgeCode)
             _validate_para_eligibility(
                 tournament_id, payload.newEntryTypeCode, payload.newParaClassCode,
                 payload.newCategoryCode, athlete_docs, sport,
@@ -1221,18 +1293,101 @@ def _clean_poomsae_list(keys: List[str]) -> List[str]:
     return [k for k in POOMSAE_KEYS if k in wanted]
 
 
+# ── Default draw settings ──────────────────────────────────────────────
+# Used for any tournament that has no saved draw settings yet (the Save
+# settings button stores the tournament's own copy, which then wins).
+DEFAULT_POOMSAE_POOLS = [
+    {"id": "all_b", "name": "All athletes B",
+     "poomsae": ["taeguk_4", "taeguk_5", "taeguk_6", "taeguk_7", "taeguk_8"]},
+    {"id": "cadets_a", "name": "Cadets athletes A",
+     "poomsae": ["taeguk_4", "taeguk_5", "taeguk_6", "taeguk_7", "taeguk_8", "koryo", "keumgang"]},
+    {"id": "juniors_a", "name": "Juniors athletes A",
+     "poomsae": ["taeguk_4", "taeguk_5", "taeguk_6", "taeguk_7", "taeguk_8", "koryo", "keumgang", "taebaek"]},
+    {"id": "under_40_a", "name": "Under 40 A",
+     "poomsae": ["taeguk_6", "taeguk_7", "taeguk_8", "koryo", "keumgang", "taebaek", "pyongwon", "sipjin"]},
+    {"id": "under_50_a", "name": "Under 50 A",
+     "poomsae": ["taeguk_8", "koryo", "keumgang", "taebaek", "pyongwon", "sipjin", "jitae", "cheonkwon"]},
+    {"id": "over_50_a", "name": "Over 50 A",
+     "poomsae": ["koryo", "keumgang", "taebaek", "pyongwon", "sipjin", "jitae", "cheonkwon", "hansu"]},
+]
+
+# Class A pool by age division; classes B, C, D always use "All athletes B".
+DEFAULT_CLASS_A_POOL_BY_AGE = {
+    "pupils": "cadets_a",
+    "younger_cadets": "cadets_a",
+    "cadets": "cadets_a",
+    "juniors": "juniors_a",
+    "seniors_under_30": "under_40_a",
+    "seniors_over_30": "under_40_a",
+    "seniors_under_40": "under_40_a",
+    "seniors_under_50": "under_50_a",
+    "seniors_over_50": "over_50_a",
+}
+# Groups skipped by default: every Class C and D, plus Class A pupils and
+# younger cadets.
+DEFAULT_EXCLUDED_CLASS_A_AGES = {"pupils", "younger_cadets"}
+
+
+def _default_draw_group(age_code: str, belt_code: str) -> Tuple[str, bool]:
+    """-> (poolId, excluded) for one "<ageCode>|<beltClassCode>" group."""
+    if belt_code == "class_a":
+        return (DEFAULT_CLASS_A_POOL_BY_AGE.get(age_code, "under_40_a"),
+                age_code in DEFAULT_EXCLUDED_CLASS_A_AGES)
+    return "all_b", belt_code in ("class_c", "class_d")
+
+
+def _draw_groups_of(tournament_id: str) -> List[Tuple[str, str]]:
+    """Every (ageCode, beltClassCode) the poomsae schema produces — belt
+    classes' `age_codes` respected, like category-schema.js."""
+    doc = db.collection("tournament_categories").document(tournament_id).get()
+    schemas = ((doc.to_dict() or {}).get("categories") or {}).get("sportSchemas") or {} if doc.exists else {}
+    groups: List[Tuple[str, str]] = []
+    for sport_schema in schemas.values():
+        for key, disc in (sport_schema.get("disciplines") or {}).items():
+            if "poomsae" not in str(key).lower():
+                continue
+            dims = disc.get("dimensions") or []
+            age_dim = next((d for d in dims if d.get("key") == "age"), {}) or {}
+            entry_dim = next((d for d in dims if d.get("key") == "entry_type"), {}) or {}
+            for opt in entry_dim.get("options") or []:
+                ages = opt.get("age_options") or age_dim.get("options") or []
+                for b in opt.get("belt_class_options") or []:
+                    allowed = b.get("age_codes")
+                    for a in ages:
+                        if isinstance(allowed, list) and a.get("code") not in allowed:
+                            continue
+                        g = (a.get("code"), b.get("code"))
+                        if g not in groups:
+                            groups.append(g)
+    return groups
+
+
+def _default_draw_settings(tournament_id: str) -> Dict:
+    assignments, excluded = {}, {}
+    for age_code, belt_code in _draw_groups_of(tournament_id):
+        pool_id, skip = _default_draw_group(age_code, belt_code)
+        assignments[f"{age_code}|{belt_code}"] = pool_id
+        excluded[f"{age_code}|{belt_code}"] = skip
+    return {"pools": copy.deepcopy(DEFAULT_POOMSAE_POOLS), "assignments": assignments, "excludedGroups": excluded}
+
+
 @router.get("/tournaments/{tournament_id}/poomsae-draw",
             dependencies=[Depends(require_operator("brackets:manage"))])
 def get_poomsae_draw(tournament_id: str):
     doc = _poomsae_draw_ref(tournament_id).get()
     data = doc.to_dict() if doc.exists else {}
+    defaults = _default_draw_settings(tournament_id)
+    has_saved = bool(data.get("pools"))
     return {
         "tournamentId": tournament_id,
         "poomsaeKeys": POOMSAE_KEYS,
-        "pools": data.get("pools"),              # None → the page applies its defaults
-        "assignments": data.get("assignments") or {},
+        # Nothing saved yet → the default setup above (pools, a pool for
+        # every age × rank group, C/D + pupils/younger cadets A skipped).
+        "pools": data.get("pools") if has_saved else defaults["pools"],
+        "assignments": (data.get("assignments") or {}) if has_saved else defaults["assignments"],
         "excludedRows": data.get("excludedRows") or {},
-        "excludedGroups": data.get("excludedGroups") or {},
+        "excludedGroups": (data.get("excludedGroups") or {}) if has_saved else defaults["excludedGroups"],
+        "defaults": defaults,   # for the page's "Reset to defaults"
         "draw": data.get("draw"),
     }
 

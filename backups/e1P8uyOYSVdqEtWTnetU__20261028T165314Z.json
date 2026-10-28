@@ -1,0 +1,3871 @@
+{
+ "scriptVersion": "1",
+ "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+ "migrationId": "20261028T165314Z",
+ "createdAt": "2026-10-28T16:53:14.639215+00:00",
+ "categoryDoc": {
+  "createdAt": {
+   "__ts__": "2026-10-11T16:05:28.368000+00:00"
+  },
+  "categories": {
+   "sportSchemas": {
+    "taekwondo": {
+     "key": "taekwondo",
+     "disciplines": {
+      "poomsae": {
+       "key": "poomsae",
+       "label": "Poomsae",
+       "dimensions": [
+        {
+         "unit": null,
+         "key": "entry_type",
+         "display": "Entry Type",
+         "open_top": false,
+         "thresholds_by": {},
+         "options": [
+          {
+           "code": "individual",
+           "match_value": "individual",
+           "belt_class_options": [
+            {
+             "code": "class_d",
+             "min": 0,
+             "label": "Class D",
+             "max": 3
+            },
+            {
+             "code": "class_c",
+             "min": 4,
+             "label": "Class C",
+             "max": 6
+            },
+            {
+             "code": "class_b",
+             "min": 7,
+             "label": "Class B",
+             "max": 9
+            },
+            {
+             "code": "class_a",
+             "min": 10,
+             "label": "Class A",
+             "max": null
+            }
+           ],
+           "label": "Individual",
+           "participantCount": 1,
+           "min": null,
+           "max": null
+          },
+          {
+           "code": "pairs_poomsae",
+           "gender_options": [
+            {
+             "code": "mixed",
+             "match_value": [
+              "male",
+              "female"
+             ],
+             "min": null,
+             "label": "Mixed",
+             "max": null
+            }
+           ],
+           "min": null,
+           "label": "Pairs Poomsae",
+           "match_value": "pairs_poomsae",
+           "belt_class_options": [
+            {
+             "code": "class_d",
+             "min": 0,
+             "label": "Class D",
+             "max": 3
+            },
+            {
+             "code": "class_c",
+             "min": 4,
+             "label": "Class C",
+             "max": 6
+            },
+            {
+             "code": "class_b",
+             "min": 7,
+             "label": "Class B",
+             "max": 9
+            },
+            {
+             "code": "class_a",
+             "min": 10,
+             "label": "Class A",
+             "max": null
+            }
+           ],
+           "participantCount": 2,
+           "max": null
+          },
+          {
+           "code": "teams_poomsae",
+           "gender_options": [
+            {
+             "code": "mixed",
+             "match_value": [
+              "male",
+              "female"
+             ],
+             "min": null,
+             "label": "Mixed",
+             "max": null
+            }
+           ],
+           "min": null,
+           "label": "Teams Poomsae",
+           "match_value": "teams_poomsae",
+           "belt_class_options": [
+            {
+             "code": "class_d",
+             "min": 0,
+             "label": "Class D",
+             "max": 3
+            },
+            {
+             "code": "class_c",
+             "min": 4,
+             "label": "Class C",
+             "max": 6
+            },
+            {
+             "code": "class_b",
+             "min": 7,
+             "label": "Class B",
+             "max": 9
+            },
+            {
+             "code": "class_a",
+             "min": 10,
+             "label": "Class A",
+             "max": null
+            }
+           ],
+           "participantCount": 3,
+           "max": null
+          },
+          {
+           "code": "para_individual",
+           "age_options": [
+            {
+             "code": "cadets",
+             "match_value": null,
+             "min": 2012,
+             "label": "Cadets",
+             "max": 2014
+            },
+            {
+             "code": "juniors",
+             "match_value": null,
+             "min": 2009,
+             "label": "Juniors",
+             "max": 2011
+            },
+            {
+             "code": "seniors",
+             "match_value": null,
+             "min": 1920,
+             "label": "Seniors",
+             "max": 2010
+            }
+           ],
+           "min": null,
+           "label": "Para Individual",
+           "para_class_options": [
+            {
+             "code": "p11",
+             "match_value": "P11",
+             "label": "P11"
+            },
+            {
+             "code": "p12",
+             "match_value": "P12",
+             "label": "P12"
+            },
+            {
+             "code": "p21",
+             "match_value": "P21",
+             "label": "P21"
+            },
+            {
+             "code": "p22",
+             "match_value": "P22",
+             "label": "P22"
+            },
+            {
+             "code": "p23",
+             "match_value": "P23",
+             "label": "P23"
+            },
+            {
+             "code": "p31",
+             "match_value": "P31",
+             "label": "P31"
+            },
+            {
+             "code": "p32",
+             "match_value": "P32",
+             "label": "P32"
+            },
+            {
+             "code": "p33",
+             "match_value": "P33",
+             "label": "P33"
+            },
+            {
+             "code": "p34",
+             "match_value": "P34",
+             "label": "P34"
+            },
+            {
+             "code": "p35",
+             "match_value": "P35",
+             "label": "P35"
+            },
+            {
+             "code": "p41",
+             "match_value": "P41",
+             "label": "P41"
+            },
+            {
+             "code": "p42",
+             "match_value": "P42",
+             "label": "P42"
+            },
+            {
+             "code": "p43",
+             "match_value": "P43",
+             "label": "P43"
+            },
+            {
+             "code": "p44",
+             "match_value": "P44",
+             "label": "P44"
+            },
+            {
+             "code": "p45",
+             "match_value": "P45",
+             "label": "P45"
+            },
+            {
+             "code": "p51",
+             "match_value": "P51",
+             "label": "P51"
+            },
+            {
+             "code": "p52",
+             "match_value": "P52",
+             "label": "P52"
+            },
+            {
+             "code": "p53",
+             "match_value": "P53",
+             "label": "P53"
+            },
+            {
+             "code": "p60",
+             "match_value": "P60",
+             "label": "P60"
+            },
+            {
+             "code": "p72",
+             "match_value": "P72",
+             "label": "P72"
+            }
+           ],
+           "match_value": "para_individual",
+           "participantCount": 1,
+           "requires_para": true,
+           "max": null
+          },
+          {
+           "code": "para_pairs",
+           "age_options": [
+            {
+             "code": "cadets",
+             "match_value": null,
+             "min": 2012,
+             "label": "Cadets",
+             "max": 2014
+            },
+            {
+             "code": "juniors",
+             "match_value": null,
+             "min": 2009,
+             "label": "Juniors",
+             "max": 2011
+            },
+            {
+             "code": "seniors",
+             "match_value": null,
+             "min": 1920,
+             "label": "Seniors",
+             "max": 2010
+            }
+           ],
+           "min": null,
+           "label": "Para Pairs",
+           "max": null,
+           "match_value": "para_pairs",
+           "participantCount": 2,
+           "requires_para": true,
+           "gender_options": [
+            {
+             "code": "mixed",
+             "match_value": [
+              "male",
+              "female"
+             ],
+             "min": null,
+             "label": "Mixed",
+             "max": null
+            }
+           ]
+          },
+          {
+           "code": "para_teams",
+           "age_options": [
+            {
+             "code": "cadets",
+             "match_value": null,
+             "min": 2012,
+             "label": "Cadets",
+             "max": 2014
+            },
+            {
+             "code": "juniors",
+             "match_value": null,
+             "min": 2009,
+             "label": "Juniors",
+             "max": 2011
+            },
+            {
+             "code": "seniors",
+             "match_value": null,
+             "min": 1920,
+             "label": "Seniors",
+             "max": 2010
+            }
+           ],
+           "min": null,
+           "label": "Para Teams",
+           "max": null,
+           "match_value": "para_teams",
+           "participantCount": 3,
+           "requires_para": true,
+           "gender_options": [
+            {
+             "code": "mixed",
+             "match_value": [
+              "male",
+              "female"
+             ],
+             "min": null,
+             "label": "Mixed",
+             "max": null
+            }
+           ]
+          },
+          {
+           "code": "freestyle_individual",
+           "age_options": [
+            {
+             "code": "children",
+             "match_value": null,
+             "min": 2015,
+             "label": "Children",
+             "max": 2021
+            },
+            {
+             "code": "under_17",
+             "match_value": null,
+             "min": 2009,
+             "label": "Under 17",
+             "max": 2014
+            },
+            {
+             "code": "over_17",
+             "match_value": null,
+             "min": 1920,
+             "label": "Over 17",
+             "max": 2008
+            }
+           ],
+           "min": null,
+           "label": "Freestyle Individual",
+           "participantCount": 1,
+           "match_value": "freestyle_individual",
+           "max": null
+          },
+          {
+           "code": "freestyle_pairs",
+           "age_options": [
+            {
+             "code": "children",
+             "match_value": null,
+             "min": 2015,
+             "label": "Children",
+             "max": 2021
+            },
+            {
+             "code": "under_17",
+             "match_value": null,
+             "min": 2009,
+             "label": "Under 17",
+             "max": 2014
+            },
+            {
+             "code": "over_17",
+             "match_value": null,
+             "min": 1920,
+             "label": "Over 17",
+             "max": 2008
+            }
+           ],
+           "min": null,
+           "label": "Freestyle Pairs",
+           "max": null,
+           "match_value": "freestyle_pairs",
+           "participantCount": 2,
+           "gender_options": [
+            {
+             "code": "mixed",
+             "match_value": [
+              "male",
+              "female"
+             ],
+             "min": null,
+             "label": "Mixed",
+             "max": null
+            }
+           ]
+          },
+          {
+           "code": "freestyle_teams",
+           "age_options": [
+            {
+             "code": "children",
+             "match_value": null,
+             "min": 2015,
+             "label": "Children",
+             "max": 2021
+            },
+            {
+             "code": "under_17",
+             "match_value": null,
+             "min": 2009,
+             "label": "Under 17",
+             "max": 2014
+            },
+            {
+             "code": "over_17",
+             "match_value": null,
+             "min": 1920,
+             "label": "Over 17",
+             "max": 2008
+            }
+           ],
+           "min": null,
+           "label": "Freestyle Teams",
+           "max": null,
+           "match_value": "freestyle_teams",
+           "participantCount": 3,
+           "gender_options": [
+            {
+             "code": "mixed",
+             "match_value": [
+              "male",
+              "female"
+             ],
+             "min": null,
+             "label": "Mixed",
+             "max": null
+            }
+           ]
+          }
+         ],
+         "field": "entryType",
+         "depends_on": [],
+         "thresholds": null,
+         "type": "discrete"
+        },
+        {
+         "unit": null,
+         "key": "age",
+         "display": "Birth Year",
+         "open_top": true,
+         "thresholds_by": {},
+         "options": [
+          {
+           "code": "pupils",
+           "match_value": null,
+           "min": 2018,
+           "label": "Pupils",
+           "max": 2021
+          },
+          {
+           "code": "younger_cadets",
+           "match_value": null,
+           "min": 2015,
+           "label": "Younger Cadets",
+           "max": 2017
+          },
+          {
+           "code": "cadets",
+           "match_value": null,
+           "min": 2012,
+           "label": "Cadets",
+           "max": 2014
+          },
+          {
+           "code": "juniors",
+           "match_value": null,
+           "min": 2009,
+           "label": "Juniors",
+           "max": 2011
+          },
+          {
+           "code": "seniors_under_30",
+           "match_value": null,
+           "min": 1996,
+           "label": "Seniors under 30",
+           "max": 2008
+          },
+          {
+           "code": "seniors_over_30",
+           "match_value": null,
+           "min": 1920,
+           "label": "Seniors over 30",
+           "max": 1995
+          },
+          {
+           "code": "seniors_under_40",
+           "match_value": null,
+           "min": 1986,
+           "label": "Seniors under 40",
+           "max": 1995
+          },
+          {
+           "code": "seniors_under_50",
+           "match_value": null,
+           "min": 1976,
+           "label": "Seniors under 50",
+           "max": 1985
+          },
+          {
+           "code": "seniors_over_50",
+           "match_value": null,
+           "min": 1920,
+           "label": "Seniors over 50",
+           "max": 1975
+          }
+         ],
+         "field": "birthYear",
+         "depends_on": [],
+         "thresholds": null,
+         "type": "range"
+        },
+        {
+         "unit": null,
+         "key": "gender",
+         "display": "Gender",
+         "open_top": true,
+         "thresholds_by": {},
+         "options": [
+          {
+           "code": "men",
+           "match_value": "male",
+           "min": null,
+           "label": "Male",
+           "max": null
+          },
+          {
+           "code": "women",
+           "match_value": "female",
+           "min": null,
+           "label": "Female",
+           "max": null
+          }
+         ],
+         "field": "gender",
+         "depends_on": [
+          "age"
+         ],
+         "thresholds": null,
+         "type": "discrete"
+        }
+       ]
+      }
+     },
+     "label": "Taekwondo"
+    }
+   }
+  },
+  "tournamentId": "e1P8uyOYSVdqEtWTnetU"
+ },
+ "registrations": {
+  "freestyle_individual_children_women_oUMWbvIUCMJeSTPblM27": {
+   "status": "active",
+   "associationId": "SATKD23062301",
+   "beltClassCode": null,
+   "categoryCode": "freestyle_individual_children_women",
+   "paraClassCode": null,
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-24T10:21:37.522000+00:00"
+   },
+   "ageCode": "children",
+   "entryTypeCode": "freestyle_individual",
+   "categoryLabel": "Freestyle Individual · Children · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "oUMWbvIUCMJeSTPblM27"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_a_men_1JjG6qPcA1B9rTcF2YhY": {
+   "status": "active",
+   "associationId": "SATKD20200000368",
+   "beltClassCode": "class_a",
+   "categoryCode": "individual_cadets_class_a_men",
+   "paraClassCode": null,
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:33:33.109000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class A · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "1JjG6qPcA1B9rTcF2YhY"
+   ],
+   "genderCode": "men"
+  },
+  "individual_cadets_class_a_women_zpNqXtHYqX6qHmuZ6HUF": {
+   "status": "active",
+   "associationId": "SATKD20200000529",
+   "beltClassCode": "class_a",
+   "categoryCode": "individual_cadets_class_a_women",
+   "paraClassCode": null,
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:35:57.539000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class A · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "zpNqXtHYqX6qHmuZ6HUF"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_b_men_n9rOrb3yCwA1TZzOwI9u": {
+   "status": "active",
+   "associationId": "SATKD20200001019",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_cadets_class_b_men",
+   "paraClassCode": null,
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:34:35.493000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class B · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "n9rOrb3yCwA1TZzOwI9u"
+   ],
+   "genderCode": "men"
+  },
+  "individual_cadets_class_b_women_TQVgECoGCvIt9NbhvAmb": {
+   "status": "active",
+   "associationId": "SATKD24012209",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_cadets_class_b_women",
+   "paraClassCode": null,
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-23T07:13:39.082000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class B · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "TQVgECoGCvIt9NbhvAmb"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_b_women_bCzfus0tGeMtePO7hrKX": {
+   "status": "active",
+   "associationId": "SATKD23012604",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_cadets_class_b_women",
+   "paraClassCode": null,
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-23T07:13:26.941000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class B · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "bCzfus0tGeMtePO7hrKX"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_b_women_xlAdX96YPNGQfRAPU4sM": {
+   "status": "active",
+   "associationId": "SATKD20200000592",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_cadets_class_b_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:11:08.588000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class B · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "xlAdX96YPNGQfRAPU4sM"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_c_men_5Xg8mWTGEkZdjxzWMTuq": {
+   "status": "active",
+   "associationId": "SATKD24011803",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_men",
+   "paraClassCode": null,
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:34:53.146000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "5Xg8mWTGEkZdjxzWMTuq"
+   ],
+   "genderCode": "men"
+  },
+  "individual_cadets_class_c_men_9FiwYmnfPHflsKpWDJxc": {
+   "status": "active",
+   "associationId": "SATKD24012002",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_men",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:36:31.532000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "9FiwYmnfPHflsKpWDJxc"
+   ],
+   "genderCode": "men"
+  },
+  "individual_cadets_class_c_men_ORYPMBQYw3XPQMPqkTM4": {
+   "status": "active",
+   "associationId": "SATKD24012502",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_men",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T12:42:42.127000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "ORYPMBQYw3XPQMPqkTM4"
+   ],
+   "genderCode": "men"
+  },
+  "individual_cadets_class_c_men_YBbN105xOId80g74SpDp": {
+   "status": "active",
+   "athleteIds": [
+    "YBbN105xOId80g74SpDp"
+   ],
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_men",
+   "paraClassCode": null,
+   "clubId": "mikulas",
+   "ageCode": "cadets",
+   "registeredAt": {
+    "__ts__": "2026-10-28T12:33:48.807000+00:00"
+   },
+   "associationId": "SATKD25020611",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "clubName": "Taekwondo 4U Liptovský Mikuláš",
+   "genderCode": "men"
+  },
+  "individual_cadets_class_c_men_mq5wHcJCv3WieSlyBrHE": {
+   "status": "active",
+   "associationId": "SATKD20200000020",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_men",
+   "paraClassCode": null,
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:17:57.775000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "mq5wHcJCv3WieSlyBrHE"
+   ],
+   "genderCode": "men"
+  },
+  "individual_cadets_class_c_women_3QRHyZ5gUIajpiN10hWh": {
+   "status": "active",
+   "associationId": "SATKD24012204",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:39:12.740000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "3QRHyZ5gUIajpiN10hWh"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_c_women_GX5Lql1ueh8pExZw1ZSg": {
+   "status": "active",
+   "associationId": "SATKD22021003",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:17:18.325000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "GX5Lql1ueh8pExZw1ZSg"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_c_women_YgaWJqL3OzicaLOlCGyd": {
+   "status": "active",
+   "associationId": "SATKD22060806",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:39:24+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "YgaWJqL3OzicaLOlCGyd"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_c_women_euaV109SHjIbZ0AdzO8s": {
+   "status": "active",
+   "athleteIds": [
+    "euaV109SHjIbZ0AdzO8s"
+   ],
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "mikulas",
+   "ageCode": "cadets",
+   "registeredAt": {
+    "__ts__": "2026-10-28T12:33:35.720000+00:00"
+   },
+   "associationId": "SATKD22110402",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "clubName": "Taekwondo 4U Liptovský Mikuláš",
+   "genderCode": "women"
+  },
+  "individual_cadets_class_d_women_MZ5nSjKYkX0kidETkslj": {
+   "status": "active",
+   "associationId": "SATKD25052902",
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_cadets_class_d_women",
+   "paraClassCode": null,
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:34:11.067000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class D · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "MZ5nSjKYkX0kidETkslj"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_d_women_Z2oZZo1FsBOCtHAH6IxY": {
+   "status": "active",
+   "associationId": "SATKD25020501",
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_cadets_class_d_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:42:22.901000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class D · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "Z2oZZo1FsBOCtHAH6IxY"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_d_women_nArschvJ6gjGNe4MaHMy": {
+   "status": "active",
+   "associationId": "SATKD23100201",
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_cadets_class_d_women",
+   "paraClassCode": null,
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:18:15.212000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class D · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "nArschvJ6gjGNe4MaHMy"
+   ],
+   "genderCode": "women"
+  },
+  "individual_cadets_class_d_women_vOn17d7xIcZ8FP9lLScB": {
+   "status": "active",
+   "associationId": "SATKD23100206",
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_cadets_class_d_women",
+   "paraClassCode": null,
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:18:07.742000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Cadets · Class D · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "vOn17d7xIcZ8FP9lLScB"
+   ],
+   "genderCode": "women"
+  },
+  "individual_juniors_class_a_women_9sPjOQ2d7rmZodzOCPR6": {
+   "status": "active",
+   "associationId": null,
+   "beltClassCode": "class_a",
+   "categoryCode": "individual_juniors_class_a_women",
+   "paraClassCode": null,
+   "clubId": "HcWgCkyCSBt3GLHIrot6",
+   "clubName": "Taekwondo Karpiel Tuchów",
+   "registeredAt": {
+    "__ts__": "2026-10-21T18:50:42.002000+00:00"
+   },
+   "ageCode": "juniors",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Juniors · Class A · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "9sPjOQ2d7rmZodzOCPR6"
+   ],
+   "genderCode": "women"
+  },
+  "individual_juniors_class_b_men_9yIbZ4nXRM3pHH896dFY": {
+   "status": "active",
+   "associationId": "SATKD20200001020",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_juniors_class_b_men",
+   "paraClassCode": null,
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:34:42.163000+00:00"
+   },
+   "ageCode": "juniors",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Juniors · Class B · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "9yIbZ4nXRM3pHH896dFY"
+   ],
+   "genderCode": "men"
+  },
+  "individual_juniors_class_b_men_Un3z8qPCPpcJGEUYhbIp": {
+   "status": "active",
+   "associationId": "SATKD20200000603",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_juniors_class_b_men",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:10:46.478000+00:00"
+   },
+   "ageCode": "juniors",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Juniors · Class B · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "Un3z8qPCPpcJGEUYhbIp"
+   ],
+   "genderCode": "men"
+  },
+  "individual_juniors_class_b_women_fvlJx8mocTTTScd1XxW0": {
+   "status": "active",
+   "associationId": "SATKD22021001",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_juniors_class_b_women",
+   "paraClassCode": null,
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:17:03.707000+00:00"
+   },
+   "ageCode": "juniors",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Juniors · Class B · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "fvlJx8mocTTTScd1XxW0"
+   ],
+   "genderCode": "women"
+  },
+  "individual_juniors_class_b_women_pIvrnXCfS0SjeryrVoY4": {
+   "status": "active",
+   "associationId": "SATKD20200000663",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_juniors_class_b_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:11:27.770000+00:00"
+   },
+   "ageCode": "juniors",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Juniors · Class B · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "pIvrnXCfS0SjeryrVoY4"
+   ],
+   "genderCode": "women"
+  },
+  "individual_juniors_class_d_women_cN0NYtVcA1BVNaV6QKm4": {
+   "status": "active",
+   "athleteIds": [
+    "cN0NYtVcA1BVNaV6QKm4"
+   ],
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_juniors_class_d_women",
+   "paraClassCode": null,
+   "clubId": "mikulas",
+   "ageCode": "juniors",
+   "registeredAt": {
+    "__ts__": "2026-10-28T12:35:08.936000+00:00"
+   },
+   "associationId": "SATKD26040901",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Juniors · Class D · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "clubName": "Taekwondo 4U Liptovský Mikuláš",
+   "genderCode": "women"
+  },
+  "individual_pupils_class_d_men_MmYEfO9fjsH0pXja09ql": {
+   "status": "active",
+   "associationId": "SATKD24011904",
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_pupils_class_d_men",
+   "paraClassCode": null,
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:34:23.728000+00:00"
+   },
+   "ageCode": "pupils",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Pupils · Class D · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "MmYEfO9fjsH0pXja09ql"
+   ],
+   "genderCode": "men"
+  },
+  "individual_pupils_class_d_women_HhRDzLffzJUrvnX8ZucI": {
+   "status": "active",
+   "athleteIds": [
+    "HhRDzLffzJUrvnX8ZucI"
+   ],
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_pupils_class_d_women",
+   "paraClassCode": null,
+   "clubId": "mikulas",
+   "ageCode": "pupils",
+   "registeredAt": {
+    "__ts__": "2026-10-28T12:34:50.574000+00:00"
+   },
+   "associationId": "SATKD26011604",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Pupils · Class D · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "clubName": "Taekwondo 4U Liptovský Mikuláš",
+   "genderCode": "women"
+  },
+  "individual_seniors_over_30_class_c_men_bwOFLAuk9uslQktvz3tM": {
+   "status": "active",
+   "athleteIds": [
+    "bwOFLAuk9uslQktvz3tM"
+   ],
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_seniors_over_30_class_c_men",
+   "paraClassCode": null,
+   "clubId": "mikulas",
+   "ageCode": "seniors_over_30",
+   "registeredAt": {
+    "__ts__": "2026-10-28T12:34:32.982000+00:00"
+   },
+   "associationId": "SATKD20200000692",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Seniors over 30 · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "clubName": "Taekwondo 4U Liptovský Mikuláš",
+   "genderCode": "men"
+  },
+  "individual_seniors_under_30_class_a_women_FwCJwDye5qz61CJFjBk4": {
+   "status": "active",
+   "associationId": "SATKD20200000751",
+   "beltClassCode": "class_a",
+   "categoryCode": "individual_seniors_under_30_class_a_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:39:59.148000+00:00"
+   },
+   "ageCode": "seniors_under_30",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Seniors under 30 · Class A · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "FwCJwDye5qz61CJFjBk4"
+   ],
+   "genderCode": "women"
+  },
+  "individual_seniors_under_30_class_a_women_cpNolasE6c673ogYn7rK": {
+   "status": "active",
+   "associationId": "SATKD20200000752",
+   "beltClassCode": "class_a",
+   "categoryCode": "individual_seniors_under_30_class_a_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:11:45.146000+00:00"
+   },
+   "ageCode": "seniors_under_30",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Seniors under 30 · Class A · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "cpNolasE6c673ogYn7rK"
+   ],
+   "genderCode": "women"
+  },
+  "individual_seniors_under_30_class_b_men_CZ6KjxJvr1M5stk0HGWm": {
+   "status": "withdrawn",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_seniors_under_30_class_b_men",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:27:27.267000+00:00"
+   },
+   "associationId": "SATKD20200000754",
+   "ageCode": "seniors_under_30",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Seniors under 30 · Class B · Male",
+   "athleteIds": [
+    "CZ6KjxJvr1M5stk0HGWm"
+   ],
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "genderCode": "men"
+  },
+  "individual_seniors_under_30_class_b_women_ZBgnr0UH4inB0cpUbfyb": {
+   "status": "active",
+   "associationId": "SATKD23110401",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_seniors_under_30_class_b_women",
+   "paraClassCode": null,
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-23T07:13:18.644000+00:00"
+   },
+   "ageCode": "seniors_under_30",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Seniors under 30 · Class B · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "ZBgnr0UH4inB0cpUbfyb"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_b_women_HLKKN2wHOQTjSShqhFUq": {
+   "status": "active",
+   "associationId": "SATKD21102102",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_younger_cadets_class_b_women",
+   "paraClassCode": null,
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-23T07:12:59.672000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class B · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "HLKKN2wHOQTjSShqhFUq"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_b_women_oUMWbvIUCMJeSTPblM27": {
+   "status": "active",
+   "associationId": "SATKD23062301",
+   "beltClassCode": "class_b",
+   "categoryCode": "individual_younger_cadets_class_b_women",
+   "paraClassCode": null,
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-23T07:13:07.834000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class B · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "oUMWbvIUCMJeSTPblM27"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_c_men_oor0JMdvbZQV70s21yLw": {
+   "status": "active",
+   "associationId": "SATKD23052501",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_younger_cadets_class_c_men",
+   "paraClassCode": null,
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:34:59.677000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "oor0JMdvbZQV70s21yLw"
+   ],
+   "genderCode": "men"
+  },
+  "individual_younger_cadets_class_c_men_uEOoHj0gYvuI0MxOmh6R": {
+   "status": "active",
+   "associationId": "SATKD22060803",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_younger_cadets_class_c_men",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:38:48.531000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "uEOoHj0gYvuI0MxOmh6R"
+   ],
+   "genderCode": "men"
+  },
+  "individual_younger_cadets_class_c_men_yUuQtwQrMIRiBmWxZOld": {
+   "status": "active",
+   "associationId": "SATKD24100104",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_younger_cadets_class_c_men",
+   "paraClassCode": null,
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-27T06:42:03.387000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class C · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "yUuQtwQrMIRiBmWxZOld"
+   ],
+   "genderCode": "men"
+  },
+  "individual_younger_cadets_class_c_women_80aVURvJa850xO5Oko1H": {
+   "status": "active",
+   "associationId": "SATKD24011807",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_younger_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "roznava",
+   "clubName": "KORYO PANTHERS TAEKWONDO Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-18T08:23:34.657000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "80aVURvJa850xO5Oko1H"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_c_women_Fmd5ToCPnnjPlt4fNamO": {
+   "status": "active",
+   "associationId": null,
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_younger_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "HcWgCkyCSBt3GLHIrot6",
+   "clubName": "Taekwondo Karpiel Tuchów",
+   "registeredAt": {
+    "__ts__": "2026-10-20T11:31:59.652000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "Fmd5ToCPnnjPlt4fNamO"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_c_women_Pti3V8C9fSaOKz1RndTJ": {
+   "status": "active",
+   "associationId": "SATKD22060807",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_younger_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:39:32.097000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "Pti3V8C9fSaOKz1RndTJ"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_c_women_dgQjVwuS9T35Nt3U9pKm": {
+   "status": "active",
+   "associationId": "SATKD22060805",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_younger_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:39:43.662000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "dgQjVwuS9T35Nt3U9pKm"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_c_women_zjDtVLYDocnrNG6BScHQ": {
+   "status": "active",
+   "associationId": "SATKD22060701",
+   "beltClassCode": "class_c",
+   "categoryCode": "individual_younger_cadets_class_c_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T11:33:28.935000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class C · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "zjDtVLYDocnrNG6BScHQ"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_d_women_R7UaY9WPwoEkiUqzfVOn": {
+   "status": "active",
+   "associationId": "SATKD24012501",
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_younger_cadets_class_d_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:39:02.902000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class D · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "R7UaY9WPwoEkiUqzfVOn"
+   ],
+   "genderCode": "women"
+  },
+  "individual_younger_cadets_class_d_women_iRwXSmkFeb83hatj6aXH": {
+   "status": "active",
+   "associationId": "SATKD24012208",
+   "beltClassCode": "class_d",
+   "categoryCode": "individual_younger_cadets_class_d_women",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-17T20:40:14.989000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "individual",
+   "categoryLabel": "Individual · Younger Cadets · Class D · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "iRwXSmkFeb83hatj6aXH"
+   ],
+   "genderCode": "women"
+  },
+  "pairs_poomsae_cadets_class_c_mixed_3QRHyZ5gUIajpiN10hWh-ORYPMBQYw3XPQMPqkTM4": {
+   "status": "active",
+   "associationId": "SATKD24012502",
+   "beltClassCode": "class_c",
+   "categoryCode": "pairs_poomsae_cadets_class_c_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T12:43:11.470000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "pairs_poomsae",
+   "categoryLabel": "Pairs Poomsae · Cadets · Class C · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "ORYPMBQYw3XPQMPqkTM4",
+    "3QRHyZ5gUIajpiN10hWh"
+   ],
+   "genderCode": "mixed"
+  },
+  "pairs_poomsae_cadets_class_c_mixed_3QRHyZ5gUIajpiN10hWh-YgaWJqL3OzicaLOlCGyd": {
+   "status": "active",
+   "associationId": "SATKD22060806",
+   "beltClassCode": "class_c",
+   "categoryCode": "pairs_poomsae_cadets_class_c_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:38:41.242000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "pairs_poomsae",
+   "categoryLabel": "Pairs Poomsae · Cadets · Class C · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "YgaWJqL3OzicaLOlCGyd",
+    "3QRHyZ5gUIajpiN10hWh"
+   ],
+   "genderCode": "mixed"
+  },
+  "pairs_poomsae_cadets_class_c_mixed_GX5Lql1ueh8pExZw1ZSg-bxADTw1hI6a4TrRvX5Ge": {
+   "status": "active",
+   "associationId": "SATKD20200000968",
+   "beltClassCode": "class_c",
+   "categoryCode": "pairs_poomsae_cadets_class_c_mixed",
+   "paraClassCode": null,
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:20:27.499000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "pairs_poomsae",
+   "categoryLabel": "Pairs Poomsae · Cadets · Class C · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "bxADTw1hI6a4TrRvX5Ge",
+    "GX5Lql1ueh8pExZw1ZSg"
+   ],
+   "genderCode": "mixed"
+  },
+  "pairs_poomsae_cadets_class_d_mixed_nArschvJ6gjGNe4MaHMy-vOn17d7xIcZ8FP9lLScB": {
+   "status": "active",
+   "associationId": "SATKD23100206",
+   "beltClassCode": "class_d",
+   "categoryCode": "pairs_poomsae_cadets_class_d_mixed",
+   "paraClassCode": null,
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:20:45.582000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "pairs_poomsae",
+   "categoryLabel": "Pairs Poomsae · Cadets · Class D · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "vOn17d7xIcZ8FP9lLScB",
+    "nArschvJ6gjGNe4MaHMy"
+   ],
+   "genderCode": "mixed"
+  },
+  "pairs_poomsae_juniors_class_b_mixed_Un3z8qPCPpcJGEUYhbIp-pIvrnXCfS0SjeryrVoY4": {
+   "status": "active",
+   "associationId": "SATKD20200000603",
+   "beltClassCode": "class_b",
+   "categoryCode": "pairs_poomsae_juniors_class_b_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:40:25.599000+00:00"
+   },
+   "ageCode": "juniors",
+   "entryTypeCode": "pairs_poomsae",
+   "categoryLabel": "Pairs Poomsae · Juniors · Class B · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "Un3z8qPCPpcJGEUYhbIp",
+    "pIvrnXCfS0SjeryrVoY4"
+   ],
+   "genderCode": "mixed"
+  },
+  "pairs_poomsae_younger_cadets_class_c_mixed_Pti3V8C9fSaOKz1RndTJ-dgQjVwuS9T35Nt3U9pKm": {
+   "status": "active",
+   "associationId": "SATKD22060805",
+   "beltClassCode": "class_c",
+   "categoryCode": "pairs_poomsae_younger_cadets_class_c_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:39:19.985000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "pairs_poomsae",
+   "categoryLabel": "Pairs Poomsae · Younger Cadets · Class C · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "dgQjVwuS9T35Nt3U9pKm",
+    "Pti3V8C9fSaOKz1RndTJ"
+   ],
+   "genderCode": "mixed"
+  },
+  "pairs_poomsae_younger_cadets_class_c_mixed_uEOoHj0gYvuI0MxOmh6R-zjDtVLYDocnrNG6BScHQ": {
+   "status": "active",
+   "associationId": "SATKD22060701",
+   "beltClassCode": "class_c",
+   "categoryCode": "pairs_poomsae_younger_cadets_class_c_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:37:50.269000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "pairs_poomsae",
+   "categoryLabel": "Pairs Poomsae · Younger Cadets · Class C · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "zjDtVLYDocnrNG6BScHQ",
+    "uEOoHj0gYvuI0MxOmh6R"
+   ],
+   "genderCode": "mixed"
+  },
+  "pairs_poomsae_younger_cadets_class_d_mixed_R7UaY9WPwoEkiUqzfVOn-iRwXSmkFeb83hatj6aXH": {
+   "status": "active",
+   "associationId": "SATKD24012208",
+   "beltClassCode": "class_d",
+   "categoryCode": "pairs_poomsae_younger_cadets_class_d_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:37:30.885000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "pairs_poomsae",
+   "categoryLabel": "Pairs Poomsae · Younger Cadets · Class D · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "iRwXSmkFeb83hatj6aXH",
+    "R7UaY9WPwoEkiUqzfVOn"
+   ],
+   "genderCode": "mixed"
+  },
+  "para_individual_cadets_p60_women_kIJM43tyxLkYXrjcr6UV": {
+   "status": "active",
+   "associationId": "SATKD22021002",
+   "beltClassCode": null,
+   "categoryCode": "para_individual_cadets_p60_women",
+   "paraClassCode": "p60",
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:19:16.642000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Cadets · P60 · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "kIJM43tyxLkYXrjcr6UV"
+   ],
+   "genderCode": "women"
+  },
+  "para_individual_juniors_p22_men_JhbphPlExl08ublAp0ho": {
+   "status": "active",
+   "associationId": null,
+   "beltClassCode": null,
+   "categoryCode": "para_individual_juniors_p22_men",
+   "paraClassCode": "p22",
+   "clubId": "G9OVDMt74V2X1XSkbV3k",
+   "clubName": "PTK RUGVICA",
+   "registeredAt": {
+    "__ts__": "2026-10-19T21:37:23.518000+00:00"
+   },
+   "ageCode": "juniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Juniors · P22 · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "JhbphPlExl08ublAp0ho"
+   ],
+   "genderCode": "men"
+  },
+  "para_individual_seniors_p21_men_CZ6KjxJvr1M5stk0HGWm": {
+   "status": "active",
+   "associationId": "SATKD20200000754",
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p21_men",
+   "paraClassCode": "p21",
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:35:22.891000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P21 · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "CZ6KjxJvr1M5stk0HGWm"
+   ],
+   "genderCode": "men"
+  },
+  "para_individual_seniors_p22_men_F3SbMSqELO25fs0g4sN6": {
+   "status": "active",
+   "associationId": "SATKD20200000070",
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p22_men",
+   "paraClassCode": "p22",
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-23T07:14:41.113000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P22 · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "F3SbMSqELO25fs0g4sN6"
+   ],
+   "genderCode": "men"
+  },
+  "para_individual_seniors_p22_men_ipteTFlhqYDe2H2i25f3": {
+   "status": "active",
+   "associationId": null,
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p22_men",
+   "paraClassCode": "p22",
+   "clubId": "G9OVDMt74V2X1XSkbV3k",
+   "clubName": "PTK RUGVICA",
+   "registeredAt": {
+    "__ts__": "2026-10-19T21:36:04.455000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P22 · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "ipteTFlhqYDe2H2i25f3"
+   ],
+   "genderCode": "men"
+  },
+  "para_individual_seniors_p22_men_l3UbwLrQcnyOtCK2VKIV": {
+   "status": "active",
+   "associationId": null,
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p22_men",
+   "paraClassCode": "p22",
+   "clubId": "G9OVDMt74V2X1XSkbV3k",
+   "clubName": "PTK RUGVICA",
+   "registeredAt": {
+    "__ts__": "2026-10-19T21:36:17.896000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P22 · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "l3UbwLrQcnyOtCK2VKIV"
+   ],
+   "genderCode": "men"
+  },
+  "para_individual_seniors_p22_men_pYZ0AlOmSEkgXuJKEj7t": {
+   "status": "active",
+   "associationId": null,
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p22_men",
+   "paraClassCode": "p22",
+   "clubId": "G9OVDMt74V2X1XSkbV3k",
+   "clubName": "PTK RUGVICA",
+   "registeredAt": {
+    "__ts__": "2026-10-19T21:36:38.845000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P22 · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "pYZ0AlOmSEkgXuJKEj7t"
+   ],
+   "genderCode": "men"
+  },
+  "para_individual_seniors_p22_women_HJ8dKFPfI3GXx8NwscjP": {
+   "status": "active",
+   "associationId": "SATKD20200000131",
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p22_women",
+   "paraClassCode": "p22",
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-23T07:14:51.193000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P22 · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "HJ8dKFPfI3GXx8NwscjP"
+   ],
+   "genderCode": "women"
+  },
+  "para_individual_seniors_p23_men_F9HpFuhH6RbCRAxwj2s9": {
+   "status": "active",
+   "associationId": "SATKD22020302",
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p23_men",
+   "paraClassCode": "p23",
+   "clubId": "ilyoke",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "registeredAt": {
+    "__ts__": "2026-10-23T07:14:59.818000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P23 · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "F9HpFuhH6RbCRAxwj2s9"
+   ],
+   "genderCode": "men"
+  },
+  "para_individual_seniors_p34_women_6mLBYJ9Nfe0mIe6DopXB": {
+   "status": "active",
+   "associationId": "SATKD20200000583",
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p34_women",
+   "paraClassCode": "p34",
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:35:26.642000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P34 · Female",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "6mLBYJ9Nfe0mIe6DopXB"
+   ],
+   "genderCode": "women"
+  },
+  "para_individual_seniors_p72_men_ZofcNqkLqplBqECUVqX1": {
+   "status": "active",
+   "associationId": "SATKD20200000350",
+   "beltClassCode": null,
+   "categoryCode": "para_individual_seniors_p72_men",
+   "paraClassCode": "p72",
+   "clubId": "ryong",
+   "clubName": "Športový klub polície Ryong Bratislava",
+   "registeredAt": {
+    "__ts__": "2026-10-28T09:35:48.125000+00:00"
+   },
+   "ageCode": "seniors",
+   "entryTypeCode": "para_individual",
+   "categoryLabel": "Para Individual · Seniors · P72 · Male",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "ZofcNqkLqplBqECUVqX1"
+   ],
+   "genderCode": "men"
+  },
+  "teams_poomsae_cadets_class_c_mixed_3QRHyZ5gUIajpiN10hWh-uEOoHj0gYvuI0MxOmh6R-zjDtVLYDocnrNG6BScHQ": {
+   "status": "active",
+   "associationId": "SATKD24012204",
+   "beltClassCode": "class_c",
+   "categoryCode": "teams_poomsae_cadets_class_c_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T11:30:44.255000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "teams_poomsae",
+   "categoryLabel": "Teams Poomsae · Cadets · Class C · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "3QRHyZ5gUIajpiN10hWh",
+    "zjDtVLYDocnrNG6BScHQ",
+    "uEOoHj0gYvuI0MxOmh6R"
+   ],
+   "genderCode": "mixed"
+  },
+  "teams_poomsae_cadets_class_c_mixed_GX5Lql1ueh8pExZw1ZSg-bxADTw1hI6a4TrRvX5Ge-mq5wHcJCv3WieSlyBrHE": {
+   "status": "active",
+   "associationId": "SATKD22021003",
+   "beltClassCode": "class_c",
+   "categoryCode": "teams_poomsae_cadets_class_c_mixed",
+   "paraClassCode": null,
+   "clubId": "hakimi",
+   "clubName": "TAEKWONDO HAKIMI Rožňava",
+   "registeredAt": {
+    "__ts__": "2026-10-20T17:21:08.920000+00:00"
+   },
+   "ageCode": "cadets",
+   "entryTypeCode": "teams_poomsae",
+   "categoryLabel": "Teams Poomsae · Cadets · Class C · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "GX5Lql1ueh8pExZw1ZSg",
+    "bxADTw1hI6a4TrRvX5Ge",
+    "mq5wHcJCv3WieSlyBrHE"
+   ],
+   "genderCode": "mixed"
+  },
+  "teams_poomsae_younger_cadets_class_c_mixed_Pti3V8C9fSaOKz1RndTJ-YgaWJqL3OzicaLOlCGyd-dgQjVwuS9T35Nt3U9pKm": {
+   "status": "active",
+   "associationId": "SATKD22060807",
+   "beltClassCode": "class_c",
+   "categoryCode": "teams_poomsae_younger_cadets_class_c_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:41:17.570000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "teams_poomsae",
+   "categoryLabel": "Teams Poomsae · Younger Cadets · Class C · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "Pti3V8C9fSaOKz1RndTJ",
+    "dgQjVwuS9T35Nt3U9pKm",
+    "YgaWJqL3OzicaLOlCGyd"
+   ],
+   "genderCode": "mixed"
+  },
+  "teams_poomsae_younger_cadets_class_d_mixed_8D2KWwVKy3KpmNzVE9dm-R7UaY9WPwoEkiUqzfVOn-iRwXSmkFeb83hatj6aXH": {
+   "status": "active",
+   "associationId": "SATKD24012208",
+   "beltClassCode": "class_d",
+   "categoryCode": "teams_poomsae_younger_cadets_class_d_mixed",
+   "paraClassCode": null,
+   "clubId": "hnusta",
+   "clubName": "TAEKWONDO KLUB Hnúšťa",
+   "registeredAt": {
+    "__ts__": "2026-10-20T09:42:08.824000+00:00"
+   },
+   "ageCode": "younger_cadets",
+   "entryTypeCode": "teams_poomsae",
+   "categoryLabel": "Teams Poomsae · Younger Cadets · Class D · Mixed",
+   "tournamentId": "e1P8uyOYSVdqEtWTnetU",
+   "athleteIds": [
+    "iRwXSmkFeb83hatj6aXH",
+    "R7UaY9WPwoEkiUqzfVOn",
+    "8D2KWwVKy3KpmNzVE9dm"
+   ],
+   "genderCode": "mixed"
+  }
+ },
+ "rosters": {
+  "cadets": {
+   "athletes": {
+    "individual_cadets_class_b_men": {
+     "n9rOrb3yCwA1TZzOwI9u": {
+      "members": [
+       {
+        "rank": 9,
+        "athleteId": "n9rOrb3yCwA1TZzOwI9u",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "associationId": "SATKD20200001019",
+        "name": "Marko Gregor Szlovinecz",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "teams_poomsae_cadets_class_c_mixed": {
+     "GX5Lql1ueh8pExZw1ZSg-bxADTw1hI6a4TrRvX5Ge-mq5wHcJCv3WieSlyBrHE": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "GX5Lql1ueh8pExZw1ZSg",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD22021003",
+        "name": "Zina Petrová",
+        "country": "SVK"
+       },
+       {
+        "rank": 6,
+        "athleteId": "bxADTw1hI6a4TrRvX5Ge",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD20200000968",
+        "name": "Ivana Sečkárová ml.",
+        "country": "SVK"
+       },
+       {
+        "rank": 6,
+        "athleteId": "mq5wHcJCv3WieSlyBrHE",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD20200000020",
+        "name": "Richard Angyal",
+        "country": "SVK"
+       }
+      ]
+     },
+     "3QRHyZ5gUIajpiN10hWh-uEOoHj0gYvuI0MxOmh6R-zjDtVLYDocnrNG6BScHQ": {
+      "members": [
+       {
+        "rank": 4,
+        "athleteId": "3QRHyZ5gUIajpiN10hWh",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012204",
+        "name": "Amélie Selčanová",
+        "country": "SVK"
+       },
+       {
+        "rank": 5,
+        "athleteId": "zjDtVLYDocnrNG6BScHQ",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060701",
+        "name": "Lia Czeneová",
+        "country": "SVK"
+       },
+       {
+        "rank": 5,
+        "athleteId": "uEOoHj0gYvuI0MxOmh6R",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060803",
+        "name": "Matúš Tóth",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_cadets_class_a_women": {
+     "zpNqXtHYqX6qHmuZ6HUF": {
+      "members": [
+       {
+        "rank": 10,
+        "athleteId": "zpNqXtHYqX6qHmuZ6HUF",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "associationId": "SATKD20200000529",
+        "name": "Viktoriia Kovaleva",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "pairs_poomsae_cadets_class_d_mixed": {
+     "nArschvJ6gjGNe4MaHMy-vOn17d7xIcZ8FP9lLScB": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "vOn17d7xIcZ8FP9lLScB",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD23100206",
+        "name": "Alexandra Örvös",
+        "country": "SVK"
+       },
+       {
+        "rank": 3,
+        "athleteId": "nArschvJ6gjGNe4MaHMy",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD23100201",
+        "name": "Kristína Jungová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_cadets_class_b_women": {
+     "xlAdX96YPNGQfRAPU4sM": {
+      "members": [
+       {
+        "rank": 8,
+        "athleteId": "xlAdX96YPNGQfRAPU4sM",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD20200000592",
+        "name": "Nina Alžbeta Kuruová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "TQVgECoGCvIt9NbhvAmb": {
+      "members": [
+       {
+        "rank": 8,
+        "athleteId": "TQVgECoGCvIt9NbhvAmb",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "associationId": "SATKD24012209",
+        "name": "Martina Miškovová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "bCzfus0tGeMtePO7hrKX": {
+      "members": [
+       {
+        "rank": 9,
+        "athleteId": "bCzfus0tGeMtePO7hrKX",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "associationId": "SATKD23012604",
+        "name": "Gabriela Markovičová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_cadets_class_c_women": {
+     "3QRHyZ5gUIajpiN10hWh": {
+      "members": [
+       {
+        "rank": 4,
+        "athleteId": "3QRHyZ5gUIajpiN10hWh",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012204",
+        "name": "Amélie Selčanová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "GX5Lql1ueh8pExZw1ZSg": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "GX5Lql1ueh8pExZw1ZSg",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD22021003",
+        "name": "Zina Petrová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "euaV109SHjIbZ0AdzO8s": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "euaV109SHjIbZ0AdzO8s",
+        "clubId": "mikulas",
+        "club": "Taekwondo 4U Liptovský Mikuláš",
+        "associationId": "SATKD22110402",
+        "name": "Aneta Vančová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "YgaWJqL3OzicaLOlCGyd": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "YgaWJqL3OzicaLOlCGyd",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060806",
+        "name": "Dominika Kamoďová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "pairs_poomsae_cadets_class_c_mixed": {
+     "3QRHyZ5gUIajpiN10hWh-ORYPMBQYw3XPQMPqkTM4": {
+      "members": [
+       {
+        "rank": 4,
+        "athleteId": "ORYPMBQYw3XPQMPqkTM4",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012502",
+        "name": "Khoa Than Van",
+        "country": "SVK"
+       },
+       {
+        "rank": 4,
+        "athleteId": "3QRHyZ5gUIajpiN10hWh",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012204",
+        "name": "Amélie Selčanová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "GX5Lql1ueh8pExZw1ZSg-bxADTw1hI6a4TrRvX5Ge": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "bxADTw1hI6a4TrRvX5Ge",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD20200000968",
+        "name": "Ivana Sečkárová ml.",
+        "country": "SVK"
+       },
+       {
+        "rank": 6,
+        "athleteId": "GX5Lql1ueh8pExZw1ZSg",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD22021003",
+        "name": "Zina Petrová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "3QRHyZ5gUIajpiN10hWh-YgaWJqL3OzicaLOlCGyd": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "YgaWJqL3OzicaLOlCGyd",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060806",
+        "name": "Dominika Kamoďová",
+        "country": "SVK"
+       },
+       {
+        "rank": 4,
+        "athleteId": "3QRHyZ5gUIajpiN10hWh",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012204",
+        "name": "Amélie Selčanová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "para_individual_cadets_p60_women": {
+     "kIJM43tyxLkYXrjcr6UV": {
+      "members": [
+       {
+        "name": "Bianka Marcinkova",
+        "athleteId": "kIJM43tyxLkYXrjcr6UV",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "isPara": true,
+        "country": "SVK",
+        "rank": 5,
+        "associationId": "SATKD22021002",
+        "paraCategory": "P60"
+       }
+      ]
+     }
+    },
+    "individual_cadets_class_c_men": {
+     "YBbN105xOId80g74SpDp": {
+      "members": [
+       {
+        "rank": 4,
+        "athleteId": "YBbN105xOId80g74SpDp",
+        "clubId": "mikulas",
+        "club": "Taekwondo 4U Liptovský Mikuláš",
+        "associationId": "SATKD25020611",
+        "name": "Matej Dunaj",
+        "country": "SVK"
+       }
+      ]
+     },
+     "mq5wHcJCv3WieSlyBrHE": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "mq5wHcJCv3WieSlyBrHE",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD20200000020",
+        "name": "Richard Angyal",
+        "country": "SVK"
+       }
+      ]
+     },
+     "ORYPMBQYw3XPQMPqkTM4": {
+      "members": [
+       {
+        "rank": 4,
+        "athleteId": "ORYPMBQYw3XPQMPqkTM4",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012502",
+        "name": "Khoa Than Van",
+        "country": "SVK"
+       }
+      ]
+     },
+     "9FiwYmnfPHflsKpWDJxc": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "9FiwYmnfPHflsKpWDJxc",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012002",
+        "name": "Lukáš Sani",
+        "country": "SVK"
+       }
+      ]
+     },
+     "5Xg8mWTGEkZdjxzWMTuq": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "5Xg8mWTGEkZdjxzWMTuq",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "associationId": "SATKD24011803",
+        "name": "Jozef Gyulaffy",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_cadets_class_a_men": {
+     "1JjG6qPcA1B9rTcF2YhY": {
+      "members": [
+       {
+        "rank": 10,
+        "athleteId": "1JjG6qPcA1B9rTcF2YhY",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "associationId": "SATKD20200000368",
+        "name": "Andrej Horňák",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_cadets_class_d_women": {
+     "vOn17d7xIcZ8FP9lLScB": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "vOn17d7xIcZ8FP9lLScB",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD23100206",
+        "name": "Alexandra Örvös",
+        "country": "SVK"
+       }
+      ]
+     },
+     "nArschvJ6gjGNe4MaHMy": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "nArschvJ6gjGNe4MaHMy",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD23100201",
+        "name": "Kristína Jungová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "Z2oZZo1FsBOCtHAH6IxY": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "Z2oZZo1FsBOCtHAH6IxY",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD25020501",
+        "name": "Janka Antalová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "MZ5nSjKYkX0kidETkslj": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "MZ5nSjKYkX0kidETkslj",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "associationId": "SATKD25052902",
+        "name": "Adela Manga",
+        "country": "SVK"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "children": {
+   "athletes": {
+    "freestyle_individual_children_women": {
+     "oUMWbvIUCMJeSTPblM27": {
+      "members": [
+       {
+        "rank": 8,
+        "athleteId": "oUMWbvIUCMJeSTPblM27",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "associationId": "SATKD23062301",
+        "name": "Freia Rheannon Polyák",
+        "country": "SVK"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "juniors": {
+   "athletes": {
+    "pairs_poomsae_juniors_class_b_mixed": {
+     "Un3z8qPCPpcJGEUYhbIp-pIvrnXCfS0SjeryrVoY4": {
+      "members": [
+       {
+        "rank": 8,
+        "athleteId": "Un3z8qPCPpcJGEUYhbIp",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD20200000603",
+        "name": "Leo Kyseľ",
+        "country": "SVK"
+       },
+       {
+        "rank": 9,
+        "athleteId": "pIvrnXCfS0SjeryrVoY4",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD20200000663",
+        "name": "Alexandra Lujza Lörinčíková",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_juniors_class_b_women": {
+     "pIvrnXCfS0SjeryrVoY4": {
+      "members": [
+       {
+        "rank": 9,
+        "athleteId": "pIvrnXCfS0SjeryrVoY4",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD20200000663",
+        "name": "Alexandra Lujza Lörinčíková",
+        "country": "SVK"
+       }
+      ]
+     },
+     "fvlJx8mocTTTScd1XxW0": {
+      "members": [
+       {
+        "rank": 8,
+        "athleteId": "fvlJx8mocTTTScd1XxW0",
+        "clubId": "hakimi",
+        "club": "TAEKWONDO HAKIMI Rožňava",
+        "associationId": "SATKD22021001",
+        "name": "Sofia Lászlóová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_juniors_class_b_men": {
+     "Un3z8qPCPpcJGEUYhbIp": {
+      "members": [
+       {
+        "rank": 8,
+        "athleteId": "Un3z8qPCPpcJGEUYhbIp",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD20200000603",
+        "name": "Leo Kyseľ",
+        "country": "SVK"
+       }
+      ]
+     },
+     "9yIbZ4nXRM3pHH896dFY": {
+      "members": [
+       {
+        "rank": 9,
+        "athleteId": "9yIbZ4nXRM3pHH896dFY",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "associationId": "SATKD20200001020",
+        "name": "Michal Gregor Szlovinecz",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_juniors_class_a_women": {
+     "9sPjOQ2d7rmZodzOCPR6": {
+      "members": [
+       {
+        "rank": 10,
+        "athleteId": "9sPjOQ2d7rmZodzOCPR6",
+        "clubId": "HcWgCkyCSBt3GLHIrot6",
+        "club": "Taekwondo Karpiel Tuchów",
+        "name": "Angelika Kędzior",
+        "country": "POL"
+       }
+      ]
+     }
+    },
+    "para_individual_juniors_p22_men": {
+     "JhbphPlExl08ublAp0ho": {
+      "members": [
+       {
+        "name": "ŠIMUN VELKAVRH",
+        "athleteId": "JhbphPlExl08ublAp0ho",
+        "clubId": "G9OVDMt74V2X1XSkbV3k",
+        "club": "PTK RUGVICA",
+        "isPara": true,
+        "country": "CRO",
+        "rank": 5,
+        "paraCategory": "P22"
+       }
+      ]
+     }
+    },
+    "individual_juniors_class_d_women": {
+     "cN0NYtVcA1BVNaV6QKm4": {
+      "members": [
+       {
+        "rank": 2,
+        "athleteId": "cN0NYtVcA1BVNaV6QKm4",
+        "clubId": "mikulas",
+        "club": "Taekwondo 4U Liptovský Mikuláš",
+        "associationId": "SATKD26040901",
+        "name": "Liliana Hiková",
+        "country": "SVK"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "pupils": {
+   "athletes": {
+    "individual_pupils_class_d_men": {
+     "MmYEfO9fjsH0pXja09ql": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "MmYEfO9fjsH0pXja09ql",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "associationId": "SATKD24011904",
+        "name": "Andrej Chovan",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_pupils_class_d_women": {
+     "HhRDzLffzJUrvnX8ZucI": {
+      "members": [
+       {
+        "rank": 2,
+        "athleteId": "HhRDzLffzJUrvnX8ZucI",
+        "clubId": "mikulas",
+        "club": "Taekwondo 4U Liptovský Mikuláš",
+        "associationId": "SATKD26011604",
+        "name": "Eliška Olšavská",
+        "country": "SVK"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "seniors": {
+   "athletes": {
+    "para_individual_seniors_p23_men": {
+     "F9HpFuhH6RbCRAxwj2s9": {
+      "members": [
+       {
+        "name": "Tóbiás Kovács",
+        "athleteId": "F9HpFuhH6RbCRAxwj2s9",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "isPara": true,
+        "country": "SVK",
+        "rank": 7,
+        "associationId": "SATKD22020302",
+        "paraCategory": "P23"
+       }
+      ]
+     }
+    },
+    "para_individual_seniors_p34_women": {
+     "6mLBYJ9Nfe0mIe6DopXB": {
+      "members": [
+       {
+        "name": "Dominika Kuchtová",
+        "athleteId": "6mLBYJ9Nfe0mIe6DopXB",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "isPara": true,
+        "country": "SVK",
+        "rank": 10,
+        "associationId": "SATKD20200000583",
+        "paraCategory": "P34"
+       }
+      ]
+     }
+    },
+    "para_individual_seniors_p22_men": {
+     "l3UbwLrQcnyOtCK2VKIV": {
+      "members": [
+       {
+        "name": "DAVID KRALJ",
+        "athleteId": "l3UbwLrQcnyOtCK2VKIV",
+        "clubId": "G9OVDMt74V2X1XSkbV3k",
+        "club": "PTK RUGVICA",
+        "isPara": true,
+        "country": "CRO",
+        "rank": 7,
+        "paraCategory": "P22"
+       }
+      ]
+     },
+     "ipteTFlhqYDe2H2i25f3": {
+      "members": [
+       {
+        "name": "KRISTIJAN BURUŠIĆ",
+        "athleteId": "ipteTFlhqYDe2H2i25f3",
+        "clubId": "G9OVDMt74V2X1XSkbV3k",
+        "club": "PTK RUGVICA",
+        "isPara": true,
+        "country": "CRO",
+        "rank": 11,
+        "paraCategory": "P22"
+       }
+      ]
+     },
+     "pYZ0AlOmSEkgXuJKEj7t": {
+      "members": [
+       {
+        "name": "KARLO NOVOSEL",
+        "athleteId": "pYZ0AlOmSEkgXuJKEj7t",
+        "clubId": "G9OVDMt74V2X1XSkbV3k",
+        "club": "PTK RUGVICA",
+        "isPara": true,
+        "country": "CRO",
+        "rank": 2,
+        "paraCategory": "P22"
+       }
+      ]
+     },
+     "F3SbMSqELO25fs0g4sN6": {
+      "members": [
+       {
+        "name": "Peter Bičkoš",
+        "athleteId": "F3SbMSqELO25fs0g4sN6",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "isPara": true,
+        "country": "SVK",
+        "rank": 9,
+        "associationId": "SATKD20200000070",
+        "paraCategory": "P22"
+       }
+      ]
+     }
+    },
+    "para_individual_seniors_p22_women": {
+     "HJ8dKFPfI3GXx8NwscjP": {
+      "members": [
+       {
+        "name": "Adriana Bérešová",
+        "athleteId": "HJ8dKFPfI3GXx8NwscjP",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "isPara": true,
+        "country": "SVK",
+        "rank": 8,
+        "associationId": "SATKD20200000131",
+        "paraCategory": "P22"
+       }
+      ]
+     }
+    },
+    "para_individual_seniors_p21_men": {
+     "CZ6KjxJvr1M5stk0HGWm": {
+      "members": [
+       {
+        "name": "Tomáš Mravec",
+        "athleteId": "CZ6KjxJvr1M5stk0HGWm",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "isPara": true,
+        "country": "SVK",
+        "rank": 9,
+        "associationId": "SATKD20200000754",
+        "paraCategory": "P21"
+       }
+      ]
+     }
+    },
+    "para_individual_seniors_p72_men": {
+     "ZofcNqkLqplBqECUVqX1": {
+      "members": [
+       {
+        "name": "Oliver Hlavinka",
+        "athleteId": "ZofcNqkLqplBqECUVqX1",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "isPara": true,
+        "country": "SVK",
+        "rank": 10,
+        "associationId": "SATKD20200000350",
+        "paraCategory": "P72"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "seniors_over_30": {
+   "athletes": {
+    "individual_seniors_over_30_class_c_men": {
+     "bwOFLAuk9uslQktvz3tM": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "bwOFLAuk9uslQktvz3tM",
+        "clubId": "mikulas",
+        "club": "Taekwondo 4U Liptovský Mikuláš",
+        "associationId": "SATKD20200000692",
+        "name": "Jaroslav Marko",
+        "country": "SVK"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "seniors_under_30": {
+   "athletes": {
+    "individual_seniors_under_30_class_a_women": {
+     "cpNolasE6c673ogYn7rK": {
+      "members": [
+       {
+        "rank": 10,
+        "athleteId": "cpNolasE6c673ogYn7rK",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD20200000752",
+        "name": "Timea Morová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "FwCJwDye5qz61CJFjBk4": {
+      "members": [
+       {
+        "rank": 10,
+        "athleteId": "FwCJwDye5qz61CJFjBk4",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD20200000751",
+        "name": "Tamara Morová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_seniors_under_30_class_b_men": {},
+    "individual_seniors_under_30_class_b_women": {
+     "ZBgnr0UH4inB0cpUbfyb": {
+      "members": [
+       {
+        "rank": 9,
+        "athleteId": "ZBgnr0UH4inB0cpUbfyb",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "associationId": "SATKD23110401",
+        "name": "Lucia Gečanová",
+        "country": "SVK"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "younger_cadets": {
+   "athletes": {
+    "pairs_poomsae_younger_cadets_class_c_mixed": {
+     "uEOoHj0gYvuI0MxOmh6R-zjDtVLYDocnrNG6BScHQ": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "zjDtVLYDocnrNG6BScHQ",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060701",
+        "name": "Lia Czeneová",
+        "country": "SVK"
+       },
+       {
+        "rank": 5,
+        "athleteId": "uEOoHj0gYvuI0MxOmh6R",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060803",
+        "name": "Matúš Tóth",
+        "country": "SVK"
+       }
+      ]
+     },
+     "Pti3V8C9fSaOKz1RndTJ-dgQjVwuS9T35Nt3U9pKm": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "dgQjVwuS9T35Nt3U9pKm",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060805",
+        "name": "Tajana Kováčová",
+        "country": "SVK"
+       },
+       {
+        "rank": 5,
+        "athleteId": "Pti3V8C9fSaOKz1RndTJ",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060807",
+        "name": "Ella Balciarová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "pairs_poomsae_younger_cadets_class_d_mixed": {
+     "R7UaY9WPwoEkiUqzfVOn-iRwXSmkFeb83hatj6aXH": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "iRwXSmkFeb83hatj6aXH",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012208",
+        "name": "Tamia Striežovská",
+        "country": "SVK"
+       },
+       {
+        "rank": 3,
+        "athleteId": "R7UaY9WPwoEkiUqzfVOn",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012501",
+        "name": "Petra Mališová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_younger_cadets_class_c_men": {
+     "uEOoHj0gYvuI0MxOmh6R": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "uEOoHj0gYvuI0MxOmh6R",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060803",
+        "name": "Matúš Tóth",
+        "country": "SVK"
+       }
+      ]
+     },
+     "yUuQtwQrMIRiBmWxZOld": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "yUuQtwQrMIRiBmWxZOld",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "associationId": "SATKD24100104",
+        "name": "Filip Podoba",
+        "country": "SVK"
+       }
+      ]
+     },
+     "oor0JMdvbZQV70s21yLw": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "oor0JMdvbZQV70s21yLw",
+        "clubId": "ryong",
+        "club": "Športový klub polície Ryong Bratislava",
+        "associationId": "SATKD23052501",
+        "name": "Hugo Gerber",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_younger_cadets_class_b_women": {
+     "HLKKN2wHOQTjSShqhFUq": {
+      "members": [
+       {
+        "rank": 9,
+        "athleteId": "HLKKN2wHOQTjSShqhFUq",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "associationId": "SATKD21102102",
+        "name": "Johana Kucirková",
+        "country": "SVK"
+       }
+      ]
+     },
+     "oUMWbvIUCMJeSTPblM27": {
+      "members": [
+       {
+        "rank": 8,
+        "athleteId": "oUMWbvIUCMJeSTPblM27",
+        "clubId": "ilyoke",
+        "club": "Športový klub polície - ILYO Taekwondo Košice",
+        "associationId": "SATKD23062301",
+        "name": "Freia Rheannon Polyák",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_younger_cadets_class_d_women": {
+     "iRwXSmkFeb83hatj6aXH": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "iRwXSmkFeb83hatj6aXH",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012208",
+        "name": "Tamia Striežovská",
+        "country": "SVK"
+       }
+      ]
+     },
+     "R7UaY9WPwoEkiUqzfVOn": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "R7UaY9WPwoEkiUqzfVOn",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012501",
+        "name": "Petra Mališová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "individual_younger_cadets_class_c_women": {
+     "Pti3V8C9fSaOKz1RndTJ": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "Pti3V8C9fSaOKz1RndTJ",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060807",
+        "name": "Ella Balciarová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "zjDtVLYDocnrNG6BScHQ": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "zjDtVLYDocnrNG6BScHQ",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060701",
+        "name": "Lia Czeneová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "80aVURvJa850xO5Oko1H": {
+      "members": [
+       {
+        "rank": 4,
+        "athleteId": "80aVURvJa850xO5Oko1H",
+        "clubId": "roznava",
+        "club": "KORYO PANTHERS TAEKWONDO Rožňava",
+        "associationId": "SATKD24011807",
+        "name": "Eva Telecká",
+        "country": "SVK"
+       }
+      ]
+     },
+     "dgQjVwuS9T35Nt3U9pKm": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "dgQjVwuS9T35Nt3U9pKm",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060805",
+        "name": "Tajana Kováčová",
+        "country": "SVK"
+       }
+      ]
+     },
+     "Fmd5ToCPnnjPlt4fNamO": {
+      "members": [
+       {
+        "rank": 6,
+        "athleteId": "Fmd5ToCPnnjPlt4fNamO",
+        "clubId": "HcWgCkyCSBt3GLHIrot6",
+        "club": "Taekwondo Karpiel Tuchów",
+        "name": "Natalia Mróz",
+        "country": "POL"
+       }
+      ]
+     }
+    },
+    "teams_poomsae_younger_cadets_class_c_mixed": {
+     "Pti3V8C9fSaOKz1RndTJ-YgaWJqL3OzicaLOlCGyd-dgQjVwuS9T35Nt3U9pKm": {
+      "members": [
+       {
+        "rank": 5,
+        "athleteId": "Pti3V8C9fSaOKz1RndTJ",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060807",
+        "name": "Ella Balciarová",
+        "country": "SVK"
+       },
+       {
+        "rank": 5,
+        "athleteId": "dgQjVwuS9T35Nt3U9pKm",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060805",
+        "name": "Tajana Kováčová",
+        "country": "SVK"
+       },
+       {
+        "rank": 5,
+        "athleteId": "YgaWJqL3OzicaLOlCGyd",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD22060806",
+        "name": "Dominika Kamoďová",
+        "country": "SVK"
+       }
+      ]
+     }
+    },
+    "teams_poomsae_younger_cadets_class_d_mixed": {
+     "8D2KWwVKy3KpmNzVE9dm-R7UaY9WPwoEkiUqzfVOn-iRwXSmkFeb83hatj6aXH": {
+      "members": [
+       {
+        "rank": 3,
+        "athleteId": "iRwXSmkFeb83hatj6aXH",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012208",
+        "name": "Tamia Striežovská",
+        "country": "SVK"
+       },
+       {
+        "rank": 3,
+        "athleteId": "R7UaY9WPwoEkiUqzfVOn",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD24012501",
+        "name": "Petra Mališová",
+        "country": "SVK"
+       },
+       {
+        "rank": 3,
+        "athleteId": "8D2KWwVKy3KpmNzVE9dm",
+        "clubId": "hnusta",
+        "club": "TAEKWONDO KLUB Hnúšťa",
+        "associationId": "SATKD25020610",
+        "name": "Romana Antalová",
+        "country": "SVK"
+       }
+      ]
+     }
+    }
+   }
+  }
+ },
+ "categoryCounts": {
+  "para_individual_juniors_p22_men": 1,
+  "individual_seniors_under_30_class_b_men": 0,
+  "individual_cadets_class_c_women": 4,
+  "pairs_poomsae_cadets_class_c_mixed": 3,
+  "pairs_poomsae_younger_cadets_class_c_mixed": 2,
+  "individual_cadets_class_a_women": 1,
+  "individual_cadets_class_b_men": 1,
+  "pairs_poomsae_younger_cadets_class_d_mixed": 1,
+  "para_individual_seniors_p22_men": 4,
+  "para_individual_seniors_p21_men": 1,
+  "para_individual_seniors_p72_men": 1,
+  "pairs_poomsae_juniors_class_b_mixed": 1,
+  "pairs_poomsae_cadets_class_d_mixed": 1,
+  "individual_cadets_class_b_women": 3,
+  "individual_younger_cadets_class_c_women": 5,
+  "individual_cadets_class_c_men": 5,
+  "teams_poomsae_cadets_class_c_mixed": 2,
+  "individual_younger_cadets_class_c_men": 3,
+  "individual_younger_cadets_class_b_women": 2,
+  "individual_juniors_class_d_women": 1,
+  "individual_pupils_class_d_men": 1,
+  "individual_cadets_class_a_men": 1,
+  "para_individual_seniors_p22_women": 1,
+  "individual_seniors_under_30_class_b_women": 1,
+  "individual_seniors_under_30_class_a_women": 2,
+  "individual_juniors_class_b_women": 2,
+  "individual_cadets_class_d_women": 4,
+  "individual_juniors_class_b_men": 2,
+  "individual_juniors_class_a_women": 1,
+  "individual_seniors_over_30_class_c_men": 1,
+  "individual_pupils_class_d_women": 1,
+  "para_individual_seniors_p23_men": 1,
+  "individual_younger_cadets_class_d_women": 2,
+  "para_individual_seniors_p34_women": 1,
+  "freestyle_individual_children_women": 1,
+  "para_individual_cadets_p60_women": 1,
+  "teams_poomsae_younger_cadets_class_c_mixed": 1,
+  "teams_poomsae_younger_cadets_class_d_mixed": 1
+ },
+ "poomsaeDraw": {
+  "assignments": {
+   "seniors_over_30|class_a": "under40_a",
+   "seniors_under_30|class_a": "under40_a",
+   "cadets|class_b": "all_b",
+   "seniors_under_40|class_c": "all_b",
+   "pupils|class_d": "all_b",
+   "seniors_under_30|class_d": "all_b",
+   "pupils|class_c": "all_b",
+   "seniors_over_50|class_d": "all_b",
+   "seniors_over_50|class_c": "all_b",
+   "seniors_under_30|class_c": "all_b",
+   "younger_cadets|class_c": "all_b",
+   "younger_cadets|class_d": "all_b",
+   "seniors_over_50|class_a": "over40_a",
+   "pupils|class_a": "youth_a",
+   "juniors|class_b": "all_b",
+   "seniors_under_50|class_d": "all_b",
+   "seniors_over_30|class_c": "all_b",
+   "cadets|class_a": "youth_a",
+   "seniors_over_30|class_d": "all_b",
+   "seniors_under_50|class_a": "over40_a",
+   "cadets|class_d": "all_b",
+   "pupils|class_b": "all_b",
+   "younger_cadets|class_b": "all_b",
+   "seniors_under_40|class_a": "under40_a",
+   "juniors|class_c": "all_b",
+   "juniors|class_d": "all_b",
+   "juniors|class_a": "youth_a",
+   "younger_cadets|class_a": "youth_a",
+   "cadets|class_c": "all_b",
+   "seniors_over_50|class_b": "all_b",
+   "seniors_under_40|class_b": "all_b",
+   "seniors_under_30|class_b": "all_b",
+   "seniors_under_40|class_d": "all_b",
+   "seniors_over_30|class_b": "all_b",
+   "seniors_under_50|class_c": "all_b",
+   "seniors_under_50|class_b": "all_b"
+  },
+  "excludedRows": {},
+  "draw": {
+   "generatedAt": "2026-10-28T15:03:53.257727+00:00",
+   "method": "server-random",
+   "rows": [
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_7"
+     ],
+     "poolId": "all_b",
+     "key": "individual|pupils|class_b",
+     "label": "Individual Pupils Class B",
+     "semifinal": "taeguk_6",
+     "round1": "taeguk_4"
+    },
+    {
+     "final": [
+      "taeguk_7",
+      "taeguk_5"
+     ],
+     "poolId": "youth_a",
+     "key": "individual|pupils|class_a",
+     "label": "Individual Pupils Class A",
+     "semifinal": "koryo",
+     "round1": "keumgang"
+    },
+    {
+     "final": [
+      "taeguk_7",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "individual|younger_cadets|class_b",
+     "label": "Individual Younger Cadets Class B",
+     "semifinal": "taeguk_5",
+     "round1": "taeguk_4"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_6"
+     ],
+     "poolId": "youth_a",
+     "key": "individual|younger_cadets|class_a",
+     "label": "Individual Younger Cadets Class A",
+     "semifinal": "taeguk_7",
+     "round1": "taeguk_5"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_7"
+     ],
+     "poolId": "all_b",
+     "key": "individual|cadets|class_b",
+     "label": "Individual Cadets Class B",
+     "semifinal": "taeguk_4",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "taeguk_8"
+     ],
+     "poolId": "youth_a",
+     "key": "individual|cadets|class_a",
+     "label": "Individual Cadets Class A",
+     "semifinal": "koryo",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "taeguk_7"
+     ],
+     "poolId": "all_b",
+     "key": "individual|juniors|class_b",
+     "label": "Individual Juniors Class B",
+     "semifinal": "taeguk_5",
+     "round1": "taeguk_8"
+    },
+    {
+     "final": [
+      "taeguk_7",
+      "taeguk_8"
+     ],
+     "poolId": "youth_a",
+     "key": "individual|juniors|class_a",
+     "label": "Individual Juniors Class A",
+     "semifinal": "taeguk_5",
+     "round1": "taeguk_4"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_8"
+     ],
+     "poolId": "all_b",
+     "key": "individual|seniors_under_30|class_b",
+     "label": "Individual Seniors under 30 Class B",
+     "semifinal": "taeguk_7",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_7",
+      "taeguk_8"
+     ],
+     "poolId": "under40_a",
+     "key": "individual|seniors_under_30|class_a",
+     "label": "Individual Seniors under 30 Class A",
+     "semifinal": "taeguk_4",
+     "round1": "koryo"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_4"
+     ],
+     "poolId": "all_b",
+     "key": "individual|seniors_over_30|class_b",
+     "label": "Individual Seniors over 30 Class B",
+     "semifinal": "taeguk_7",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "sipjin"
+     ],
+     "poolId": "under40_a",
+     "key": "individual|seniors_over_30|class_a",
+     "label": "Individual Seniors over 30 Class A",
+     "semifinal": "taeguk_6",
+     "round1": "koryo"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_7"
+     ],
+     "poolId": "all_b",
+     "key": "individual|seniors_under_40|class_b",
+     "label": "Individual Seniors under 40 Class B",
+     "semifinal": "taeguk_6",
+     "round1": "taeguk_4"
+    },
+    {
+     "final": [
+      "sipjin",
+      "keumgang"
+     ],
+     "poolId": "under40_a",
+     "key": "individual|seniors_under_40|class_a",
+     "label": "Individual Seniors under 40 Class A",
+     "semifinal": "koryo",
+     "round1": "taeguk_5"
+    },
+    {
+     "final": [
+      "taeguk_6",
+      "taeguk_4"
+     ],
+     "poolId": "all_b",
+     "key": "individual|seniors_under_50|class_b",
+     "label": "Individual Seniors under 50 Class B",
+     "semifinal": "taeguk_7",
+     "round1": "taeguk_5"
+    },
+    {
+     "final": [
+      "koryo",
+      "pyongwon"
+     ],
+     "poolId": "over40_a",
+     "key": "individual|seniors_under_50|class_a",
+     "label": "Individual Seniors under 50 Class A",
+     "semifinal": "jitae",
+     "round1": "keumgang"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "individual|seniors_over_50|class_b",
+     "label": "Individual Seniors over 50 Class B",
+     "semifinal": "taeguk_4",
+     "round1": "taeguk_7"
+    },
+    {
+     "final": [
+      "koryo",
+      "keumgang"
+     ],
+     "poolId": "over40_a",
+     "key": "individual|seniors_over_50|class_a",
+     "label": "Individual Seniors over 50 Class A",
+     "semifinal": "pyongwon",
+     "round1": "cheonkwon"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|pupils|class_b",
+     "label": "Pairs Poomsae Pupils Class B",
+     "semifinal": "taeguk_4",
+     "round1": "taeguk_7"
+    },
+    {
+     "final": [
+      "taeguk_6",
+      "taeguk_8"
+     ],
+     "poolId": "youth_a",
+     "key": "pairs_poomsae|pupils|class_a",
+     "label": "Pairs Poomsae Pupils Class A",
+     "semifinal": "taeguk_5",
+     "round1": "koryo"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_5"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|younger_cadets|class_b",
+     "label": "Pairs Poomsae Younger Cadets Class B",
+     "semifinal": "taeguk_7",
+     "round1": "taeguk_4"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_5"
+     ],
+     "poolId": "youth_a",
+     "key": "pairs_poomsae|younger_cadets|class_a",
+     "label": "Pairs Poomsae Younger Cadets Class A",
+     "semifinal": "taeguk_4",
+     "round1": "koryo"
+    },
+    {
+     "final": [
+      "taeguk_7",
+      "taeguk_8"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|cadets|class_b",
+     "label": "Pairs Poomsae Cadets Class B",
+     "semifinal": "taeguk_6",
+     "round1": "taeguk_4"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_7"
+     ],
+     "poolId": "youth_a",
+     "key": "pairs_poomsae|cadets|class_a",
+     "label": "Pairs Poomsae Cadets Class A",
+     "semifinal": "keumgang",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "taeguk_7"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|juniors|class_b",
+     "label": "Pairs Poomsae Juniors Class B",
+     "semifinal": "taeguk_5",
+     "round1": "taeguk_8"
+    },
+    {
+     "final": [
+      "koryo",
+      "taeguk_8"
+     ],
+     "poolId": "youth_a",
+     "key": "pairs_poomsae|juniors|class_a",
+     "label": "Pairs Poomsae Juniors Class A",
+     "semifinal": "keumgang",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|seniors_under_30|class_b",
+     "label": "Pairs Poomsae Seniors under 30 Class B",
+     "semifinal": "taeguk_5",
+     "round1": "taeguk_8"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "taeguk_8"
+     ],
+     "poolId": "under40_a",
+     "key": "pairs_poomsae|seniors_under_30|class_a",
+     "label": "Pairs Poomsae Seniors under 30 Class A",
+     "semifinal": "taeguk_5",
+     "round1": "koryo"
+    },
+    {
+     "final": [
+      "taeguk_7",
+      "taeguk_5"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|seniors_over_30|class_b",
+     "label": "Pairs Poomsae Seniors over 30 Class B",
+     "semifinal": "taeguk_8",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "keumgang"
+     ],
+     "poolId": "under40_a",
+     "key": "pairs_poomsae|seniors_over_30|class_a",
+     "label": "Pairs Poomsae Seniors over 30 Class A",
+     "semifinal": "taeguk_8",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_4"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|seniors_under_40|class_b",
+     "label": "Pairs Poomsae Seniors under 40 Class B",
+     "semifinal": "taeguk_6",
+     "round1": "taeguk_7"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "keumgang"
+     ],
+     "poolId": "under40_a",
+     "key": "pairs_poomsae|seniors_under_40|class_a",
+     "label": "Pairs Poomsae Seniors under 40 Class A",
+     "semifinal": "sipjin",
+     "round1": "koryo"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|seniors_under_50|class_b",
+     "label": "Pairs Poomsae Seniors under 50 Class B",
+     "semifinal": "taeguk_5",
+     "round1": "taeguk_7"
+    },
+    {
+     "final": [
+      "cheonkwon",
+      "hansu"
+     ],
+     "poolId": "over40_a",
+     "key": "pairs_poomsae|seniors_under_50|class_a",
+     "label": "Pairs Poomsae Seniors under 50 Class A",
+     "semifinal": "sipjin",
+     "round1": "keumgang"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "pairs_poomsae|seniors_over_50|class_b",
+     "label": "Pairs Poomsae Seniors over 50 Class B",
+     "semifinal": "taeguk_5",
+     "round1": "taeguk_7"
+    },
+    {
+     "final": [
+      "pyongwon",
+      "cheonkwon"
+     ],
+     "poolId": "over40_a",
+     "key": "pairs_poomsae|seniors_over_50|class_a",
+     "label": "Pairs Poomsae Seniors over 50 Class A",
+     "semifinal": "taeguk_8",
+     "round1": "hansu"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_5"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|pupils|class_b",
+     "label": "Teams Poomsae Pupils Class B",
+     "semifinal": "taeguk_4",
+     "round1": "taeguk_7"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_4"
+     ],
+     "poolId": "youth_a",
+     "key": "teams_poomsae|pupils|class_a",
+     "label": "Teams Poomsae Pupils Class A",
+     "semifinal": "taeguk_7",
+     "round1": "keumgang"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|younger_cadets|class_b",
+     "label": "Teams Poomsae Younger Cadets Class B",
+     "semifinal": "taeguk_4",
+     "round1": "taeguk_7"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "koryo"
+     ],
+     "poolId": "youth_a",
+     "key": "teams_poomsae|younger_cadets|class_a",
+     "label": "Teams Poomsae Younger Cadets Class A",
+     "semifinal": "taeguk_6",
+     "round1": "taeguk_5"
+    },
+    {
+     "final": [
+      "taeguk_7",
+      "taeguk_8"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|cadets|class_b",
+     "label": "Teams Poomsae Cadets Class B",
+     "semifinal": "taeguk_4",
+     "round1": "taeguk_5"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_8"
+     ],
+     "poolId": "youth_a",
+     "key": "teams_poomsae|cadets|class_a",
+     "label": "Teams Poomsae Cadets Class A",
+     "semifinal": "taeguk_7",
+     "round1": "koryo"
+    },
+    {
+     "final": [
+      "taeguk_6",
+      "taeguk_4"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|juniors|class_b",
+     "label": "Teams Poomsae Juniors Class B",
+     "semifinal": "taeguk_7",
+     "round1": "taeguk_8"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "koryo"
+     ],
+     "poolId": "youth_a",
+     "key": "teams_poomsae|juniors|class_a",
+     "label": "Teams Poomsae Juniors Class A",
+     "semifinal": "keumgang",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_6",
+      "taeguk_8"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|seniors_under_30|class_b",
+     "label": "Teams Poomsae Seniors under 30 Class B",
+     "semifinal": "taeguk_4",
+     "round1": "taeguk_5"
+    },
+    {
+     "final": [
+      "taeguk_5",
+      "taeguk_7"
+     ],
+     "poolId": "under40_a",
+     "key": "teams_poomsae|seniors_under_30|class_a",
+     "label": "Teams Poomsae Seniors under 30 Class A",
+     "semifinal": "taeguk_6",
+     "round1": "taeguk_4"
+    },
+    {
+     "final": [
+      "taeguk_7",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|seniors_over_30|class_b",
+     "label": "Teams Poomsae Seniors over 30 Class B",
+     "semifinal": "taeguk_8",
+     "round1": "taeguk_5"
+    },
+    {
+     "final": [
+      "taebaek",
+      "koryo"
+     ],
+     "poolId": "under40_a",
+     "key": "teams_poomsae|seniors_over_30|class_a",
+     "label": "Teams Poomsae Seniors over 30 Class A",
+     "semifinal": "sipjin",
+     "round1": "taeguk_8"
+    },
+    {
+     "final": [
+      "taeguk_8",
+      "taeguk_7"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|seniors_under_40|class_b",
+     "label": "Teams Poomsae Seniors under 40 Class B",
+     "semifinal": "taeguk_4",
+     "round1": "taeguk_6"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "taeguk_5"
+     ],
+     "poolId": "under40_a",
+     "key": "teams_poomsae|seniors_under_40|class_a",
+     "label": "Teams Poomsae Seniors under 40 Class A",
+     "semifinal": "taebaek",
+     "round1": "taeguk_8"
+    },
+    {
+     "final": [
+      "taeguk_6",
+      "taeguk_8"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|seniors_under_50|class_b",
+     "label": "Teams Poomsae Seniors under 50 Class B",
+     "semifinal": "taeguk_5",
+     "round1": "taeguk_4"
+    },
+    {
+     "final": [
+      "pyongwon",
+      "keumgang"
+     ],
+     "poolId": "over40_a",
+     "key": "teams_poomsae|seniors_under_50|class_a",
+     "label": "Teams Poomsae Seniors under 50 Class A",
+     "semifinal": "jitae",
+     "round1": "cheonkwon"
+    },
+    {
+     "final": [
+      "taeguk_4",
+      "taeguk_6"
+     ],
+     "poolId": "all_b",
+     "key": "teams_poomsae|seniors_over_50|class_b",
+     "label": "Teams Poomsae Seniors over 50 Class B",
+     "semifinal": "taeguk_7",
+     "round1": "taeguk_8"
+    },
+    {
+     "final": [
+      "koryo",
+      "taebaek"
+     ],
+     "poolId": "over40_a",
+     "key": "teams_poomsae|seniors_over_50|class_a",
+     "label": "Teams Poomsae Seniors over 50 Class A",
+     "semifinal": "pyongwon",
+     "round1": "cheonkwon"
+    }
+   ]
+  },
+  "updatedAt": {
+   "__ts__": "2026-10-28T15:03:53.282000+00:00"
+  },
+  "excludedGroups": {},
+  "pools": [
+   {
+    "name": "All athletes B",
+    "id": "all_b",
+    "poomsae": [
+     "taeguk_4",
+     "taeguk_5",
+     "taeguk_6",
+     "taeguk_7",
+     "taeguk_8"
+    ]
+   },
+   {
+    "name": "Youth athletes A",
+    "id": "youth_a",
+    "poomsae": [
+     "taeguk_4",
+     "taeguk_5",
+     "taeguk_6",
+     "taeguk_7",
+     "taeguk_8",
+     "koryo",
+     "keumgang"
+    ]
+   },
+   {
+    "name": "Under 40 A",
+    "id": "under40_a",
+    "poomsae": [
+     "taeguk_4",
+     "taeguk_5",
+     "taeguk_6",
+     "taeguk_7",
+     "taeguk_8",
+     "koryo",
+     "keumgang",
+     "taebaek",
+     "pyongwon",
+     "sipjin"
+    ]
+   },
+   {
+    "name": "Over 40 A",
+    "id": "over40_a",
+    "poomsae": [
+     "taeguk_8",
+     "koryo",
+     "keumgang",
+     "taebaek",
+     "pyongwon",
+     "sipjin",
+     "jitae",
+     "cheonkwon",
+     "hansu"
+    ]
+   }
+  ]
+ }
+}

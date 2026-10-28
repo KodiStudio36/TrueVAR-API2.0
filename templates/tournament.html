@@ -368,6 +368,17 @@ immediately, with no resize listener or re-render needed.
     // with a `match_value` equal to the athlete's paraCategory, e.g.
     // "P11"). Declaring para_class_options implies requires_para.
     //
+    // CLASS → AGE LIMIT: a belt class may list `age_codes` — the only age
+    // divisions it exists in (e.g. Individual Class A: seniors under 30 /
+    // under 40 / under 50 / over 50; Classes B–D: under 30 / over 30). A
+    // class without `age_codes` exists in every age division.
+    //
+    // SAME PARA CLASS: `same_para_class: "class"` (or true) on a para entry
+    // type makes every member of a pair/team share the exact same
+    // paraCategory (P21 + P21); `"group"` only the same family (P21 + P23 →
+    // P2x). It works without a class split in the code, so a para pair
+    // category can stay one mixed bracket per age.
+    //
     // Belt and para classes are folded into ONE "class" level as a cross
     // product (the tree still calls it `beltClasses` so every existing
     // loop over division.beltClasses → genders → weightCats keeps
@@ -440,53 +451,56 @@ immediately, with no resize listener or re-render needed.
                 rankMin: b.min ?? null,
                 rankMax: b.max ?? null,
                 paraMatch: p.match_value ? String(p.match_value).toUpperCase() : null,
+                ageCodes: Array.isArray(b.age_codes) ? b.age_codes : null,
             })));
 
             const divisions = ageOptions.map(ageOpt => {
-                const beltClasses = classOptions.map(cls => {
-                    const genders = [];
+                const beltClasses = classOptions
+                    .filter(cls => !cls.ageCodes || cls.ageCodes.includes(ageOpt.code))
+                    .map(cls => {
+                        const genders = [];
 
-                    genderOptions.forEach(genderOpt => {
-                        let weightCats;
-                        // Only the non-empty parts go into the code, so an
-                        // entry type with no belt/para class produces exactly
-                        // the same code shape as before these features.
-                        const codeBase = [ageOpt.code, cls.code, genderOpt.code].filter(Boolean).join("_");
+                        genderOptions.forEach(genderOpt => {
+                            let weightCats;
+                            // Only the non-empty parts go into the code, so an
+                            // entry type with no belt/para class produces exactly
+                            // the same code shape as before these features.
+                            const codeBase = [ageOpt.code, cls.code, genderOpt.code].filter(Boolean).join("_");
 
-                        if (weightDim) {
-                            const thresholdKey = `${ageOpt.code}|${genderOpt.code}`;
-                            const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[thresholdKey]) || [];
-                            if (thresholds.length === 0) return; // no weight config for this age/gender pair — skip
+                            if (weightDim) {
+                                const thresholdKey = `${ageOpt.code}|${genderOpt.code}`;
+                                const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[thresholdKey]) || [];
+                                if (thresholds.length === 0) return; // no weight config for this age/gender pair — skip
 
-                            weightCats = thresholds.map(w => ({
-                                code: `${codeBase}_${w}`,
-                                label: `-${w}${unit}`,
-                                maxWeight: w,
-                            }));
-                            if (weightDim.open_top) {
-                                const top = thresholds[thresholds.length - 1];
-                                weightCats.push({
-                                    code: `${codeBase}_${top}plus`,
-                                    label: `+${top}${unit}`,
-                                    maxWeight: null,
-                                });
+                                weightCats = thresholds.map(w => ({
+                                    code: `${codeBase}_${w}`,
+                                    label: `-${w}${unit}`,
+                                    maxWeight: w,
+                                }));
+                                if (weightDim.open_top) {
+                                    const top = thresholds[thresholds.length - 1];
+                                    weightCats.push({
+                                        code: `${codeBase}_${top}plus`,
+                                        label: `+${top}${unit}`,
+                                        maxWeight: null,
+                                    });
+                                }
+                            } else {
+                                // No weight dimension (e.g. poomsae) — the
+                                // class + gender level IS the terminal
+                                // category. A single implicit bracket with an
+                                // empty label auto-selects and skips the
+                                // weight picker.
+                                weightCats = [{ code: codeBase, label: "", maxWeight: undefined }];
                             }
-                        } else {
-                            // No weight dimension (e.g. poomsae) — the
-                            // class + gender level IS the terminal
-                            // category. A single implicit bracket with an
-                            // empty label auto-selects and skips the
-                            // weight picker.
-                            weightCats = [{ code: codeBase, label: "", maxWeight: undefined }];
-                        }
 
-                        genders.push({ code: genderOpt.code, label: genderOpt.label, matchValue: genderOpt.match_value, weightCats });
-                    });
+                            genders.push({ code: genderOpt.code, label: genderOpt.label, matchValue: genderOpt.match_value, weightCats });
+                        });
 
-                    if (genders.length === 0) return null;
+                        if (genders.length === 0) return null;
 
-                    return { ...cls, genders };
-                }).filter(Boolean);
+                        return { ...cls, genders };
+                    }).filter(Boolean);
 
                 if (beltClasses.length === 0) return null;
 
@@ -504,6 +518,7 @@ immediately, with no resize listener or re-render needed.
                 label: entryOpt.label,
                 participantCount: entryOpt.participantCount || 1,
                 requiresPara,
+                sameParaClass: requiresPara ? sameParaClassMode(entryOpt.same_para_class) : null,
                 divisions,
             };
         });
@@ -572,10 +587,33 @@ immediately, with no resize listener or re-render needed.
         return results;
     }
 
+    // same_para_class → null (off), "class" (exact P21) or "group" (P2x).
+    // Mirrors _same_para_class_mode in tournament_router.py.
+    function sameParaClassMode(raw) {
+        if (raw === true || raw === "class") return "class";
+        if (raw === "group") return "group";
+        return null;
+    }
+
+    function paraClassKey(paraCategory, mode) {
+        const c = String(paraCategory || "").trim().toUpperCase();
+        if (!c) return null;
+        return mode === "group" ? c.slice(0, 2) : c;
+    }
+
+    // Every member of a pair/team has a para class and they all share it.
+    function sameParaClassOk(entryType, athletes) {
+        if (!entryType.sameParaClass || athletes.length < 2) return true;
+        const keys = athletes.map(a => paraClassKey(a.paraCategory, entryType.sameParaClass));
+        return keys.every(k => k && k === keys[0]);
+    }
+
     // Same filter the modal uses: first athlete drives age/gender, and
-    // every member must fit the class (belt + para).
+    // every member must fit the class (belt + para) and — where the entry
+    // type asks for it — share one para class.
     function resolveEligibleForEntry(entryType, athletes) {
         if (!athletes || athletes.length === 0) return [];
+        if (!sameParaClassOk(entryType, athletes)) return [];
         return resolveEligibleCategories(entryType, athletes[0])
             .filter(ec => athletes.every(a => classMatches(entryType, ec.beltClass, a)));
     }
@@ -586,6 +624,16 @@ immediately, with no resize listener or re-render needed.
         const nonPara = athletes.filter(a => !a.isPara);
         if (nonPara.length) {
             return `${nonPara.map(a => a.displayName).join(", ")} ${nonPara.length === 1 ? "is" : "are"} not registered as a para athlete. Only para athletes can enter ${entryType.label}.`;
+        }
+        if (!sameParaClassOk(entryType, athletes)) {
+            const missingClass = athletes.filter(a => !a.paraCategory);
+            if (missingClass.length) {
+                return `${missingClass.map(a => a.displayName).join(", ")} ${missingClass.length === 1 ? "has" : "have"} no para class set on their athlete profile.`;
+            }
+            const got = [...new Set(athletes.map(a => String(a.paraCategory).toUpperCase()))];
+            return entryType.sameParaClass === "group"
+                ? `All members of a ${entryType.label} entry must be from the same para group (got ${got.join(", ")}).`
+                : `All members of a ${entryType.label} entry must have the same para class (got ${got.join(", ")}).`;
         }
         const hasParaClasses = entryType.divisions.some(d => d.beltClasses.some(bc => bc.paraMatch));
         if (!hasParaClasses) return null;
