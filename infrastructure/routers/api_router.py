@@ -473,20 +473,31 @@ class RegisterEntryRequest(BaseModel):
 # the class automatically; this is the server-side guarantee for club
 # registrations. Staff endpoints (admin-add / admin-move) are exempt.
 
-def _find_entry_type_option(tournament_id: str, entry_type_code: str) -> Optional[dict]:
+def _find_entry_type_schema(tournament_id: str, entry_type_code: str) -> Tuple[Optional[dict], List[dict]]:
+    """
+    (entry_type option, discipline dimensions). A discipline without an
+    entry_type dimension has one implicit "individual" type, like
+    parseCategories in tournament.html.
+    """
     doc = db.collection("tournament_categories").document(tournament_id).get()
     if not doc.exists:
-        return None
+        return None, []
     schemas = ((doc.to_dict() or {}).get("categories") or {}).get("sportSchemas") or {}
     for sport_schema in schemas.values():
         for disc in (sport_schema.get("disciplines") or {}).values():
-            for dim in disc.get("dimensions") or []:
-                if dim.get("key") != "entry_type":
-                    continue
-                for opt in dim.get("options") or []:
-                    if opt.get("code") == entry_type_code:
-                        return opt
-    return None
+            dims = disc.get("dimensions") or []
+            entry_dim = next((d for d in dims if d.get("key") == "entry_type"), None)
+            options = (entry_dim or {}).get("options") or []
+            if not options and entry_type_code == "individual":
+                return {"code": "individual", "label": "Individual", "participantCount": 1}, dims
+            for opt in options:
+                if opt.get("code") == entry_type_code:
+                    return opt, dims
+    return None, []
+
+
+def _find_entry_type_option(tournament_id: str, entry_type_code: str) -> Optional[dict]:
+    return _find_entry_type_schema(tournament_id, entry_type_code)[0]
 
 
 def _para_rules(opt: Optional[dict], entry_type_code: str) -> Tuple[bool, List[dict]]:
@@ -563,6 +574,147 @@ def _validate_class_age(
                 detail=f"{b.get('label') or belt_class_code} is not offered in this age division.",
             )
         return
+
+
+# ── ENTRY MEMBERS: AGE / GENDER / BELT / COUNT ────────────────────────────
+# Every member of an entry must fit the category on its own. The browser
+# used to take age/gender from the first athlete only, and the server
+# checked neither, so a pair/team could mix age divisions. Club paths only
+# (staff admin-add / admin-move can still place anyone anywhere).
+
+def _dim_options(dims: List[dict], key: str) -> List[dict]:
+    return next((d.get("options") or [] for d in dims if d.get("key") == key), [])
+
+
+def _gender_matches(gender_opt: dict, athlete_gender: Optional[str]) -> bool:
+    """Same rules as genderMatches in tournament.html."""
+    mv = gender_opt.get("match_value")
+    if isinstance(mv, list):
+        return athlete_gender in mv
+    if mv is None:
+        return True
+    return mv == athlete_gender
+
+
+def _validate_entry_members(
+    tournament_id: str,
+    entry_type_code: str,
+    age_code: str,
+    belt_class_code: Optional[str],
+    para_class_code: Optional[str],
+    gender_code: str,
+    category_code: str,
+    athletes: List[Tuple[str, dict]],
+    sport: Optional[str],
+) -> None:
+    """
+    Checks, for a club registration/edit:
+      - the member count equals the entry type's participantCount
+      - ageCode / beltClassCode / genderCode exist in the schema and the
+        categoryCode really is that age / class / para class / gender
+      - EVERY member's birth year is inside the age division, gender is
+        inside the gender bracket, rank is inside the belt class
+    """
+    opt, dims = _find_entry_type_schema(tournament_id, entry_type_code)
+    if opt is None:
+        raise HTTPException(status_code=400, detail="Unknown entry type for this tournament.")
+    label = opt.get("label") or entry_type_code
+
+    expected = int(opt.get("participantCount") or 1)
+    if len(athletes) != expected:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A {label} entry needs exactly {expected} athlete{'' if expected == 1 else 's'}.",
+        )
+
+    age_opt = next((a for a in (opt.get("age_options") or _dim_options(dims, "age"))
+                    if a.get("code") == age_code), None)
+    if not age_opt:
+        raise HTTPException(status_code=400, detail="Unknown age division.")
+    gender_opt = next((g for g in (opt.get("gender_options") or _dim_options(dims, "gender"))
+                       if g.get("code") == gender_code), None)
+    if not gender_opt:
+        raise HTTPException(status_code=400, detail="Unknown gender category.")
+    belt_opt = None
+    if belt_class_code:
+        belt_opt = next((b for b in (opt.get("belt_class_options") or [])
+                         if b.get("code") == belt_class_code), None)
+        if not belt_opt:
+            raise HTTPException(status_code=400, detail="Unknown class.")
+
+    # {entryType}_{age}[_{belt}][_{para}]_{gender}[_{weight}] — see
+    # category-schema.js. Stops a roster entry landing in the wrong
+    # division_rosters doc.
+    base = "_".join(p for p in (entry_type_code, age_code, belt_class_code, para_class_code, gender_code) if p)
+    if category_code != base and not category_code.startswith(base + "_"):
+        raise HTTPException(status_code=400, detail="Category code doesn't match the age division / class / gender.")
+
+    lo, hi = age_opt.get("min"), age_opt.get("max")
+    age_label = age_opt.get("label") or age_code
+    span = f"{lo if lo is not None else '…'}–{hi if hi is not None else '…'}"
+    team_note = " Every member of the entry must be from the same age division." if expected > 1 else ""
+    b_lo, b_hi = (belt_opt or {}).get("min"), (belt_opt or {}).get("max")
+
+    for _, a in athletes:
+        name = _display_name(a)
+        sport_data = (a.get("sports") or {}).get(sport) or {}
+        by = _birth_year(a)
+        if by is None:
+            raise HTTPException(status_code=400, detail=f"{name} has no birthday on their athlete profile.")
+        if (lo is not None and by < lo) or (hi is not None and by > hi):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} (born {by}) is not in the {age_label} age division ({span}).{team_note}",
+            )
+        if not _gender_matches(gender_opt, (a.get("gender") or "").lower()):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} doesn't fit the {gender_opt.get('label') or gender_code} category.",
+            )
+        if b_lo is not None or b_hi is not None:
+            rank = sport_data.get("rank")
+            if rank is None or (b_lo is not None and rank < b_lo) or (b_hi is not None and rank > b_hi):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{name}'s rank doesn't fit {belt_opt.get('label') or belt_class_code}."
+                           + (" Every member of the entry must be in the same belt class." if expected > 1 else ""),
+                )
+
+
+# ── ONE ENTRY PER ATHLETE PER ENTRY TYPE × AGE DIVISION ───────────────────
+# The registration doc id is {categoryCode}_{sorted athleteIds}, so A+B and
+# A+C used to be two different docs and both went through. This checks every
+# active registration that contains any of the athletes. Applies to club AND
+# staff paths — a double entry is never valid.
+
+def _assert_not_registered_twice(
+    tx,
+    tournament_ref,
+    athletes: List[Tuple[str, dict]],
+    entry_type_code: str,
+    age_code: str,
+    ignore_doc_id: Optional[str] = None,
+) -> None:
+    """
+    Read inside the transaction (before any write), so two clubs/tabs
+    racing can't both get through. array_contains on a single field needs
+    no composite index. ignore_doc_id = the registration being moved.
+    """
+    regs = tournament_ref.collection("registrations")
+    for athlete_id, a in athletes:
+        for snap in regs.where("athleteIds", "array_contains", athlete_id).get(transaction=tx):
+            if snap.id == ignore_doc_id:
+                continue
+            r = snap.to_dict() or {}
+            if r.get("status", "active") != "active":
+                continue
+            if r.get("entryTypeCode") == entry_type_code and r.get("ageCode") == age_code:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{_display_name(a)} is already registered in "
+                           f"{r.get('categoryLabel') or r.get('categoryCode')}. An athlete can be "
+                           f"entered only once per entry type and age division.",
+                )
 
 
 def _validate_para_eligibility(
@@ -659,6 +811,8 @@ def _execute_registration_create(
 ) -> None:
     if not payload.athleteIds:
         raise HTTPException(status_code=400, detail="At least one athlete is required.")
+    if len(set(payload.athleteIds)) != len(payload.athleteIds):
+        raise HTTPException(status_code=400, detail="The same athlete can't be in one entry twice.")
 
     tournament_ref = db.collection("tournaments").document(tournament_id)
     tournament_doc = tournament_ref.get()
@@ -677,12 +831,16 @@ def _execute_registration_create(
         members.append(_build_roster_member(athlete_id, athlete, sport))
         athlete_docs.append((athlete_id, athlete))
 
-    # Para rules bind CLUB registrations only. Staff (admin-add, from the
-    # category manager) can put any athlete into any category — e.g. a
+    # Eligibility rules bind CLUB registrations only. Staff (admin-add, from
+    # the category manager) can put any athlete into any category — e.g. a
     # non-para athlete into a para category, or a class the athlete isn't
-    # classified as — so the check is skipped entirely on that path.
+    # classified as — so these checks are skipped entirely on that path.
     if enforce_club_match:
         _validate_class_age(tournament_id, payload.entryTypeCode, payload.beltClassCode, payload.ageCode)
+        _validate_entry_members(
+            tournament_id, payload.entryTypeCode, payload.ageCode, payload.beltClassCode,
+            payload.paraClassCode, payload.genderCode, payload.categoryCode, athlete_docs, sport,
+        )
         _validate_para_eligibility(
             tournament_id, payload.entryTypeCode, payload.paraClassCode,
             payload.categoryCode, athlete_docs, sport,
@@ -712,6 +870,9 @@ def _execute_registration_create(
         existing = reg_ref.get(transaction=tx)
         if existing.exists and existing.to_dict().get("status", "active") == "active":
             raise HTTPException(status_code=409, detail="This entry is already registered in this category.")
+        # One active entry per athlete per entry type × age division
+        # (club and staff paths alike).
+        _assert_not_registered_twice(tx, tournament_ref, athlete_docs, payload.entryTypeCode, payload.ageCode)
 
         tx.set(reg_ref, {
             "tournamentId": tournament_id,
@@ -957,6 +1118,8 @@ def _execute_registration_move(
 ) -> None:
     if not payload.athleteIds:
         raise HTTPException(status_code=400, detail="At least one athlete is required.")
+    if len(set(payload.athleteIds)) != len(payload.athleteIds):
+        raise HTTPException(status_code=400, detail="The same athlete can't be in one entry twice.")
 
     if payload.oldCategoryCode == payload.newCategoryCode:
         raise HTTPException(status_code=400, detail="New category is the same as the current one.")
@@ -998,14 +1161,25 @@ def _execute_registration_move(
             members.append(_build_roster_member(athlete_id, athlete, sport))
             athlete_docs.append((athlete_id, athlete))
 
-        # Para rules bind club edits only; staff (admin-move) are
+        # Eligibility rules bind club edits only; staff (admin-move) are
         # unrestricted (see _execute_registration_create).
         if enforce_ownership:
             _validate_class_age(tournament_id, payload.newEntryTypeCode, payload.newBeltClassCode, payload.newAgeCode)
+            _validate_entry_members(
+                tournament_id, payload.newEntryTypeCode, payload.newAgeCode, payload.newBeltClassCode,
+                payload.newParaClassCode, payload.newGenderCode, payload.newCategoryCode, athlete_docs, sport,
+            )
             _validate_para_eligibility(
                 tournament_id, payload.newEntryTypeCode, payload.newParaClassCode,
                 payload.newCategoryCode, athlete_docs, sport,
             )
+
+        # One active entry per athlete per entry type × age division — the
+        # entry being moved doesn't count against itself.
+        _assert_not_registered_twice(
+            tx, tournament_ref, athlete_docs, payload.newEntryTypeCode, payload.newAgeCode,
+            ignore_doc_id=old_reg_ref.id,
+        )
 
         tx.set(old_reg_ref, {"status": "moved", "movedTo": new_reg_ref.id}, merge=True)
 

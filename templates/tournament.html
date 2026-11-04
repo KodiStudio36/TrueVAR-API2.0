@@ -608,14 +608,57 @@ immediately, with no resize listener or re-render needed.
         return keys.every(k => k && k === keys[0]);
     }
 
-    // Same filter the modal uses: first athlete drives age/gender, and
-    // every member must fit the class (belt + para) and — where the entry
-    // type asks for it — share one para class.
+    // Same rule as resolveEligibleCategories' age check, as a helper.
+    function inAgeRange(division, birthYear) {
+        return birthYear != null && !(birthYear < division.ageMin) && !(birthYear > division.ageMax);
+    }
+
+    // EVERY member must fit the category on their own: age division,
+    // gender bracket and class (belt + para). Previously age/gender came
+    // from athletes[0] only, so a pair/team could mix age divisions.
+    // Mirrors _validate_entry_members in tournament_router.py.
+    function memberFits(entryType, ec, athlete) {
+        return !!athlete
+            && inAgeRange(ec.division, athlete.birthYear)
+            && genderMatches(ec.gender, athlete.gender)
+            && classMatches(entryType, ec.beltClass, athlete);
+    }
+
+    // Categories every selected athlete fits (and, where the entry type
+    // asks for it, all members share one para class).
     function resolveEligibleForEntry(entryType, athletes) {
         if (!athletes || athletes.length === 0) return [];
         if (!sameParaClassOk(entryType, athletes)) return [];
         return resolveEligibleCategories(entryType, athletes[0])
-            .filter(ec => athletes.every(a => classMatches(entryType, ec.beltClass, a)));
+            .filter(ec => athletes.every(a => memberFits(entryType, ec, a)));
+    }
+
+    // Why a pair/team has no common category (age or gender mismatch).
+    function mixedMembersReason(entryType, athletes) {
+        if (!entryType || !athletes || athletes.length < 2) return null;
+        const base = resolveEligibleCategories(entryType, athletes[0]);
+        if (base.length === 0) return null;
+        const names = list => list.map(a => a.displayName).join(", ");
+        const verb = list => list.length === 1 ? "is" : "are";
+        const rest = athletes.slice(1);
+        const otherAge = rest.filter(a => !base.some(ec => inAgeRange(ec.division, a.birthYear)));
+        if (otherAge.length) {
+            return `${names(otherAge)} ${verb(otherAge)} not in the same age division as ${athletes[0].displayName}. All members of a ${entryType.label} entry must be from one age division.`;
+        }
+        const otherGender = rest.filter(a => !base.some(ec => inAgeRange(ec.division, a.birthYear) && genderMatches(ec.gender, a.gender)));
+        if (otherGender.length) {
+            return `${names(otherGender)} ${verb(otherGender)} not eligible for the same gender category as ${athletes[0].displayName}.`;
+        }
+        // Belt class (e.g. Class A + Class C): members must share one class.
+        // Para class mismatches are explained by ineligibilityReason instead.
+        const firstClasses = [...new Set(base.map(ec => ec.beltClass.label).filter(Boolean))];
+        const otherClass = rest.filter(a => !base.some(ec =>
+            inAgeRange(ec.division, a.birthYear) && genderMatches(ec.gender, a.gender)
+            && beltClassMatches(ec.beltClass, a.rank)));
+        if (otherClass.length) {
+            return `${names(otherClass)} ${verb(otherClass)} not in the same belt class as ${athletes[0].displayName}${firstClasses.length ? ` (${firstClasses.join(" / ")})` : ""}. All members of a ${entryType.label} entry must be in one belt class.`;
+        }
+        return null;
     }
 
     // Human-readable reason shown when a para entry type has no match.
@@ -1018,6 +1061,9 @@ immediately, with no resize listener or re-render needed.
     // shown only when more than one option genuinely applies → confirm.
     // For para entry types, non-para athletes are shown disabled in the
     // search and the para class is resolved from the athlete profile.
+    // For pairs/teams, athletes who can't share a category with the ones
+    // already picked (other age division, gender, class) are shown
+    // disabled too.
     let pendingEntryType = null;
     let selectedAthletes = [];
     let eligibleCategories = [];
@@ -1190,8 +1236,22 @@ immediately, with no resize listener or re-render needed.
         }
     }
 
+    // Short reason an athlete can't be picked right now, or null:
+    //   - para entry type and the athlete isn't a para athlete
+    //   - pair/team and the athlete can't share any category with the
+    //     athletes already picked (other age division, gender or class)
+    function blockReasonForEntry(athlete) {
+        if (!pendingEntryType) return null;
+        if (pendingEntryType.requiresPara && !athlete.isPara) return "Not a para athlete";
+        if (selectedAthletes.length > 0
+            && resolveEligibleForEntry(pendingEntryType, [...selectedAthletes, athlete]).length === 0) {
+            return `Doesn't fit the same category as ${selectedAthletes[0].displayName}`;
+        }
+        return null;
+    }
+
     function isBlockedForEntry(athlete) {
-        return !!(pendingEntryType && pendingEntryType.requiresPara && !athlete.isPara);
+        return !!blockReasonForEntry(athlete);
     }
 
     function renderSearchResults() {
@@ -1203,16 +1263,20 @@ immediately, with no resize listener or re-render needed.
         }
 
         resultsEl.innerHTML = lastSearchResults.map((a, i) => {
-            const blocked = isBlockedForEntry(a);
+            const blockReason = blockReasonForEntry(a);
+            const blocked = !!blockReason;
             const paraChip = a.isPara
                 ? `<span class="para-chip">${escapeHtml(a.paraCategory || "Para")}</span>`
                 : "";
+            const detail = blocked
+                ? (mixedMembersReason(pendingEntryType, [...selectedAthletes, a]) || blockReason)
+                : "";
             return `
-            <div ${blocked ? `title="Not a para athlete"` : `onclick="selectAthleteByIndex(${i})"`}
+            <div ${blocked ? `title="${escapeHtml(detail)}"` : `onclick="selectAthleteByIndex(${i})"`}
                 style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--border); cursor: ${blocked ? "not-allowed" : "pointer"}; ${blocked ? "opacity: 0.45;" : ""}">
                 <div>
                     <div style="font-weight: 600;">${escapeHtml(a.displayName)}${paraChip}</div>
-                    <div class="text-muted" style="font-size: 0.82rem;">${blocked ? "Not a para athlete" : escapeHtml(a.club || "")}</div>
+                    <div class="text-muted" style="font-size: 0.82rem;">${blocked ? escapeHtml(blockReason) : escapeHtml(a.club || "")}</div>
                 </div>
                 <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">
                     ${escapeHtml(a.gender || "?")}${a.birthYear != null ? " · " + a.birthYear : ""}
@@ -1230,7 +1294,11 @@ immediately, with no resize listener or re-render needed.
 
         selectedAthletes.push(athlete);
 
-        if (selectedAthletes.length < pendingEntryType.participantCount) {
+        // Still picking members — unless the ones picked so far already
+        // fit no category, in which case show the reason right away
+        // instead of greying out everyone else with no explanation.
+        if (selectedAthletes.length < pendingEntryType.participantCount
+            && resolveEligibleForEntry(pendingEntryType, selectedAthletes).length > 0) {
             document.getElementById("athleteSearchInput").value = "";
             document.getElementById("searchResults").innerHTML = "";
             document.getElementById("searchResults").classList.add("hidden");
@@ -1238,8 +1306,7 @@ immediately, with no resize listener or re-render needed.
             return;
         }
 
-        // Age/gender use the first athlete; class (belt + para) must fit
-        // EVERY selected athlete.
+        // Age, gender and class (belt + para) must fit EVERY selected athlete.
         eligibleCategories = resolveEligibleForEntry(pendingEntryType, selectedAthletes);
         chosenCategory = null;
         chosenBracket = null;
@@ -1264,7 +1331,8 @@ immediately, with no resize listener or re-render needed.
         `;
 
         if (eligibleCategories.length === 0) {
-            const reason = ineligibilityReason(pendingEntryType, selectedAthletes)
+            const reason = mixedMembersReason(pendingEntryType, selectedAthletes)
+                || ineligibilityReason(pendingEntryType, selectedAthletes)
                 || `No category in ${pendingEntryType.label} matches this athlete's age, gender, and belt rank.`;
             summaryEl.innerHTML = header + `<p style="color: #b91c1c;">${escapeHtml(reason)}</p>`;
             return;
