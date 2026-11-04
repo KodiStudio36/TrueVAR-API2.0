@@ -1,0 +1,18 @@
+{% extends "dashboard/live_queue_base.html" %}
+{# Kyorugi live queue — shared layout: live_queue_base.html; shared JS:
+/static/js/live-queue-common.js; kyorugi JS: /static/js/live-queue-kyorugi.js
+(equipment conflicts, TA/KO/Protest/Friendly sheets, fight result editor). #}
+
+{% block queue_hint %}
+Every court's full running order, live, side by side. Drag the ⠿ handle to reorder within a court or drop
+onto another court's column to re-court. Click a fight to open its details, or use the print icon for an
+instant TA sheet print.
+{% endblock %}
+
+{% block discipline_libs %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+{% endblock %}
+
+{% block discipline_scripts %}
+<script src="/static/js/live-queue-kyorugi.js"></script>
+{% endblock %}

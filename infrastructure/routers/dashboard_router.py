@@ -151,6 +151,20 @@ async def poomsae_draw_page(request: Request, tournament_id: str, repo=Depends(g
     })
 
 
+@router.get("/tournaments/{tournament_id}/split-days",
+            dependencies=[Depends(require_operator("tournament:create"))])
+async def split_days_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):
+    """TOS only (tournament:create) — split one tournament into several days
+    (see the SPLIT A TOURNAMENT INTO DAYS endpoints in api_router.py)."""
+    tournament = GetTournamentUseCase(repo).execute(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    return templates.TemplateResponse(request, "dashboard/split_days.html", {
+        "request": request, "tournament": tournament,
+    })
+
+
+
 @router.get("/tournaments/{tournament_id}/live",
             dependencies=[Depends(require_operator("matches:manage"))])
 async def live_queue_page(request: Request, tournament_id: str, repo=Depends(get_tournament_repo)):

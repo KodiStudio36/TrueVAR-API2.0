@@ -1,0 +1,1990 @@
+/* ════════════════════════════════════════════════════════════════════
+ * live-queue-common.js — everything the kyorugi and poomsae live queues
+ * share: the ONE realtime match listener, court columns, drag-and-drop
+ * re-ordering, the match detail editor, corner replacement, winner
+ * propagation, bulk edit, insert match, compute results, bracket PDFs,
+ * "Print New Results", club standings and the print helpers.
+ *
+ * Loaded by templates/dashboard/live_queue_base.html AFTER the page
+ * constants (TOURNAMENT_ID, SPORT, DISCIPLINE, TOURNAMENT_TITLE) and
+ * category-schema.js / bracket-core.js / bracket-sheets.js; BEFORE the
+ * discipline's own files. The last discipline file calls
+ * startLiveQueue(discipline).
+ *
+ * CONTRACT — the discipline object passed to startLiveQueue():
+ *   init()                    async, optional — extra loads after the
+ *                             listener starts (kyorugi: equipment meta)
+ *   conflicts(byCourt)        -> Map<matchId, reason> (empty Map for none)
+ *   formatOf(match)           -> the FORMAT module that handles this match
+ *                                (kyorugi: one; poomsae: cut-off or duel)
+ *   bulkFields                [{key, label, type: "text"|"number", placeholder}]
+ *   insert                    {requiresRed, roundPhases, fieldsHtml(),
+ *                              read() -> extra fields, format(hasRed),
+ *                              actions: [{id, label, after(newMatch)}]}
+ *   resultKinds               [{kind, collect() -> items, print(items)}] —
+ *                             extra "Print New Results" kinds. The shared
+ *                             single-elimination bracket sheet is built in.
+ *
+ * FORMAT module (one per way a match is run):
+ *   key                       "kyorugi" | "poomsae_cutoff" | "poomsae_duel"
+ *   solo                      true → one performer, no red corner
+ *   roundPhases               phases offered in the detail editor
+ *   statusOptions             [[value, label]] for the detail editor
+ *   winnerStatuses            statuses that need a winner picked
+ *   rowExtraHtml(m)           badges / score line under the names
+ *   rowButtons(m)             [{kind, title, label}] small row buttons
+ *   onRowButton(kind, m, btn)
+ *   detailFieldsHtml(m)       extra inputs in the detail grid
+ *   detailUpdates(m)          -> extra fields read back from those inputs
+ *   detailReadonlyHtml(m)     extra read-only info
+ *   detailActionsHtml(m)      extra footer buttons
+ *   openResult(matchId)       the view for a decided match
+ * Missing members fall back to the defaults in FORMAT_DEFAULTS below.
+ * ════════════════════════════════════════════════════════════════════ */
+"use strict";
+
+let fsDb = null;
+let unsubscribe = null;
+let LQ = null; // the discipline object — see startLiveQueue()
+
+// Single source of truth for every match in this tournament, kept in
+// sync incrementally via docChanges() in subscribeAll().
+let matchesById = new Map();
+
+let dragState = null; // { matchId, fromCourtId }
+
+// categoryCode -> categoryLabel, fetched ONCE from the tournament's own
+// /brackets collection (match docs only carry categoryCode).
+let categoryLabelByCode = {};
+
+// Statuses of a match/performance that was never run — count as finished
+// for scheduling (never "next up") and for the cut-off ranking.
+const NOT_PERFORMED = new Set(["withdrawn", "dns", "dsq", "disqualified", "cancelled", "walkover"]);
+
+const FORMAT_DEFAULTS = {
+    key: "generic",
+    solo: false,
+    roundPhases: ["R32", "R16", "QF", "SF", "F"],
+    statusOptions: [["pending", "Pending"], ["ready", "Ready"], ["done", "Completed"], ["walkover", "Walkover"]],
+    winnerStatuses: ["done", "walkover"],
+    rowExtraHtml: () => "",
+    rowButtons: () => [],
+    onRowButton: () => { },
+    detailFieldsHtml: () => "",
+    detailUpdates: () => ({}),
+    detailReadonlyHtml: () => "",
+    detailActionsHtml: () => "",
+    openResult: null, // null → the generic detail editor also handles decided matches
+};
+
+function formatOf(m) {
+    return { ...FORMAT_DEFAULTS, ...((LQ && LQ.formatOf && LQ.formatOf(m)) || {}) };
+}
+
+// ── Bootstrapping ───────────────────────────────────────────────────────
+async function startLiveQueue(discipline) {
+    LQ = {
+        init: null,
+        conflicts: () => new Map(),
+        bulkFields: [],
+        insert: { requiresRed: true, roundPhases: FORMAT_DEFAULTS.roundPhases, fieldsHtml: () => "", read: () => ({}), format: () => null, actions: [] },
+        resultKinds: [],
+        ...discipline,
+    };
+    await initFirebase();
+    subscribeAll();
+    loadCategoryLabels(); // fire-and-forget — rows show raw codes until labels arrive
+    loadAgeCodes();       // fire-and-forget — bulk edit's "entire age division"
+    if (LQ.init) LQ.init();
+}
+
+async function loadCategoryLabels() {
+    try {
+        const snap = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("brackets").get();
+        snap.forEach((doc) => {
+            const data = doc.data();
+            if (data.categoryCode) categoryLabelByCode[data.categoryCode] = data.categoryLabel || data.categoryCode;
+        });
+        renderCourts();
+    } catch (err) {
+        console.error("Failed to load category labels", err);
+    }
+}
+
+function resolveCategoryLabel(code) {
+    return categoryLabelByCode[code] || code || "";
+}
+
+// Match docs carry only categoryCode, never ageCode. The age division is
+// one "_"-separated part of the code. The list comes from the tournament's
+// own category schema (category-schema.js), with the usual codes as a
+// fallback; longest first so "seniors_under_30" wins over "seniors".
+let knownAgeCodes = [
+    "pupils", "pupils_1", "pupils_2", "younger_cadets", "cadets", "juniors", "seniors", "veterans",
+    "seniors_under_30", "seniors_over_30", "seniors_under_40", "seniors_under_50", "seniors_over_50",
+    "children", "under_17", "over_17",
+].sort((a, b) => b.length - a.length);
+
+async function loadAgeCodes() {
+    try {
+        if (!window.TrueVARCategories) return;
+        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/categories`);
+        const dims = TrueVARCategories.dimensionsFor(await res.json(), String(SPORT).toLowerCase(), String(DISCIPLINE).toLowerCase());
+        const codes = [...new Set(TrueVARCategories.flatten(dims).map(c => c.ageCode).filter(Boolean))];
+        if (codes.length) knownAgeCodes = [...new Set([...codes, ...knownAgeCodes])].sort((a, b) => b.length - a.length);
+    } catch (err) {
+        console.warn("Category schema not loaded — using the default age codes", err);
+    }
+}
+
+function ageCodeForCategoryCode(categoryCode) {
+    if (!categoryCode) return null;
+    const wrapped = `_${categoryCode}_`;
+    return knownAgeCodes.find(code => wrapped.includes(`_${code}_`)) || null;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BULK EDIT — apply the discipline's bulk fields (kyorugi: round/break
+// time, PSS size, hit level; poomsae: round seconds) to every match in
+// ONE category or a whole AGE DIVISION, in one batched write.
+// ═══════════════════════════════════════════════════════════════════
+
+function matchesForBulkScope(scopeVal) {
+    if (!scopeVal) return [];
+    const sepIdx = scopeVal.indexOf(":");
+    const kind = scopeVal.slice(0, sepIdx);
+    const value = scopeVal.slice(sepIdx + 1);
+    const result = [];
+    matchesById.forEach((m) => {
+        if (kind === "cat" && m.categoryCode === value) result.push(m);
+        if (kind === "age" && ageCodeForCategoryCode(m.categoryCode) === value) result.push(m);
+    });
+    return result;
+}
+
+function openBulkEditModal() {
+    const categoriesPresent = new Map(); // categoryCode -> label
+    matchesById.forEach((m) => {
+        if (m.categoryCode) categoriesPresent.set(m.categoryCode, resolveCategoryLabel(m.categoryCode));
+    });
+
+    const ageDivisionsPresent = new Map(); // ageCode -> count of distinct categories
+    categoriesPresent.forEach((label, code) => {
+        const ageCode = ageCodeForCategoryCode(code);
+        if (!ageCode) return;
+        ageDivisionsPresent.set(ageCode, (ageDivisionsPresent.get(ageCode) || 0) + 1);
+    });
+
+    if (categoriesPresent.size === 0) {
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>Bulk Edit Category Settings</h3>
+                <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <p class="lq-field-hint">No matches loaded yet — push brackets first.</p>
+                <div class="lq-modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Close</button></div>
+            </div>
+        `);
+        return;
+    }
+
+    const categoryOptionsHtml = [...categoriesPresent.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([code, label]) => `<option value="cat:${escapeAttr(code)}">${escapeHtml(label)}</option>`)
+        .join("");
+
+    const ageOptionsHtml = [...ageDivisionsPresent.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([ageCode, count]) => `<option value="age:${escapeAttr(ageCode)}">All ${escapeHtml(ageCode.replace(/_/g, " "))} (${count} categor${count === 1 ? "y" : "ies"})</option>`)
+        .join("");
+
+    const fieldsHtml = LQ.bulkFields.map(f => `
+        <label>${escapeHtml(f.label)} <input type="${f.type === "number" ? "number" : "text"}" id="bulk-${f.key}" placeholder="${escapeAttr(f.placeholder || "unchanged")}"></label>
+    `).join("");
+
+    openModal(`
+        <div class="lq-modal-header">
+            <h3>Bulk Edit Category Settings</h3>
+            <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="lq-modal-body">
+            <p class="lq-field-hint" style="margin-bottom:1rem;">
+                Applies to every match currently in the chosen scope. Leave a field blank to leave it
+                unchanged. Useful for fixing a mistake across many matches at once, mid-tournament.
+            </p>
+            <div class="lq-form-field">
+                <label style="display:block; font-size:.72rem; font-weight:700; color:var(--lq-muted); text-transform:uppercase; margin-bottom:.3rem;">Apply to</label>
+                <select id="bulk-scope">
+                    <optgroup label="Single category">${categoryOptionsHtml}</optgroup>
+                    ${ageOptionsHtml ? `<optgroup label="Entire age division">${ageOptionsHtml}</optgroup>` : ""}
+                </select>
+            </div>
+            <div class="lq-detail-grid" style="margin-top:1rem;">${fieldsHtml}</div>
+            <p id="bulk-preview" class="lq-field-hint" style="margin-top:.75rem;"></p>
+            <div id="bulk-error" class="lq-alert-error hidden"></div>
+            <div class="lq-modal-actions">
+                <button class="btn btn-primary" id="bulk-apply-btn" onclick="applyBulkEdit()">Apply</button>
+                <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    `);
+
+    const updatePreview = () => {
+        const count = matchesForBulkScope(document.getElementById("bulk-scope").value).length;
+        document.getElementById("bulk-preview").textContent = `This will update ${count} match(es).`;
+    };
+    document.getElementById("bulk-scope").onchange = updatePreview;
+    updatePreview();
+}
+
+async function applyBulkEdit() {
+    const errEl = document.getElementById("bulk-error");
+    errEl.classList.add("hidden");
+
+    const scopeVal = document.getElementById("bulk-scope").value;
+    const updates = {};
+    LQ.bulkFields.forEach(f => {
+        const raw = document.getElementById(`bulk-${f.key}`).value.trim();
+        if (raw === "") return;
+        if (f.type === "number") {
+            const n = Number(raw);
+            if (!Number.isNaN(n)) updates[f.key] = n;
+        } else {
+            updates[f.key] = raw;
+        }
+    });
+
+    if (Object.keys(updates).length === 0) {
+        errEl.textContent = "Enter at least one field to change.";
+        errEl.classList.remove("hidden");
+        return;
+    }
+
+    const matches = matchesForBulkScope(scopeVal);
+    if (matches.length === 0) {
+        errEl.textContent = "No matches in that scope.";
+        errEl.classList.remove("hidden");
+        return;
+    }
+
+    if (!confirm(`Apply these changes to ${matches.length} match(es)? This can't be undone from here.`)) return;
+
+    const btn = document.getElementById("bulk-apply-btn");
+    btn.disabled = true;
+    btn.textContent = "Applying…";
+
+    try {
+        // Firestore batched writes cap at 500 — chunk defensively.
+        const CHUNK = 400;
+        for (let i = 0; i < matches.length; i += CHUNK) {
+            const batch = fsDb.batch();
+            matches.slice(i, i + CHUNK).forEach((m) => batch.set(matchDocRef(m.id), updates, { merge: true }));
+            await batch.commit();
+        }
+        closeModal();
+        // The realtime listener re-renders from the docChanges.
+    } catch (err) {
+        console.error("Bulk edit failed", err);
+        errEl.textContent = "Bulk edit failed: " + err.message;
+        errEl.classList.remove("hidden");
+        btn.disabled = false;
+        btn.textContent = "Apply";
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// COMPUTE RESULTS — the "🏅 Compute Results" button. Delegates to the
+// backend's compute_tournament_results_endpoint, which writes placements
+// onto tournaments/{id}/division_rosters. Safe to run repeatedly.
+// ═══════════════════════════════════════════════════════════════════
+
+function openComputeResultsModal() {
+    openModal(`
+        <div class="lq-modal-header">
+            <h3>Compute Final Placements</h3>
+            <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="lq-modal-body">
+            <p class="lq-field-hint" style="margin-bottom:1rem;">
+                Scans every category's bracket and derives 1st/2nd/joint-3rd/joint-5th/etc. from match
+                results, then writes them onto each athlete's roster entry so they show up on the public
+                tournament page. Categories whose final hasn't been decided yet are skipped — safe to run
+                again later as more finals finish.
+            </p>
+            <div id="results-compute-output"></div>
+            <div class="lq-modal-actions">
+                <button class="btn btn-primary" id="results-compute-btn" onclick="runComputeResults()">Compute Now</button>
+                <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    `);
+}
+
+async function runComputeResults() {
+    const btn = document.getElementById("results-compute-btn");
+    const out = document.getElementById("results-compute-output");
+    btn.disabled = true;
+    btn.textContent = "Computing…";
+    out.innerHTML = "";
+
+    try {
+        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/results/compute`, { method: "POST" });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.detail || `Failed (${res.status})`);
+        }
+        const data = await res.json();
+
+        const rows = data.results.map((r) => {
+            const color = r.status === "complete" ? "var(--lq-green)" : r.status === "partial" ? "var(--lq-amber)" : "var(--lq-muted)";
+            return `
+                <div style="display:flex; justify-content:space-between; gap:.5rem; padding:.3rem 0; border-bottom:1px solid var(--lq-border); font-size:.82rem;">
+                    <span>${escapeHtml(r.categoryCode)}</span>
+                    <span style="color:${color}; font-weight:700; text-transform:uppercase; text-align:right;">${escapeHtml(r.status)}${r.detail ? " — " + escapeHtml(r.detail) : ""}</span>
+                </div>`;
+        }).join("");
+
+        out.innerHTML = `
+            <p style="font-size:.85rem; margin-bottom:.5rem;">
+                <strong>${data.categoriesProcessed}</strong> categor${data.categoriesProcessed === 1 ? "y" : "ies"} processed,
+                <strong>${data.categoriesSkipped}</strong> skipped.
+            </p>
+            <div style="max-height:260px; overflow-y:auto;">${rows || '<p class="lq-field-hint">No categories found for this tournament yet.</p>'}</div>
+            ${data.categoriesProcessed > 0 ? `
+                <div class="lq-modal-actions" style="margin-top:.75rem;">
+                    <button type="button" class="btn btn-ghost btn-sm" id="results-print-brackets-btn" onclick="printResultsBracketsPdf()">🖨 Print Bracket PDFs (with Results)</button>
+                </div>
+                <div class="lq-modal-actions" style="margin-top:.5rem;">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="openClubStandingsModal()">🏆 Club Standings</button>
+                </div>
+            ` : ""}
+        `;
+    } catch (err) {
+        console.error("Compute results failed", err);
+        out.innerHTML = `<div class="lq-alert-error">Failed: ${escapeHtml(err.message)}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Compute Now";
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BRACKET PDF EXPORT — the "📄 Bracket PDFs" button. Single-elimination
+// draw sheets (kyorugi and side-by-side poomsae) rebuilt from the saved
+// bracket docs: BracketCore re-runs the same seeded placement, then every
+// match is overlaid with its live doc (status, corners incl. replaced
+// athletes, court, result). Drawing / PDF / print: BracketSheets.
+// Cut-off and round robin have no draw sheet — their results print from
+// "Print New Results" instead.
+// ═══════════════════════════════════════════════════════════════════
+
+let bracketDocsByCategoryCode = {};
+let reconstructedBrackets = [];   // rebuilt every time — see prepareBracketPdfData()
+
+async function loadBracketDocsForPdf() {
+    bracketDocsByCategoryCode = {};
+    try {
+        const snap = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("brackets").get();
+        snap.forEach(doc => {
+            const data = doc.data();
+            if (data.categoryCode) bracketDocsByCategoryCode[data.categoryCode] = data;
+        });
+    } catch (err) {
+        console.error("Failed to load bracket docs for PDF rebuild", err);
+    }
+}
+
+// ageCode -> { categoryCode -> { entryId -> { placement, members } } }
+async function loadDivisionRostersForPdf() {
+    const rostersByAgeCode = {};
+    try {
+        const snap = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("division_rosters").get();
+        snap.forEach(doc => { rostersByAgeCode[doc.id] = (doc.data() || {}).athletes || {}; });
+    } catch (err) {
+        console.error("Failed to load division rosters for PDF rebuild", err);
+    }
+    return rostersByAgeCode;
+}
+
+function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
+    const entries = (bracketDoc.entries || []).slice().sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
+    if (entries.length < 2) return null;
+    if (bracketDoc.system && bracketDoc.system !== "single_elimination") return null; // cut-off / round robin: no draw sheet
+
+    const placementFn = BracketCore.PLACEMENT_STRATEGIES[bracketDoc.placementStrategy] || BracketCore.PLACEMENT_STRATEGIES.standard;
+    const built = BracketCore.generateSingleElimination(bracketDoc.categoryCode, entries, placementFn);
+
+    const liveMatchByKey = {};
+    matchesById.forEach(m => {
+        if (m.categoryCode !== bracketDoc.categoryCode) return;
+        if (m.bracketRound == null || m.bracketMatchNumber == null) return;
+        liveMatchByKey[`${m.bracketRound}_${m.bracketMatchNumber}`] = m;
+    });
+
+    // The live match doc is the truth for who is in a slot: `replaced`
+    // (old entryId → live corner) and `liveNames` (entryId → current name).
+    const replaced = {};
+    const liveNames = {};
+    built.rounds.forEach(round => round.forEach(m => {
+        if (m.status === "walkover") return;
+        const live = liveMatchByKey[`${m.round}_${m.matchNumber}`];
+        if (!live) { m.notInDatabase = true; return; }
+        ["blue", "red"].forEach(side => {
+            const was = m[side], now = live[side];
+            if (!now || !now.entryId) return;
+            if (now.name) liveNames[now.entryId] = now;
+            if (was && was.entryId && was.entryId !== now.entryId) replaced[was.entryId] = now;
+        });
+        m.status = live.status;
+        m.winnerEntryId = live.winnerEntryId || null;
+        m.blue = live.blue || m.blue;
+        m.red = live.red || m.red;
+        m.courtId = live.courtId;
+        m.queuePosition = live.queuePosition;
+        m.displayNumber = live.displayNumber;
+        m.roundPhase = live.roundPhase || m.roundPhase;
+        m.win = live.win || null;
+        m.win_score = live.win_score || null;
+        m.win_type = live.win_type || null;
+    }));
+
+    const currentEntries = entries.map(e => {
+        const now = replaced[e.entryId] || liveNames[e.entryId];
+        if (!now) return e;
+        return {
+            ...e,
+            entryId: now.entryId,
+            athleteIds: now.athleteIds || e.athleteIds,
+            name: now.name || e.name,
+            clubId: now.clubId ?? e.clubId,
+            clubName: now.clubName ?? e.clubName,
+            country: now.country ?? e.country,
+            replacedEntryId: replaced[e.entryId] ? e.entryId : undefined,
+        };
+    });
+
+    const ageCode = ageCodeForCategoryCode(bracketDoc.categoryCode);
+    const rosterEntries = (ageCode && rostersByAgeCode[ageCode] && rostersByAgeCode[ageCode][bracketDoc.categoryCode]) || {};
+    const placements = {};
+    Object.entries(rosterEntries).forEach(([entryId, entry]) => {
+        if (entry && entry.placement != null) placements[entryId] = entry.placement;
+    });
+    Object.entries(replaced).forEach(([oldId, now]) => {
+        if (placements[oldId] != null && placements[now.entryId] == null) placements[now.entryId] = placements[oldId];
+        delete placements[oldId];
+    });
+
+    return {
+        categoryCode: bracketDoc.categoryCode,
+        categoryLabel: bracketDoc.categoryLabel || bracketDoc.categoryCode,
+        entries: currentEntries,
+        rounds: built.rounds,
+        bracketSize: built.bracketSize,
+        placements,
+    };
+}
+
+async function prepareBracketPdfData() {
+    const [, , rostersByAgeCode] = await Promise.all([
+        loadBracketDocsForPdf(),
+        BracketSheets.prepareAssets(),
+        loadDivisionRostersForPdf(),
+    ]);
+    reconstructedBrackets = Object.values(bracketDocsByCategoryCode)
+        .map(bracketDoc => reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode))
+        .filter(Boolean)
+        .sort((a, b) => a.categoryLabel.localeCompare(b.categoryLabel));
+}
+
+const BRACKET_SHEET_OPTIONS = { title: TOURNAMENT_TITLE };
+
+// ── Printing through a hidden iframe ─────────────────────────────────
+// Every "generate something then print it" on this page goes through
+// here: write the HTML, wait for any images to decode, settle briefly,
+// print. Off-screen with REAL dimensions so the engine actually paints.
+function createHiddenPrintIframe() {
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.top = "-10000px";
+    iframe.style.left = "-10000px";
+    iframe.style.width = "1200px";
+    iframe.style.height = "1600px";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+    return iframe;
+}
+
+function printHtmlInFrame(bodyHtml, opts) {
+    opts = opts || {};
+    const imgSizeCss = opts.pageSizeMm
+        ? `width: ${opts.pageSizeMm.width}mm; height: ${opts.pageSizeMm.height}mm;`
+        : `width: 100%;`;
+    const pageSizeCss = opts.pageSizeMm
+        ? `size: ${opts.pageSizeMm.width}mm ${opts.pageSizeMm.height}mm;`
+        : (opts.landscape ? "size: landscape;" : "");
+
+    return new Promise((resolve, reject) => {
+        const iframe = createHiddenPrintIframe();
+        const cleanup = () => {
+            setTimeout(() => {
+                if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+            }, 1000);
+        };
+
+        const doc = iframe.contentWindow.document;
+        doc.open();
+        doc.write(`<!DOCTYPE html><html><head><style>
+                html, body { margin: 0; padding: 0; }
+                img { ${imgSizeCss} display: block; page-break-after: always; page-break-inside: avoid; }
+                img:last-child { page-break-after: auto; }
+                @page { margin: 0;${pageSizeCss ? " " + pageSizeCss : ""} }
+            </style></head><body>${bodyHtml}</body></html>`);
+        doc.close();
+
+        const images = [...doc.images];
+        const whenReady = images.length === 0
+            ? Promise.resolve()
+            : Promise.all(images.map(img => img.complete
+                ? Promise.resolve()
+                : new Promise(res => { img.onload = res; img.onerror = res; })));
+
+        whenReady
+            .then(() => new Promise(res => setTimeout(res, 100))) // borders paint late — settle first
+            .then(() => {
+                try {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                } finally {
+                    cleanup();
+                }
+            });
+    });
+}
+
+function printImageDataUrl(dataUrl) {
+    return printHtmlInFrame(`<img src="${dataUrl}">`);
+}
+
+async function openBracketPdfModal() {
+    openModal(`
+        <div class="lq-modal-header">
+            <h3>Bracket Sheets (PDF)</h3>
+            <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="lq-modal-body">
+            <p class="lq-field-hint" style="margin-bottom:1rem;">
+                Single-elimination draw sheets, rebuilt live from what's currently saved — seeding plus every
+                match's current status, corners, court and (once decided) its result. The Classification box
+                is filled in once 🏅 Compute Results has run. Cut-off and round-robin categories have no draw
+                sheet — their results print from 🖨 Print New Results.
+            </p>
+            <div id="bracket-pdf-list"><p class="lq-field-hint">Loading brackets…</p></div>
+            <div class="lq-modal-actions">
+                <button class="btn btn-primary" id="bracket-pdf-print-all-btn" onclick="printAllBracketsPDF()" disabled>🖨 Print All</button>
+                <button class="btn btn-ghost" id="bracket-pdf-download-btn" onclick="downloadAllBracketsPDF()" disabled>⬇ Download PDF</button>
+                <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    `);
+
+    await prepareBracketPdfData();
+
+    const listEl = document.getElementById("bracket-pdf-list");
+    if (!listEl) return; // modal was closed while loading
+    const printAllBtn = document.getElementById("bracket-pdf-print-all-btn");
+
+    if (reconstructedBrackets.length === 0) {
+        listEl.innerHTML = `<p class="lq-field-hint">No single-elimination brackets for this tournament.</p>`;
+        return;
+    }
+
+    printAllBtn.disabled = false;
+    document.getElementById("bracket-pdf-download-btn").disabled = false;
+    listEl.innerHTML = reconstructedBrackets.map(b => {
+        const missing = b.rounds.some(r => r.some(m => m.notInDatabase));
+        return `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:.5rem; padding:.4rem 0; border-bottom:1px solid var(--lq-border); font-size:.85rem;">
+                <span>${escapeHtml(b.categoryLabel)}${missing ? ` <span style="color:var(--lq-amber);">· some matches missing from DB</span>` : ""}</span>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="printSingleBracketPdf('${escapeAttr(b.categoryCode)}', this)">🖨 Print</button>
+            </div>
+        `;
+    }).join("");
+}
+
+async function printSingleBracketPdf(categoryCode, btnEl) {
+    const bracket = reconstructedBrackets.find(b => b.categoryCode === categoryCode);
+    if (!bracket) return;
+
+    const originalText = btnEl ? btnEl.textContent : null;
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Printing…"; }
+
+    try {
+        await BracketSheets.print([bracket], BRACKET_SHEET_OPTIONS);
+    } catch (err) {
+        console.error("Failed to print bracket sheet", err);
+        alert(err.message || "Failed to print — try again.");
+    } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = originalText; }
+    }
+}
+
+async function buildAndPrintAllBracketsPdf() {
+    if (reconstructedBrackets.length === 0) throw new Error("No brackets to print.");
+    await BracketSheets.print(reconstructedBrackets, BRACKET_SHEET_OPTIONS);
+}
+
+async function downloadAllBracketsPDF() {
+    const btn = document.getElementById("bracket-pdf-download-btn");
+    if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
+    try {
+        const safeTitle = (TOURNAMENT_TITLE || "brackets").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "brackets";
+        await BracketSheets.downloadPdf(reconstructedBrackets, `${safeTitle}_brackets.pdf`, BRACKET_SHEET_OPTIONS);
+    } catch (err) {
+        console.error("Failed to build brackets PDF", err);
+        alert(err.message || "Failed to build the PDF — try again.");
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "⬇ Download PDF"; }
+    }
+}
+
+async function printAllBracketsPDF() {
+    const btn = document.getElementById("bracket-pdf-print-all-btn");
+    if (btn) { btn.disabled = true; btn.textContent = "Printing…"; }
+    try {
+        await buildAndPrintAllBracketsPdf();
+    } catch (err) {
+        console.error("Failed to print brackets PDF", err);
+        alert(err.message || "Failed to print — try again.");
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "🖨 Print All"; }
+    }
+}
+
+// Shortcut from the 🏅 Compute Results modal.
+async function printResultsBracketsPdf() {
+    const btn = document.getElementById("results-print-brackets-btn");
+    if (btn) { btn.disabled = true; btn.textContent = "Printing…"; }
+    try {
+        await prepareBracketPdfData();
+        await buildAndPrintAllBracketsPdf();
+    } catch (err) {
+        console.error("Failed to print brackets PDF from results modal", err);
+        alert(err.message || "Failed to print — try again.");
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "🖨 Print Bracket PDFs (with Results)"; }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PRINT NEW RESULTS — prints every category whose result is FINISHED
+// and hasn't been printed yet, and reprints one whose result changed
+// since (a corrected score, a replaced athlete).
+//
+//   single elimination  built in here: the bracket sheet with results +
+//                       Classification, once the Final is decided
+//   anything else       the discipline's resultKinds (poomsae: cut-off
+//                       results table, round-robin standings)
+//
+// MEMORY: tournaments/{id}/meta/printedResults →
+//   { categories: { categoryCode: { fingerprint, printedAt, label } } }
+// shared by every computer; localStorage if Firestore refuses the write.
+// ═══════════════════════════════════════════════════════════════════
+
+const PRINTED_RESULTS_LOCAL_KEY = `truevar.printedResults.${TOURNAMENT_ID}`;
+
+function printedResultsRef() {
+    return fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("meta").doc("printedResults");
+}
+
+async function loadPrintedResults() {
+    let remote = {}, local = {};
+    try {
+        const doc = await printedResultsRef().get();
+        remote = (doc.exists && doc.data().categories) || {};
+    } catch (err) {
+        console.warn("printedResults not readable from Firestore — using this browser's memory", err);
+    }
+    try { local = JSON.parse(localStorage.getItem(PRINTED_RESULTS_LOCAL_KEY) || "{}") || {}; } catch (e) { /* none */ }
+    return { ...local, ...remote };
+}
+
+// -> "firestore" | "local"
+async function savePrintedResults(updates) {
+    try {
+        const merged = { ...JSON.parse(localStorage.getItem(PRINTED_RESULTS_LOCAL_KEY) || "{}"), ...updates };
+        localStorage.setItem(PRINTED_RESULTS_LOCAL_KEY, JSON.stringify(merged));
+    } catch (e) { /* storage unavailable */ }
+    try {
+        await printedResultsRef().set({ categories: updates }, { merge: true });
+        return "firestore";
+    } catch (err) {
+        console.warn("printedResults not writable in Firestore — remembered in this browser only", err);
+        return "local";
+    }
+}
+
+// Small, stable string hash (djb2) — only used to notice change.
+function fingerprintOf(value) {
+    const str = JSON.stringify(value);
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+}
+
+// Plain printable results page (title, category, bordered table) — used
+// by the discipline result kinds so every results printout looks alike.
+function resultsTablePageHtml(label, headers, rowsHtml, note) {
+    const th = (h) => `<th style="border:1px solid #111; padding:5px 7px; font-weight:700; text-align:${h.left ? "left" : "center"};">${escapeHtml(h.label)}</th>`;
+    return `
+        <div style="font-family: Arial, Helvetica, sans-serif; padding: 24px; box-sizing: border-box; color: #111; page-break-after: always;">
+            <div style="font-size: 20px; font-weight: 700;">${escapeHtml(TOURNAMENT_TITLE || "Tournament")}</div>
+            <div style="font-size: 16px; font-weight: 700; margin: 4px 0 16px;">${escapeHtml(label)} — Results</div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <thead><tr>${headers.map(th).join("")}</tr></thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+            ${note ? `<div style="font-size: 11px; color: #333; margin-top: 8px;">${note}</div>` : ""}
+            <div style="font-size: 10px; color: #555; margin-top: 8px;">Printed ${escapeHtml(new Date().toLocaleString())}</div>
+        </div>`;
+}
+
+function resultCellHtml(content, extra) {
+    return `<td style="border:1px solid #111; padding:5px 7px; ${extra || "text-align:center;"}">${content}</td>`;
+}
+
+// ── single elimination ───────────────────────────────────────────────
+function isBracketFinished(bracket) {
+    const lastRound = bracket.rounds[bracket.rounds.length - 1] || [];
+    const final = lastRound[0];
+    if (!final) return false;
+    if (final.status === "walkover") return true;
+    return isDone(final) && !final.notInDatabase;
+}
+
+function bracketFingerprint(bracket) {
+    return fingerprintOf({
+        placements: bracket.placements,
+        rounds: bracket.rounds.map(r => r.map(m => [
+            m.matchId, m.status, m.winnerEntryId || null, m.win || null, m.win_score || null, m.win_type || null,
+            m.blue && m.blue.name || null, m.red && m.red.name || null,
+        ])),
+    });
+}
+
+// ── the button ───────────────────────────────────────────────────────
+async function collectFinishedResults() {
+    let computeNote = null;
+    try {
+        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/results/compute`, { method: "POST" });
+        if (!res.ok) computeNote = `Placements not recomputed (${res.status}) — printed as last computed.`;
+    } catch (err) {
+        computeNote = "Placements not recomputed (offline?) — printed as last computed.";
+    }
+    await prepareBracketPdfData(); // bracket docs + rosters + live matches → reconstructedBrackets
+
+    const finished = [];
+    reconstructedBrackets.filter(isBracketFinished).forEach(b => {
+        finished.push({ kind: "bracket", code: b.categoryCode, label: b.categoryLabel, bracket: b, fingerprint: bracketFingerprint(b) });
+    });
+    for (const rk of LQ.resultKinds) {
+        const items = await rk.collect(bracketDocsByCategoryCode);
+        (items || []).forEach(i => finished.push({ ...i, kind: rk.kind }));
+    }
+    finished.sort((a, b) => a.label.localeCompare(b.label));
+    return { finished, computeNote };
+}
+
+async function printResultItems(items) {
+    const brackets = items.filter(i => i.kind === "bracket").map(i => i.bracket);
+    if (brackets.length) await BracketSheets.print(brackets, BRACKET_SHEET_OPTIONS);
+    for (const rk of LQ.resultKinds) {
+        const mine = items.filter(i => i.kind === rk.kind);
+        if (mine.length) await rk.print(mine);
+    }
+}
+
+async function printNewResults() {
+    const btn = document.getElementById("print-new-results-btn");
+    const label = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+    try {
+        const [{ finished, computeNote }, printed] = await Promise.all([collectFinishedResults(), loadPrintedResults()]);
+        const fresh = finished.filter(i => !printed[i.code]);
+        const changed = finished.filter(i => printed[i.code] && printed[i.code].fingerprint !== i.fingerprint);
+        const toPrint = [...fresh, ...changed];
+
+        if (toPrint.length === 0) {
+            showNewResultsSummary({ printed: [], finished, printedBefore: printed, computeNote, storage: null });
+            return;
+        }
+        if (btn) btn.textContent = "Printing…";
+        await printResultItems(toPrint);
+        const now = new Date().toISOString();
+        const storage = await savePrintedResults(Object.fromEntries(toPrint.map(i => [i.code, { fingerprint: i.fingerprint, printedAt: now, label: i.label }])));
+        showNewResultsSummary({ printed: toPrint, changedCodes: new Set(changed.map(i => i.code)), finished, printedBefore: printed, computeNote, storage });
+    } catch (err) {
+        console.error("Print new results failed", err);
+        alert(err.message || "Failed to print — try again.");
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+}
+
+// "Print everything again" — for a lost or jammed printout.
+async function reprintAllResults(btnEl) {
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Printing…"; }
+    try {
+        const { finished } = await collectFinishedResults();
+        if (finished.length === 0) { alert("No finished categories yet."); return; }
+        await printResultItems(finished);
+        const now = new Date().toISOString();
+        await savePrintedResults(Object.fromEntries(finished.map(i => [i.code, { fingerprint: i.fingerprint, printedAt: now, label: i.label }])));
+        closeModal();
+    } catch (err) {
+        console.error("Reprint failed", err);
+        alert(err.message || "Failed to print — try again.");
+    } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Print everything again"; }
+    }
+}
+
+function showNewResultsSummary({ printed, changedCodes, finished, printedBefore, computeNote, storage }) {
+    const last = Object.values(printedBefore).map(p => p.printedAt).filter(Boolean).sort().pop();
+    const list = printed.map(i => `
+        <div style="display:flex; justify-content:space-between; gap:.5rem; padding:.3rem 0; border-bottom:1px solid var(--lq-border); font-size:.85rem;">
+            <span>${escapeHtml(i.label)}</span>
+            <span style="color:${changedCodes && changedCodes.has(i.code) ? "var(--lq-amber)" : "var(--lq-green)"}; font-weight:700;">
+                ${changedCodes && changedCodes.has(i.code) ? "CORRECTED" : "NEW"}</span>
+        </div>`).join("");
+    openModal(`
+        <div class="lq-modal-header">
+            <h3>${printed.length ? `Printed ${printed.length} result${printed.length === 1 ? "" : "s"}` : "No new results"}</h3>
+            <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="lq-modal-body">
+            ${printed.length ? `<div style="max-height:260px; overflow-y:auto; margin-bottom:.75rem;">${list}</div>`
+            : `<p class="lq-field-hint">Nothing finished since the last print${last ? ` (${escapeHtml(new Date(last).toLocaleString())})` : ""}. ${finished.length} finished categor${finished.length === 1 ? "y has" : "ies have"} already been printed.</p>`}
+            ${computeNote ? `<div class="lq-alert-error" style="margin-bottom:.5rem;">${escapeHtml(computeNote)}</div>` : ""}
+            ${storage === "local" ? `<div class="lq-alert-error" style="margin-bottom:.5rem;">Couldn't save to Firestore — only THIS browser remembers what was printed.</div>` : ""}
+            <div class="lq-modal-actions">
+                <button class="btn btn-ghost" onclick="reprintAllResults(this)">Print everything again</button>
+                <button class="btn btn-primary" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    `);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CLUB STANDINGS — the "🏆 Club Standings" button. Tallies every club's
+// 1st/2nd/3rd places (division_rosters "placement") plus won matches
+// (every decided duel in matchesById), weighted by the points chosen.
+// Ties share a place (1, 1, 3).
+// ═══════════════════════════════════════════════════════════════════
+
+function openClubStandingsModal() {
+    openModal(`
+        <div class="lq-modal-header">
+            <h3>Club Standings (PDF)</h3>
+            <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="lq-modal-body">
+            <p class="lq-field-hint" style="margin-bottom:1rem;">
+                Ranks every club by a weighted score: 1st/2nd/3rd-place finishes (from 🏅 Compute Results)
+                plus total won matches, each worth whatever points you set below. Ties share the same place.
+            </p>
+            <div class="lq-detail-grid">
+                <label>Points per 1st <input type="number" id="cs-pts-first" value="7" step="any"></label>
+                <label>Points per 2nd <input type="number" id="cs-pts-second" value="3" step="any"></label>
+                <label>Points per 3rd <input type="number" id="cs-pts-third" value="1" step="any"></label>
+                <label>Points per won match <input type="number" id="cs-pts-won" value="1" step="any"></label>
+                <label class="lq-checkbox-label lq-span-2">
+                    <input type="checkbox" id="cs-include-single">
+                    Include categories with only one registered athlete (awarded 1st automatically — no match was needed for that medal)
+                </label>
+            </div>
+            <div id="club-standings-error" class="lq-alert-error hidden"></div>
+            <div class="lq-modal-actions">
+                <button class="btn btn-primary" id="club-standings-print-btn" onclick="printClubStandingsPdf()">🖨 Print</button>
+                <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    `);
+}
+
+async function loadRegisteredClubsForStandings() {
+    const clubNameById = {};
+    try {
+        const doc = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("meta").doc("registeredClubs").get();
+        const data = doc.exists ? doc.data() : {};
+        Object.entries(data || {}).forEach(([clubId, info]) => { clubNameById[clubId] = (info && info.clubName) || clubId; });
+    } catch (err) {
+        console.error("Failed to load registered clubs for standings", err);
+    }
+    return clubNameById;
+}
+
+async function printClubStandingsPdf() {
+    const errEl = document.getElementById("club-standings-error");
+    errEl.classList.add("hidden");
+
+    const ptsFirst = Number(document.getElementById("cs-pts-first").value) || 0;
+    const ptsSecond = Number(document.getElementById("cs-pts-second").value) || 0;
+    const ptsThird = Number(document.getElementById("cs-pts-third").value) || 0;
+    const ptsWon = Number(document.getElementById("cs-pts-won").value) || 0;
+    const includeSingle = document.getElementById("cs-include-single").checked;
+
+    const btn = document.getElementById("club-standings-print-btn");
+    btn.disabled = true;
+    btn.textContent = "Printing…";
+
+    try {
+        const [rostersByAgeCode, clubNameById] = await Promise.all([
+            loadDivisionRostersForPdf(),
+            loadRegisteredClubsForStandings(),
+        ]);
+
+        const tally = {};
+        const bump = (clubId, field, amount) => {
+            if (!clubId) return;
+            const row = tally[clubId] || (tally[clubId] = { first: 0, second: 0, third: 0, wonFights: 0 });
+            row[field] += amount;
+        };
+
+        Object.values(rostersByAgeCode).forEach(categoriesForAge => {
+            Object.values(categoriesForAge).forEach(entriesForCategory => {
+                const entries = Object.values(entriesForCategory || {});
+                entries.forEach(entry => {
+                    const clubId = entry.members && entry.members[0] ? entry.members[0].clubId : null;
+                    if (entry.placement === 1) bump(clubId, "first", 1);
+                    else if (entry.placement === 2) bump(clubId, "second", 1);
+                    else if (entry.placement === 3) bump(clubId, "third", 1);
+                });
+                if (includeSingle && entries.length === 1 && entries[0].placement == null) {
+                    const clubId = entries[0].members && entries[0].members[0] ? entries[0].members[0].clubId : null;
+                    bump(clubId, "first", 1);
+                }
+            });
+        });
+
+        matchesById.forEach(m => {
+            if (!m.winnerEntryId) return;
+            const winnerCorner = m.blue && m.blue.entryId === m.winnerEntryId ? m.blue
+                : m.red && m.red.entryId === m.winnerEntryId ? m.red
+                    : null;
+            if (winnerCorner && winnerCorner.clubId) bump(winnerCorner.clubId, "wonFights", 1);
+        });
+
+        const rows = Object.entries(tally).map(([clubId, counts]) => ({
+            clubId,
+            clubName: clubNameById[clubId] || clubId,
+            ...counts,
+            points: counts.first * ptsFirst + counts.second * ptsSecond + counts.third * ptsThird + counts.wonFights * ptsWon,
+        })).filter(r => r.first || r.second || r.third || r.wonFights);
+
+        if (rows.length === 0) {
+            errEl.textContent = "Nothing to rank yet — run 🏅 Compute Results first, or check the box to include single-athlete categories.";
+            errEl.classList.remove("hidden");
+            return;
+        }
+
+        rows.sort((a, b) => b.points - a.points || a.clubName.localeCompare(b.clubName));
+        let place = 0;
+        rows.forEach((r, i) => {
+            if (i === 0 || r.points !== rows[i - 1].points) place = i + 1;
+            r.place = place;
+        });
+
+        await printHtmlInFrame(buildClubStandingsHtml(rows));
+        closeModal();
+    } catch (err) {
+        console.error("Failed to print club standings PDF", err);
+        errEl.textContent = err.message || "Failed to print — try again.";
+        errEl.classList.remove("hidden");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "🖨 Print";
+    }
+}
+
+function buildClubStandingsHtml(rows) {
+    const cell = (content, extra) => `<td style="border:1px solid #111; padding:6px 8px; ${extra || "text-align:center;"}">${content}</td>`;
+    const rowsHtml = rows.map(r => `
+        <tr>
+            ${cell(escapeHtml(String(r.place)))}
+            ${cell(escapeHtml(r.clubName), "text-align:left;")}
+            ${cell(r.first)}
+            ${cell(r.second)}
+            ${cell(r.third)}
+            ${cell(r.wonFights)}
+            ${cell(r.points)}
+        </tr>
+    `).join("");
+
+    const th = (label, extra) => `<th style="border:1px solid #111; padding:6px 8px; font-weight:700; ${extra || "text-align:center;"}">${escapeHtml(label)}</th>`;
+
+    return `
+        <div style="font-family: Arial, Helvetica, sans-serif; padding: 24px; box-sizing: border-box; color: #111;">
+            <div style="font-size: 20px; font-weight: 700;">${escapeHtml(TOURNAMENT_TITLE || "Tournament")}</div>
+            <div style="font-size: 16px; font-weight: 700; margin: 4px 0 16px;">Club Standings</div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <thead>
+                    <tr>
+                        ${th("Place")}
+                        ${th("Club", "text-align:left;")}
+                        ${th("1st")}
+                        ${th("2nd")}
+                        ${th("3rd")}
+                        ${th("Won Matches")}
+                        ${th("Points")}
+                    </tr>
+                </thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INSERT MATCH — the "+" between two rows. Creates a new match doc
+// slotted exactly there; display number <base>.<n> after the previous
+// match (101 → 101.1 → 101.2). Discipline fields via LQ.insert. When the
+// discipline allows a missing red corner (poomsae), leaving red empty
+// creates a solo performance.
+// ═══════════════════════════════════════════════════════════════════
+
+let insertPendingCorners = { blue: null, red: null };
+let insertSearchTimers = { blue: null, red: null };
+let insertSearchResults = { blue: [], red: [] };
+
+function computeInsertDisplayNumber(prevMatch, nextMatch) {
+    if (prevMatch && prevMatch.displayNumber != null) {
+        const prev = prevMatch.displayNumber;
+        const base = Math.floor(prev);
+        const decimalDigit = Math.round((prev - base) * 10);
+        return Number((base + (decimalDigit + 1) / 10).toFixed(1));
+    }
+    if (nextMatch && nextMatch.displayNumber != null) {
+        return Number((nextMatch.displayNumber - 0.1).toFixed(1));
+    }
+    return null;
+}
+
+function computeInsertQueuePosition(prevMatch, nextMatch) {
+    const prevQ = prevMatch ? prevMatch.queuePosition : null;
+    const nextQ = nextMatch ? nextMatch.queuePosition : null;
+    if (prevQ != null && nextQ != null) return (prevQ + nextQ) / 2;
+    if (prevQ != null) return prevQ + 1;
+    if (nextQ != null) return nextQ - 1;
+    return 0;
+}
+
+function openInsertModal(courtId, prevMatch, nextMatch) {
+    insertPendingCorners = { blue: null, red: null };
+    insertSearchResults = { blue: [], red: [] };
+    const ins = LQ.insert;
+
+    const categoriesPresent = new Map();
+    matchesById.forEach((m) => {
+        if (m.categoryCode) categoriesPresent.set(m.categoryCode, resolveCategoryLabel(m.categoryCode));
+    });
+    const categoryOptionsHtml = [...categoriesPresent.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([code, label]) => `<option value="${escapeAttr(code)}">${escapeHtml(label)}</option>`)
+        .join("");
+
+    const prevLabel = prevMatch ? `#${prevMatch.displayNumber}` : "the start of this court";
+    const nextLabel = nextMatch ? `#${nextMatch.displayNumber}` : "the end of this court";
+
+    openModal(`
+        <div class="lq-modal-header">
+            <h3>Insert Match</h3>
+            <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="lq-modal-body">
+            <p class="lq-field-hint" style="margin-bottom:1rem;">
+                Inserting on <strong>${escapeHtml(courtId)}</strong>, between ${escapeHtml(prevLabel)} and ${escapeHtml(nextLabel)}.
+                It gets its own number so nothing else gets renumbered.
+                ${ins.requiresRed ? "" : "Leave Red empty for a solo performance."}
+            </p>
+
+            <div class="lq-detail-corners">
+                <div class="lq-detail-corner blue">
+                    <label>Blue Corner</label>
+                    <div class="lq-corner-current" id="insert-corner-current-blue">— none picked —</div>
+                    <input type="search" id="insert-corner-search-blue" class="lq-text-input" placeholder="Search athlete…" autocomplete="off">
+                    <div id="insert-corner-results-blue" class="lq-athlete-results"></div>
+                </div>
+                <div class="lq-detail-corner red">
+                    <label>Red Corner${ins.requiresRed ? "" : " (optional)"}</label>
+                    <div class="lq-corner-current" id="insert-corner-current-red">— none picked —</div>
+                    <input type="search" id="insert-corner-search-red" class="lq-text-input" placeholder="Search athlete…" autocomplete="off">
+                    <div id="insert-corner-results-red" class="lq-athlete-results"></div>
+                </div>
+            </div>
+
+            <div class="lq-form-field">
+                <label style="display:block; font-size:.72rem; font-weight:700; color:var(--lq-muted); text-transform:uppercase; margin-bottom:.3rem;">Category</label>
+                <select id="insert-category">
+                    ${categoryOptionsHtml}
+                    <option value="__custom__">Other / exhibition category…</option>
+                </select>
+                <div id="insert-category-custom" class="hidden" style="display:flex; gap:.5rem; margin-top:.5rem;">
+                    <input type="text" id="insert-category-code" placeholder="categoryCode e.g. exhibition_open" class="lq-text-input">
+                    <input type="text" id="insert-category-label" placeholder="Label e.g. Exhibition · Open" class="lq-text-input">
+                </div>
+            </div>
+
+            <div class="lq-detail-grid" style="margin-top:1rem;">
+                <label>Round Phase
+                    <select id="insert-roundPhase">
+                        ${ins.roundPhases.slice().reverse().map(p => `<option value="${p}">${p}</option>`).join("")}
+                    </select>
+                </label>
+                <label>&nbsp;</label>
+                ${ins.fieldsHtml()}
+                <label class="lq-checkbox-label lq-span-2">
+                    <input type="checkbox" id="insert-isRanked">
+                    Ranked / official (counts toward standings) — off by default for inserted matches
+                </label>
+            </div>
+
+            <div id="insert-error" class="lq-alert-error hidden"></div>
+
+            <div class="lq-modal-actions">
+                <button class="btn btn-primary" id="insert-submit-btn">Create Match</button>
+                ${(ins.actions || []).map(a => `<button class="btn btn-ghost" id="insert-action-${escapeAttr(a.id)}">${a.label}</button>`).join("")}
+                <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    `);
+
+    wireInsertCornerSearch("blue");
+    wireInsertCornerSearch("red");
+    document.getElementById("insert-category").onchange = () => {
+        document.getElementById("insert-category-custom").classList.toggle(
+            "hidden", document.getElementById("insert-category").value !== "__custom__"
+        );
+    };
+    document.getElementById("insert-submit-btn").onclick = (e) => submitInsertMatch(courtId, prevMatch, nextMatch, null, e.currentTarget);
+    (ins.actions || []).forEach(a => {
+        document.getElementById(`insert-action-${a.id}`).onclick = (e) => submitInsertMatch(courtId, prevMatch, nextMatch, a, e.currentTarget);
+    });
+}
+
+function wireInsertCornerSearch(side) {
+    const input = document.getElementById(`insert-corner-search-${side}`);
+    input.oninput = () => {
+        clearTimeout(insertSearchTimers[side]);
+        const q = input.value.trim();
+        const resultsEl = document.getElementById(`insert-corner-results-${side}`);
+        if (q.length < 2) { resultsEl.innerHTML = ""; return; }
+        insertSearchTimers[side] = setTimeout(async () => {
+            try {
+                const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&sport=${encodeURIComponent(SPORT)}&limit=8`);
+                const data = await res.json();
+                renderInsertCornerResults(side, data.athletes || []);
+            } catch (err) {
+                resultsEl.innerHTML = `<div class="lq-athlete-result-item">Search failed — try again.</div>`;
+            }
+        }, 250);
+    };
+}
+
+function renderInsertCornerResults(side, athletes) {
+    const el = document.getElementById(`insert-corner-results-${side}`);
+    insertSearchResults[side] = athletes;
+    if (athletes.length === 0) {
+        el.innerHTML = `<div class="lq-athlete-result-item">No matching athletes.</div>`;
+        return;
+    }
+    el.innerHTML = athletes.map((a, i) => `
+        <div class="lq-athlete-result-item" data-idx="${i}">
+            <strong>${escapeHtml(a.displayName)}</strong><br>
+            <span style="color:var(--lq-muted); font-size:.75rem;">${escapeHtml(a.club || "No club")}${a.birthYear != null ? " · " + a.birthYear : ""}</span>
+        </div>
+    `).join("");
+    [...el.querySelectorAll(".lq-athlete-result-item[data-idx]")].forEach(item => {
+        item.onclick = () => pickInsertCorner(side, parseInt(item.dataset.idx, 10));
+    });
+}
+
+function pickInsertCorner(side, idx) {
+    const athlete = insertSearchResults[side][idx];
+    if (!athlete) return;
+    insertPendingCorners[side] = athlete;
+    document.getElementById(`insert-corner-current-${side}`).textContent = athlete.displayName;
+    document.getElementById(`insert-corner-search-${side}`).value = "";
+    document.getElementById(`insert-corner-results-${side}`).innerHTML = "";
+}
+
+function cornerFromAthlete(a) {
+    return {
+        entryId: a.id,
+        athleteIds: [a.id],
+        name: a.displayName,
+        country: a.country || null,
+        clubId: a.clubId || null,
+        clubName: a.club || null,
+    };
+}
+
+async function submitInsertMatch(courtId, prevMatch, nextMatch, action, activeBtn) {
+    const errEl = document.getElementById("insert-error");
+    errEl.classList.add("hidden");
+    const ins = LQ.insert;
+
+    if (!insertPendingCorners.blue || (ins.requiresRed && !insertPendingCorners.red)) {
+        errEl.textContent = ins.requiresRed ? "Pick an athlete for both corners." : "Pick at least the Blue athlete.";
+        errEl.classList.remove("hidden");
+        return;
+    }
+
+    const categorySelect = document.getElementById("insert-category");
+    let categoryCode, categoryLabel;
+    if (categorySelect.value === "__custom__") {
+        categoryCode = document.getElementById("insert-category-code").value.trim();
+        categoryLabel = document.getElementById("insert-category-label").value.trim();
+        if (!categoryCode || !categoryLabel) {
+            errEl.textContent = "Enter both a category code and label.";
+            errEl.classList.remove("hidden");
+            return;
+        }
+    } else {
+        categoryCode = categorySelect.value;
+        categoryLabel = categorySelect.options[categorySelect.selectedIndex].textContent;
+    }
+
+    const displayNumber = computeInsertDisplayNumber(prevMatch, nextMatch);
+    if (displayNumber == null) {
+        errEl.textContent = "Couldn't determine a match number — this court has no other matches to anchor to yet.";
+        errEl.classList.remove("hidden");
+        return;
+    }
+    const queuePosition = computeInsertQueuePosition(prevMatch, nextMatch);
+    const hasRed = !!insertPendingCorners.red;
+    const format = ins.format ? ins.format(hasRed) : null;
+
+    const newMatch = {
+        tournamentId: TOURNAMENT_ID,
+        tournamentName: TOURNAMENT_TITLE,
+        categoryCode,
+        categoryLabel,
+        displayNumber,
+        roundPhase: document.getElementById("insert-roundPhase").value,
+        blue: cornerFromAthlete(insertPendingCorners.blue),
+        red: hasRed ? cornerFromAthlete(insertPendingCorners.red) : null,
+        status: "ready",
+        winnerEntryId: null,
+        courtId,
+        queuePosition,
+        ...ins.read(),
+        ...(format ? { format } : {}),
+        isRanked: document.getElementById("insert-isRanked").checked,
+        source: "tournament_system_manual_insert",
+        assignment: "manual",
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+
+    const buttons = [...document.querySelectorAll("#modal-panel .lq-modal-actions .btn")];
+    const originalText = activeBtn ? activeBtn.textContent : "";
+    buttons.forEach(b => { b.disabled = true; });
+    if (activeBtn) activeBtn.textContent = "Creating…";
+
+    try {
+        await matchDocRef(`${TOURNAMENT_ID}_${displayNumber}`).set(newMatch);
+        closeModal();
+        if (action && action.after) action.after(newMatch);
+    } catch (err) {
+        console.error("Insert failed", err);
+        errEl.textContent = "Failed to create match: " + err.message;
+        errEl.classList.remove("hidden");
+        buttons.forEach(b => { b.disabled = false; });
+        if (activeBtn) activeBtn.textContent = originalText;
+    }
+}
+
+// A corner with no entryId yet: a cut-off qualifier still to come, a
+// winner of an earlier match ("101 Winner"), or a genuine bye.
+function participantLabel(corner) {
+    if (!corner) return "BYE";
+    if (corner.name) return corner.name;
+    if (corner.source && corner.source.matchId) {
+        const feeder = matchesById.get(corner.source.matchId);
+        return feeder ? `${feeder.displayNumber ?? "?"} Winner` : "Winner TBD";
+    }
+    if (corner.pendingAdvancement) return "Qualifier (to be decided)";
+    return "BYE";
+}
+
+// "Blue vs Red", or just the performer of a solo match.
+function cornersText(m) {
+    return formatOf(m).solo
+        ? participantLabel(m.blue)
+        : `${participantLabel(m.blue)} vs ${participantLabel(m.red)}`;
+}
+
+async function initFirebase() {
+    try {
+        const res = await fetch("/api/firebase-client-config");
+        const config = await res.json();
+        if (!config.projectId) {
+            setConnState("error", "Firebase not configured");
+            return;
+        }
+        firebase.initializeApp(config);
+        fsDb = firebase.firestore();
+    } catch (e) {
+        setConnState("error", "Config load failed");
+    }
+}
+
+function setConnState(state, text) {
+    const el = document.getElementById("conn-indicator");
+    el.className = "lq-conn " + state;
+    document.getElementById("conn-text").textContent = text;
+}
+
+// ── The ONE Firestore query on this entire page ─────────────────────────
+// One long-lived listener on every match of the tournament: the first
+// snapshot is billed once, every later one only for changed docs
+// (docChanges). Filtering on tournamentId alone needs no composite index.
+function subscribeAll() {
+    if (!fsDb) return;
+    if (unsubscribe) unsubscribe();
+    setConnState("", "Connecting…");
+
+    const query = fsDb
+        .collection("sports").doc(SPORT)
+        .collection("disciplines").doc(DISCIPLINE)
+        .collection("matches")
+        .where("tournamentId", "==", TOURNAMENT_ID)
+        .limit(2000); // sanity ceiling, not pagination
+
+    unsubscribe = query.onSnapshot(
+        (snapshot) => {
+            setConnState("live", "Live");
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === "removed") {
+                    matchesById.delete(change.doc.id);
+                } else {
+                    matchesById.set(change.doc.id, { id: change.doc.id, ...change.doc.data() });
+                }
+            });
+            renderCourts();
+        },
+        (err) => {
+            console.error(err);
+            setConnState("error", "Connection error — check Firestore rules");
+        }
+    );
+}
+
+// ── Grouping / rendering ─────────────────────────────────────────────────
+// "completed" is what Firebase Sync writes for a saved result (kyorugi
+// on WIN, poomsae on Final Results); a cut-off performance never gets a
+// winnerEntryId. A performance that never happened (DNS, withdrawn…) is
+// finished too — it must never show as "next up".
+function isDone(m) {
+    return m.status === "done" || m.status === "completed" || NOT_PERFORMED.has(m.status) || !!m.winnerEntryId;
+}
+
+function statusInfo(m) {
+    if (!isDone(m)) return m.status === "ready" ? ["lq-status-ready", "Ready"] : ["lq-status-pending", "Pending"];
+    if (m.status === "walkover") return ["lq-status-walkover", "Walkover"];
+    if (NOT_PERFORMED.has(m.status)) return ["lq-status-walkover", m.status.toUpperCase() === "DNS" ? "DNS" : m.status[0].toUpperCase() + m.status.slice(1)];
+    return ["lq-status-done", "Completed"];
+}
+
+function groupByCourtSorted() {
+    const byCourt = {};
+    matchesById.forEach((m) => {
+        const cid = m.courtId || "unassigned";
+        (byCourt[cid] = byCourt[cid] || []).push(m);
+    });
+    Object.values(byCourt).forEach((list) => list.sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0)));
+    return byCourt;
+}
+
+function findNextUpId(matches) {
+    for (const m of matches) {
+        if (!isDone(m) && m.status === "ready") return m.id;
+    }
+    return null;
+}
+
+function renderCourts() {
+    if (!LQ) return;
+    const wrap = document.getElementById("courts-row");
+    const byCourt = groupByCourtSorted();
+    const courtIds = Object.keys(byCourt).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    if (courtIds.length === 0) {
+        wrap.innerHTML = '<div class="lq-loading">No matches scheduled yet — push brackets first.</div>';
+        return;
+    }
+
+    const conflicts = LQ.conflicts(byCourt) || new Map();
+
+    wrap.innerHTML = "";
+    courtIds.forEach((courtId) => {
+        const matches = byCourt[courtId];
+        const pending = matches.filter(m => !isDone(m) && m.status !== "ready").length;
+        const ready = matches.filter(m => !isDone(m) && m.status === "ready").length;
+        const done = matches.filter(isDone).length;
+        const conflictCount = matches.filter(m => conflicts.has(m.id)).length;
+        const nextUpId = findNextUpId(matches);
+
+        const column = document.createElement("div");
+        column.className = "lq-court-column";
+        column.dataset.courtId = courtId;
+        column.ondragover = (e) => { e.preventDefault(); onColumnDragOver(e, column); };
+        column.ondragleave = (e) => onColumnDragLeave(e, column);
+        column.ondrop = (e) => { e.preventDefault(); onColumnDrop(e, column, courtId, matches); };
+
+        const header = document.createElement("div");
+        header.className = "lq-court-column-header";
+        header.innerHTML = `
+            <span class="lq-court-column-name">${escapeHtml(courtId)}</span>
+            <span class="lq-court-column-meta">${matches.length} total · ${pending} pending · ${ready} ready · ${done} done${conflictCount > 0 ? ` · <span style="color:#b91c1c; font-weight:700;">⚠ ${conflictCount} conflict${conflictCount === 1 ? "" : "s"}</span>` : ""}</span>
+        `;
+        column.appendChild(header);
+
+        const body = document.createElement("div");
+        body.className = "lq-court-column-body";
+        if (matches.length === 0) {
+            body.innerHTML = `<div class="lq-court-column-empty">No matches on this court.</div>`;
+            body.appendChild(buildGap(courtId, null, null));
+        } else {
+            body.appendChild(buildGap(courtId, null, matches[0]));
+            matches.forEach((m, i) => {
+                body.appendChild(buildRow(m, m.id === nextUpId, conflicts.get(m.id)));
+                body.appendChild(buildGap(courtId, m, matches[i + 1] || null));
+            });
+        }
+        column.appendChild(body);
+        wrap.appendChild(column);
+    });
+}
+
+function buildGap(courtId, prevMatch, nextMatch) {
+    const gap = document.createElement("div");
+    gap.className = "lq-gap";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lq-gap-btn";
+    btn.title = "Insert a match here";
+    btn.textContent = "+";
+    btn.onclick = (e) => { e.stopPropagation(); openInsertModal(courtId, prevMatch, nextMatch); };
+    gap.appendChild(btn);
+    return gap;
+}
+
+function buildRow(m, isNext, conflictReason) {
+    const fmt = formatOf(m);
+    const row = document.createElement("div");
+    row.className = "lq-row" + (isNext ? " next-up" : "");
+    row.draggable = true;
+    row.dataset.matchId = m.id;
+    row.dataset.format = fmt.key;
+
+    row.ondragstart = (e) => {
+        dragState = { matchId: m.id, fromCourtId: m.courtId };
+        row.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+    };
+    row.ondragend = () => { row.classList.remove("dragging"); removeDropIndicator(); };
+    row.onclick = () => { if (!row.classList.contains("dragging")) openDetailModal(m.id); };
+
+    const [statusClass, statusLabel] = statusInfo(m);
+    const extra = fmt.rowExtraHtml(m, conflictReason);
+    const corners = fmt.solo
+        ? `<span class="lq-corner-name solo">${escapeHtml(participantLabel(m.blue))}</span>`
+        : `<span class="lq-corner-name blue">${escapeHtml(participantLabel(m.blue))}</span>
+           <span class="lq-vs">vs</span>
+           <span class="lq-corner-name red">${escapeHtml(participantLabel(m.red))}</span>`;
+    const buttons = fmt.rowButtons(m).map(b =>
+        `<button type="button" class="lq-print-btn" title="${escapeAttr(b.title || "")}" data-kind="${escapeAttr(b.kind)}">${b.label}</button>`).join("");
+
+    row.innerHTML = `
+        <span class="lq-drag-handle" title="Drag to reorder, or drop on another court's column">⠿</span>
+        <span class="lq-row-number">#${escapeHtml(String(m.displayNumber ?? "—"))}</span>
+        <div class="lq-row-main">
+            <div class="lq-row-corners">${corners}</div>
+            <div class="lq-row-meta">${escapeHtml(resolveCategoryLabel(m.categoryCode))}${m.roundPhase ? " · " + escapeHtml(m.roundPhase) : ""}${m.isRanked === false ? ' · <span class="lq-unranked-flag">Unranked</span>' : ""}</div>
+            ${extra ? `<div class="lq-row-badges">${extra}</div>` : ""}
+        </div>
+        ${isNext ? '<span class="lq-next-badge">NEXT</span>' : ""}
+        <span class="lq-status-pill ${statusClass}">${statusLabel}</span>
+        ${buttons}
+    `;
+
+    row.querySelectorAll(".lq-print-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            fmt.onRowButton(btn.dataset.kind, m, btn);
+        });
+    });
+
+    return row;
+}
+
+// ── Drag and drop: reorder within a court, or drop onto another court ──
+let dropIndicatorEl = null;
+function ensureDropIndicator() {
+    if (!dropIndicatorEl) {
+        dropIndicatorEl = document.createElement("div");
+        dropIndicatorEl.className = "lq-drop-indicator";
+    }
+    return dropIndicatorEl;
+}
+function removeDropIndicator() {
+    if (dropIndicatorEl && dropIndicatorEl.parentNode) dropIndicatorEl.parentNode.removeChild(dropIndicatorEl);
+}
+
+function computeDropIndex(bodyEl, clientY) {
+    const rows = [...bodyEl.querySelectorAll(".lq-row")];
+    let dropIndex = rows.length;
+    for (let i = 0; i < rows.length; i++) {
+        const rect = rows[i].getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) { dropIndex = i; break; }
+    }
+    return { dropIndex, rows };
+}
+
+function onColumnDragOver(event, column) {
+    if (!dragState) return;
+    const body = column.querySelector(".lq-court-column-body");
+    const { dropIndex, rows } = computeDropIndex(body, event.clientY);
+
+    const indicator = ensureDropIndicator();
+    if (dropIndex >= rows.length) body.appendChild(indicator);
+    else body.insertBefore(indicator, rows[dropIndex]);
+
+    document.querySelectorAll(".lq-court-column.drag-over").forEach((c) => {
+        if (c !== column) c.classList.remove("drag-over");
+    });
+    column.classList.add("drag-over");
+}
+
+function onColumnDragLeave(event, column) {
+    if (!column.contains(event.relatedTarget)) column.classList.remove("drag-over");
+}
+
+// ── Generic modal ─────────────────────────────────────────────────────
+function openModal(innerHtml) {
+    document.getElementById("modal-panel").innerHTML = innerHtml;
+    document.getElementById("modal-overlay").classList.remove("hidden");
+}
+function closeModal() {
+    document.getElementById("modal-overlay").classList.add("hidden");
+    document.getElementById("modal-panel").innerHTML = "";
+}
+
+function confirmDragDrop(bodyHtml) {
+    return new Promise((resolve) => {
+        openModal(`
+            <div class="lq-modal-header">
+                <h3>Confirm move</h3>
+                <button class="lq-modal-close" id="drag-confirm-x">&times;</button>
+            </div>
+            <div class="lq-modal-body">
+                <div class="lq-drag-confirm-text">${bodyHtml}</div>
+                <div class="lq-modal-actions">
+                    <button class="btn btn-primary" id="drag-confirm-yes">Move it</button>
+                    <button class="btn btn-ghost" id="drag-confirm-no">Cancel</button>
+                </div>
+            </div>
+        `);
+        const finish = (result) => { closeModal(); resolve(result); };
+        document.getElementById("drag-confirm-yes").onclick = () => finish(true);
+        document.getElementById("drag-confirm-no").onclick = () => finish(false);
+        document.getElementById("drag-confirm-x").onclick = () => finish(false);
+    });
+}
+
+async function onColumnDrop(event, column, courtId, courtMatches) {
+    column.classList.remove("drag-over");
+    removeDropIndicator();
+    if (!dragState) return;
+
+    const body = column.querySelector(".lq-court-column-body");
+    const { dropIndex } = computeDropIndex(body, event.clientY);
+
+    // Leave the dragged match out of its own column before picking neighbours.
+    const targetList = courtMatches.filter((m) => m.id !== dragState.matchId);
+    const prevMatch = targetList[dropIndex - 1] || null;
+    const nextMatch = targetList[dropIndex] || null;
+
+    const draggedId = dragState.matchId;
+    const dragged = matchesById.get(draggedId);
+    dragState = null;
+    if (!dragged) return;
+
+    const num = (x) => (x && x.displayNumber != null ? `#${x.displayNumber}` : "?");
+    const positionDesc = !prevMatch && !nextMatch
+        ? `as the only match on <strong>${escapeHtml(courtId)}</strong>`
+        : !prevMatch
+            ? `at the very START of <strong>${escapeHtml(courtId)}</strong>, right before ${escapeHtml(num(nextMatch))}`
+            : !nextMatch
+                ? `at the very END of <strong>${escapeHtml(courtId)}</strong>, right after ${escapeHtml(num(prevMatch))}`
+                : `on <strong>${escapeHtml(courtId)}</strong>, between ${escapeHtml(num(prevMatch))} and ${escapeHtml(num(nextMatch))}`;
+
+    const fmt = formatOf(dragged);
+    const who = fmt.solo
+        ? `<span>${escapeHtml(participantLabel(dragged.blue))}</span>`
+        : `<span style="color:var(--lq-blue)">${escapeHtml(participantLabel(dragged.blue))}</span>
+           <span style="color:var(--lq-muted)">vs</span>
+           <span style="color:var(--lq-red)">${escapeHtml(participantLabel(dragged.red))}</span>`;
+
+    const confirmed = await confirmDragDrop(`
+        Move <strong>#${escapeHtml(String(dragged.displayNumber ?? "?"))} · ${escapeHtml(resolveCategoryLabel(dragged.categoryCode))}</strong><br>
+        ${who}
+        <br><br>
+        ${positionDesc}?
+    `);
+    if (!confirmed) return;
+
+    try {
+        const res = await fetch(`/api/matches/${SPORT}/${DISCIPLINE}/${draggedId}/position`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                courtId,
+                prevQueuePosition: prevMatch ? prevMatch.queuePosition : null,
+                nextQueuePosition: nextMatch ? nextMatch.queuePosition : null,
+            }),
+        });
+        if (!res.ok) throw new Error(`Reposition failed (${res.status})`);
+    } catch (err) {
+        console.error("Reposition failed", err);
+        alert("Failed to move that match — try again.");
+    }
+}
+
+// ── Match detail / edit modal ────────────────────────────────────────
+// Every field of an UNDECIDED match, saved in one write straight to
+// Firestore (Firestore rules gate who may write). Corners are replaced
+// by searching for an athlete, never typed by hand; a corner still fed
+// by an earlier match is read-only. A decided match opens its format's
+// result view instead (format.openResult).
+let pendingCornerReplacement = { blue: null, red: null };
+let cornerSearchTimers = { blue: null, red: null };
+let cornerSearchResults = { blue: [], red: [] };
+let currentDetailMatchId = null;
+
+function openDetailModal(matchId) {
+    const m = matchesById.get(matchId);
+    if (!m) return;
+    const fmt = formatOf(m);
+
+    if (isDone(m) && fmt.openResult) { fmt.openResult(matchId); return; }
+
+    currentDetailMatchId = matchId;
+    pendingCornerReplacement = { blue: null, red: null };
+    cornerSearchResults = { blue: [], red: [] };
+
+    const cornerFieldsHtml = (corner, side) => {
+        const label = fmt.solo ? "Athlete" : side === "blue" ? "Blue Corner" : "Red Corner";
+        if (!(corner && corner.entryId)) {
+            return `
+                <div class="lq-detail-corner ${side}">
+                    <label>${label}</label>
+                    <input type="text" value="${escapeAttr(participantLabel(corner))}" disabled title="Resolves automatically once the earlier round finishes — not directly editable here">
+                </div>
+            `;
+        }
+        return `
+            <div class="lq-detail-corner ${side}">
+                <label>${label}</label>
+                <div class="lq-corner-current" id="corner-current-${side}">${escapeHtml(participantLabel(corner))}</div>
+                <input type="search" id="corner-search-${side}" class="lq-text-input" placeholder="Search to replace this athlete…" autocomplete="off">
+                <div id="corner-results-${side}" class="lq-athlete-results"></div>
+            </div>
+        `;
+    };
+
+    const blueEntryId = m.blue?.entryId || "";
+    const redEntryId = m.red?.entryId || "";
+    const winnerOptionsHtml = `
+        <option value="" ${!m.winnerEntryId ? "selected" : ""}>— none —</option>
+        ${blueEntryId ? `<option value="${escapeAttr(blueEntryId)}" ${m.winnerEntryId === blueEntryId ? "selected" : ""}>${escapeHtml(participantLabel(m.blue))} (Blue)</option>` : ""}
+        ${redEntryId ? `<option value="${escapeAttr(redEntryId)}" ${m.winnerEntryId === redEntryId ? "selected" : ""}>${escapeHtml(participantLabel(m.red))} (Red)</option>` : ""}
+    `;
+
+    // Keep an unusual current phase (e.g. "EXH") selectable.
+    const currentPhase = m.roundPhase || "";
+    const extraPhaseOption = currentPhase && !fmt.roundPhases.includes(currentPhase)
+        ? `<option value="${escapeAttr(currentPhase)}" selected>${escapeHtml(currentPhase)} (current)</option>`
+        : "";
+    const roundPhaseOptionsHtml = extraPhaseOption + fmt.roundPhases.map(p =>
+        `<option value="${p}" ${currentPhase === p ? "selected" : ""}>${p}</option>`
+    ).join("");
+
+    const statusKnown = fmt.statusOptions.some(([v]) => v === m.status);
+    const statusOptionsHtml = (statusKnown ? "" : `<option value="${escapeAttr(m.status || "")}" selected>${escapeHtml(m.status || "—")} (current)</option>`)
+        + fmt.statusOptions.map(([v, l]) => `<option value="${v}" ${m.status === v ? "selected" : ""}>${escapeHtml(l)}</option>`).join("");
+
+    const readonlyExtra = fmt.detailReadonlyHtml(m);
+
+    openModal(`
+        <div class="lq-modal-header">
+            <h3>#${escapeHtml(String(m.displayNumber ?? "—"))} · ${escapeHtml(resolveCategoryLabel(m.categoryCode))}</h3>
+            <button class="lq-modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="lq-modal-body">
+            <div class="lq-detail-corners">
+                ${cornerFieldsHtml(m.blue, "blue")}
+                ${fmt.solo ? "" : cornerFieldsHtml(m.red, "red")}
+            </div>
+
+            <div class="lq-detail-grid">
+                <label class="lq-span-2">Category Code
+                    <input type="text" id="edit-categoryCode" value="${escapeAttr(m.categoryCode || "")}">
+                </label>
+                <label>Court
+                    <input type="text" id="edit-courtId" value="${escapeAttr(m.courtId || "")}">
+                </label>
+                <label>Status
+                    <select id="edit-status">${statusOptionsHtml}</select>
+                </label>
+                <label>Queue Position
+                    <input type="number" step="any" id="edit-queuePosition" value="${m.queuePosition ?? ""}">
+                </label>
+                <label>Display Number
+                    <input type="number" step="any" id="edit-displayNumber" value="${m.displayNumber ?? ""}">
+                </label>
+                <div class="lq-field-hint lq-span-2">
+                    Court/position here is a raw override — it won't recompute neighbours the way drag-and-drop
+                    does. Prefer dragging the match when just reordering.
+                </div>
+                <label>Round Phase
+                    <select id="edit-roundPhase">${roundPhaseOptionsHtml}</select>
+                </label>
+                ${fmt.solo ? "<label>&nbsp;</label>" : `<label>Winner
+                    <select id="edit-winnerEntryId">${winnerOptionsHtml}</select>
+                </label>`}
+                ${fmt.detailFieldsHtml(m)}
+                <label class="lq-checkbox-label lq-span-2">
+                    <input type="checkbox" id="edit-isRanked" ${m.isRanked !== false ? "checked" : ""}>
+                    Ranked / official (counts toward standings)
+                </label>
+            </div>
+
+            <div class="lq-detail-readonly">
+                Round ${escapeHtml(String(m.bracketRound ?? m.round ?? "—"))} · Match ${escapeHtml(String(m.bracketMatchNumber ?? m.matchNumber ?? "—"))}
+                ${m.tournamentName ? " · " + escapeHtml(m.tournamentName) : ""}
+                ${readonlyExtra ? `<div class="lq-row-badges" style="margin-top:.4rem;">${readonlyExtra}</div>` : ""}
+            </div>
+
+            <div id="detail-error" class="lq-alert-error hidden"></div>
+
+            <div class="lq-modal-actions">
+                <button class="btn btn-primary" id="detail-save-btn">Save Changes</button>
+                ${fmt.detailActionsHtml(m)}
+                <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    `);
+
+    wireCornerSearch("blue", m.blue);
+    if (!fmt.solo) wireCornerSearch("red", m.red);
+    document.getElementById("detail-save-btn").onclick = () => saveMatchEdits(matchId);
+}
+
+function wireCornerSearch(side, originalCorner) {
+    const input = document.getElementById(`corner-search-${side}`);
+    if (!input) return;
+    input.oninput = () => {
+        clearTimeout(cornerSearchTimers[side]);
+        const q = input.value.trim();
+        const resultsEl = document.getElementById(`corner-results-${side}`);
+        if (q.length < 2) { resultsEl.innerHTML = ""; return; }
+        cornerSearchTimers[side] = setTimeout(async () => {
+            try {
+                const res = await fetch(`/api/athletes/search-admin?q=${encodeURIComponent(q)}&sport=${encodeURIComponent(SPORT)}&limit=8`);
+                const data = await res.json();
+                renderCornerResults(side, data.athletes || [], originalCorner);
+            } catch (err) {
+                resultsEl.innerHTML = `<div class="lq-athlete-result-item">Search failed — try again.</div>`;
+            }
+        }, 250);
+    };
+}
+
+function renderCornerResults(side, athletes, originalCorner) {
+    const el = document.getElementById(`corner-results-${side}`);
+    cornerSearchResults[side] = athletes;
+    if (athletes.length === 0) {
+        el.innerHTML = `<div class="lq-athlete-result-item">No matching athletes.</div>`;
+        return;
+    }
+    el.innerHTML = athletes.map((a, i) => `
+        <div class="lq-athlete-result-item" data-idx="${i}">
+            <strong>${escapeHtml(a.displayName)}</strong><br>
+            <span style="color:var(--lq-muted); font-size:.75rem;">${escapeHtml(a.club || "No club")}${a.birthYear != null ? " · " + a.birthYear : ""}</span>
+        </div>
+    `).join("");
+    [...el.querySelectorAll(".lq-athlete-result-item[data-idx]")].forEach(item => {
+        item.onclick = () => pickCornerReplacement(side, parseInt(item.dataset.idx, 10), originalCorner);
+    });
+}
+
+function pickCornerReplacement(side, idx, originalCorner) {
+    const athlete = cornerSearchResults[side][idx];
+    if (!athlete) return;
+    pendingCornerReplacement[side] = athlete;
+
+    document.getElementById(`corner-current-${side}`).innerHTML = `
+        <span style="text-decoration:line-through; color:var(--lq-muted);">${escapeHtml(participantLabel(originalCorner))}</span>
+        → <strong>${escapeHtml(athlete.displayName)}</strong>
+        <button type="button" onclick="undoCornerReplacement('${side}', this)" style="border:none; background:none; color:var(--lq-muted); cursor:pointer; font-size:.75rem; text-decoration:underline;">undo</button>
+    `;
+    document.getElementById(`corner-search-${side}`).value = "";
+    document.getElementById(`corner-results-${side}`).innerHTML = "";
+}
+
+function undoCornerReplacement(side) {
+    pendingCornerReplacement[side] = null;
+    const m = matchesById.get(currentDetailMatchId);
+    const corner = side === "blue" ? m?.blue : m?.red;
+    document.getElementById(`corner-current-${side}`).textContent = participantLabel(corner);
+}
+
+async function saveMatchEdits(matchId) {
+    const m = matchesById.get(matchId);
+    if (!m) return;
+    const fmt = formatOf(m);
+
+    const errEl = document.getElementById("detail-error");
+    errEl.classList.add("hidden");
+
+    const status = document.getElementById("edit-status").value;
+    const winnerSelect = document.getElementById("edit-winnerEntryId");
+    let winnerEntryId = winnerSelect ? (winnerSelect.value || null) : null;
+
+    if (!fmt.solo && fmt.winnerStatuses.includes(status) && !winnerEntryId) {
+        errEl.textContent = "Completed / walkover matches need a winner selected.";
+        errEl.classList.remove("hidden");
+        return;
+    }
+    if (status === "pending" || status === "ready") winnerEntryId = null; // a reset match has no winner
+
+    const textOrEmpty = (id) => document.getElementById(id).value.trim();
+    const numOrNull = (id) => {
+        const raw = document.getElementById(id).value;
+        if (raw === "") return null;
+        const n = Number(raw);
+        return Number.isNaN(n) ? null : n;
+    };
+
+    const updates = {
+        categoryCode: textOrEmpty("edit-categoryCode"),
+        courtId: textOrEmpty("edit-courtId"),
+        roundPhase: textOrEmpty("edit-roundPhase"),
+        status,
+        isRanked: document.getElementById("edit-isRanked").checked,
+        ...fmt.detailUpdates(m),
+    };
+    if (!fmt.solo) updates.winnerEntryId = winnerEntryId;
+    const qp = numOrNull("edit-queuePosition"); if (qp !== null) updates.queuePosition = qp;
+    const dn = numOrNull("edit-displayNumber"); if (dn !== null) updates.displayNumber = dn;
+
+    // A corner is only written when a replacement athlete was picked.
+    // (merge write: a solo qualifier slot also drops its placeholder flag)
+    if (pendingCornerReplacement.blue) {
+        updates.blue = cornerFromAthlete(pendingCornerReplacement.blue);
+        if (fmt.solo && m.blue && m.blue.pendingAdvancement) updates.blue.pendingAdvancement = firebase.firestore.FieldValue.delete();
+    }
+    if (pendingCornerReplacement.red) updates.red = cornerFromAthlete(pendingCornerReplacement.red);
+
+    const saveBtn = document.getElementById("detail-save-btn");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+
+    try {
+        const batch = fsDb.batch();
+        if (!fmt.solo) propagateWinnerChangeIfNeeded(m, winnerEntryId, batch);
+        batch.set(matchDocRef(matchId), updates, { merge: true });
+        await batch.commit();
+        closeModal();
+    } catch (err) {
+        console.error("Save failed", err);
+        errEl.textContent = "Save failed: " + err.message;
+        errEl.classList.remove("hidden");
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save Changes";
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WINNER-CHANGE PROPAGATION (head-to-head brackets). Correcting a winner
+// rewrites the next round's corner that this match feeds
+// (corner.source.matchId); a later match already decided with the old
+// winner is reset and the correction cascades.
+// ═══════════════════════════════════════════════════════════════════
+
+function matchDocRef(matchId) {
+    return fsDb
+        .collection("sports").doc(SPORT)
+        .collection("disciplines").doc(DISCIPLINE)
+        .collection("matches").doc(matchId);
+}
+
+function applyCornerUpdateDownstream(originMatchId, cornerData, batch, visited) {
+    matchesById.forEach(m => {
+        if (visited.has(m.id)) return;
+        ["blue", "red"].forEach(side => {
+            const corner = m[side];
+            if (!corner || !corner.source || corner.source.matchId !== originMatchId) return;
+
+            const otherCorner = m[side === "blue" ? "red" : "blue"];
+            const bothKnown = !!cornerData.entryId && !!(otherCorner && otherCorner.entryId);
+            const update = { [side]: cornerData };
+
+            const invalidatesExistingResult = m.winnerEntryId && corner.entryId
+                && corner.entryId === m.winnerEntryId && corner.entryId !== cornerData.entryId;
+
+            if (invalidatesExistingResult) {
+                update.status = bothKnown ? "ready" : "pending";
+                update.winnerEntryId = null;
+                update.win = null;
+                update.win_score = null;
+                update.win_type = null;
+            } else if (!m.winnerEntryId) {
+                update.status = bothKnown ? "ready" : "pending";
+            }
+
+            visited.add(m.id);
+            batch.set(matchDocRef(m.id), update, { merge: true });
+
+            if (invalidatesExistingResult) {
+                applyCornerUpdateDownstream(m.id, { entryId: null, source: { matchId: m.id, slot: "winner" } }, batch, visited);
+            }
+        });
+    });
+}
+
+function propagateWinnerChangeIfNeeded(m, newWinnerEntryId, batch) {
+    if ((newWinnerEntryId || null) === (m.winnerEntryId || null)) return;
+    const visited = new Set([m.id]);
+    if (newWinnerEntryId) {
+        const winnerCorner = m.blue && m.blue.entryId === newWinnerEntryId ? m.blue
+            : m.red && m.red.entryId === newWinnerEntryId ? m.red
+                : null;
+        if (!winnerCorner) return;
+        applyCornerUpdateDownstream(m.id, { ...winnerCorner, source: { matchId: m.id, slot: "winner" } }, batch, visited);
+    } else {
+        applyCornerUpdateDownstream(m.id, { entryId: null, source: { matchId: m.id, slot: "winner" } }, batch, visited);
+    }
+}
+
+// ── Utils ────────────────────────────────────────────────────────────────
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str).replace(/[&<>"']/g, s => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[s]));
+}
+function escapeAttr(str) { return escapeHtml(str).replace(/'/g, "\\'"); }

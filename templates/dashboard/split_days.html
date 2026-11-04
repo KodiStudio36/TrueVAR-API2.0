@@ -1,0 +1,879 @@
+{% extends "dashboard/base.html" %}
+{% block content %}
+{#
+Split into Days — pick a day for every category; Day 1 stays this
+tournament (" Day 1" is added to its name), every other day becomes a copy
+of it with that day's registrations moved in. Opened from the Category
+Manager. API: GET/POST /api/tournaments/{id}/split-days (tournament_router.py).
+#}
+
+<div id="flash" class="flash-banner hidden"></div>
+
+<div class="sd-wrapper">
+    <div class="sd-topbar">
+        <a href="/dashboard/tournaments/{{ tournament.id }}" class="btn btn-ghost btn-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5" />
+                <path d="M12 19l-7-7 7-7" />
+            </svg>
+            Back to Tournament
+        </a>
+        <div class="sd-topbar-title">
+            <span class="panel-eyebrow">{{ tournament.title }}</span>
+            <h1 class="panel-title" style="font-size:1.5rem;">Split into Days</h1>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" id="previewBtn" onclick="previewSplit()" disabled>
+            Preview split
+        </button>
+    </div>
+
+    <p class="text-muted sd-hint">
+        Choose a day for every category. <strong>Day 1</strong> stays this tournament — " Day 1" is added to its
+        name. Every other day becomes a new tournament: a copy of this one (settings, categories, coaches and
+        referees, poomsae draw settings) with that day's registrations moved into it. After the split each day is
+        a separate tournament with its own brackets, matches and results. Only categories with registrations are
+        listed.
+    </p>
+
+    <div id="blockers" class="sd-blockers hidden"></div>
+
+    <div class="sd-board">
+        {# ── LEFT: days ──────────────────────────────────────────────── #}
+        <div class="card-panel sd-pane">
+            <div class="sd-pane-header">
+                <h2 class="sd-pane-title">Days</h2>
+                <label class="sd-inline">
+                    Number of days
+                    <select id="dayCount" onchange="setDayCount(this.value)"></select>
+                </label>
+            </div>
+            <div id="dayList" class="sd-day-list"></div>
+            <div id="multiDayNote" class="text-muted sd-note"></div>
+        </div>
+
+        {# ── RIGHT: categories ───────────────────────────────────────── #}
+        <div class="card-panel sd-pane sd-pane--cats">
+            <div class="sd-pane-header">
+                <h2 class="sd-pane-title">Categories</h2>
+                <input id="filter" type="text" placeholder="Filter categories…" class="sd-filter"
+                    oninput="renderCategories()">
+            </div>
+            <div id="categoryList" class="sd-cat-list">
+                <p class="text-muted" style="padding: 1rem 0;">Loading…</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="modalOverlay" class="sd-modal-overlay hidden" onclick="if (event.target === this) closeModal()">
+    <div class="sd-modal" id="modalPanel"></div>
+</div>
+
+<script src="/static/js/category-schema.js"></script>
+<script>
+    const TOURNAMENT_ID = {{ tournament.id | string | tojson }};
+    const TOURNAMENT_SPORT = {{ tournament.sport | default ('', true) | string | lower | tojson }};
+    const TOURNAMENT_DISCIPLINE = {{ tournament.discipline | default ('', true) | string | lower | tojson }};
+    const DAY_LABEL = "Day";
+    const STORE_KEY = `truevar.splitDays.${TOURNAMENT_ID}`;
+
+    let overview = null;       // GET /split-days
+    let categories = [];       // [{categoryCode, categoryLabel, entryTypeCode, ageCode, entries, athleteIds, history, order, group, sub}]
+    let dayCount = 2;
+    let assignment = {};       // categoryCode -> day (1-based)
+    let dayDates = [];         // datetime-local strings, index 0 = Day 1
+
+    // ── helpers ────────────────────────────────────────────────────────
+    function escapeHtml(str) {
+        return String(str ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+    function showFlash(text, isError) {
+        const el = document.getElementById("flash");
+        el.textContent = text;
+        el.className = `flash-banner ${isError ? "flash-banner--error" : ""}`;
+        setTimeout(() => el.classList.add("hidden"), 3500);
+    }
+    function openModal(html) {
+        document.getElementById("modalPanel").innerHTML = html;
+        document.getElementById("modalOverlay").classList.remove("hidden");
+    }
+    function closeModal() {
+        document.getElementById("modalOverlay").classList.add("hidden");
+        document.getElementById("modalPanel").innerHTML = "";
+    }
+    // Date ↔ <input type="datetime-local"> in the browser's own time zone.
+    function toLocalInput(d) {
+        if (!(d instanceof Date) || isNaN(d)) return "";
+        const p = n => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    function fmtDate(v) {
+        const d = new Date(v);
+        return isNaN(d) ? "—" : d.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+    function baseTitle() {
+        const t = (overview && overview.title) || "";
+        const suffix = ` ${DAY_LABEL} 1`;
+        return t.endsWith(suffix) ? t.slice(0, -suffix.length) : t;
+    }
+    function saveLocal() {
+        try { localStorage.setItem(STORE_KEY, JSON.stringify({ dayCount, assignment })); } catch (e) { /* storage off */ }
+    }
+
+    // ── load ───────────────────────────────────────────────────────────
+    async function init() {
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/split-days`);
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `Failed to load (${res.status})`);
+            }
+            overview = await res.json();
+        } catch (err) {
+            document.getElementById("categoryList").innerHTML = `<p style="color:#b91c1c;">${escapeHtml(err.message)}</p>`;
+            return;
+        }
+
+        // Schema order (entry type → age → class → gender), so the list reads
+        // like the category manager; codes the schema doesn't know go last.
+        const order = {};
+        try {
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/categories`);
+            const dims = TrueVARCategories.dimensionsFor(await res.json(), TOURNAMENT_SPORT, TOURNAMENT_DISCIPLINE);
+            TrueVARCategories.flatten(dims).forEach((c, i) => { order[c.code] = { i, group: c.groupLabel, sub: c.ageLabel }; });
+        } catch (err) { /* label order only */ }
+
+        categories = overview.categories
+            .filter(c => c.entries > 0 || c.history > 0)
+            .map(c => {
+                const parts = String(c.categoryLabel || c.categoryCode).split(" · ");
+                const o = order[c.categoryCode];
+                return {
+                    ...c,
+                    order: o ? o.i : 1e6,
+                    group: (o && o.group) || parts[0] || c.entryTypeCode || "Other",
+                    sub: (o && o.sub) || parts[1] || c.ageCode || "",
+                    short: parts.length > 1 ? parts.slice(1).join(" · ") : (c.categoryLabel || c.categoryCode),
+                };
+            })
+            .sort((a, b) => a.order - b.order || a.categoryLabel.localeCompare(b.categoryLabel));
+
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { /* none */ }
+        dayCount = Math.min(overview.maxDays, Math.max(2, (saved && saved.dayCount) || 2));
+        assignment = {};
+        categories.forEach(c => {
+            const d = saved && saved.assignment ? saved.assignment[c.categoryCode] : null;
+            assignment[c.categoryCode] = d && d <= dayCount ? d : 1;
+        });
+
+        const start = overview.dateTime ? new Date(overview.dateTime) : null;
+        dayDates = Array.from({ length: overview.maxDays }, (_, i) => start ? toLocalInput(new Date(start.getTime() + i * 86400000)) : "");
+
+        document.getElementById("dayCount").innerHTML = Array.from({ length: overview.maxDays - 1 }, (_, i) => i + 2)
+            .map(n => `<option value="${n}" ${n === dayCount ? "selected" : ""}>${n}</option>`).join("");
+
+        const blockersEl = document.getElementById("blockers");
+        if (overview.blockers.length) {
+            blockersEl.innerHTML = overview.blockers.map(b => `<div>⚠ ${escapeHtml(b)}</div>`).join("");
+            blockersEl.classList.remove("hidden");
+        }
+        render();
+    }
+
+    // ── actions ────────────────────────────────────────────────────────
+    function setDayCount(value) {
+        dayCount = Number(value);
+        Object.keys(assignment).forEach(code => { if (assignment[code] > dayCount) assignment[code] = dayCount; });
+        saveLocal();
+        render();
+    }
+    function assign(codes, day) {
+        codes.forEach(code => { assignment[code] = day; });
+        saveLocal();
+        render();
+    }
+    function assignOne(code, day) { assign([code], day); }
+    function assignGroup(group, sub, day) {
+        assign(categories.filter(c => c.group === group && (sub === null || c.sub === sub)).map(c => c.categoryCode), day);
+    }
+    function setDayDate(i, value) { dayDates[i] = value; renderDays(); }
+
+    // ── render ─────────────────────────────────────────────────────────
+    function daySummary(day) {
+        const cats = categories.filter(c => assignment[c.categoryCode] === day);
+        const athletes = new Set(cats.flatMap(c => c.athleteIds));
+        return { cats: cats.length, entries: cats.reduce((s, c) => s + c.entries, 0), athletes };
+    }
+
+    function render() {
+        renderDays();
+        renderCategories();
+        document.getElementById("previewBtn").disabled = !!overview.blockers.length || categories.length === 0;
+    }
+
+    function renderDays() {
+        const base = baseTitle();
+        const sums = Array.from({ length: dayCount }, (_, i) => daySummary(i + 1));
+        document.getElementById("dayList").innerHTML = sums.map((s, i) => `
+            <div class="sd-day ${s.cats === 0 && i > 0 ? "sd-day--empty" : ""}">
+                <div class="sd-day-head">
+                    <span class="sd-day-pill sd-day-pill--${i + 1} sd-day-pill--on">${DAY_LABEL} ${i + 1}</span>
+                    <span class="sd-day-title">${escapeHtml(`${base} ${DAY_LABEL} ${i + 1}`)}</span>
+                </div>
+                <div class="sd-day-meta">${i === 0 ? "this tournament" : "new tournament"} · ${s.cats} categor${s.cats === 1 ? "y" : "ies"} · ${s.entries} entr${s.entries === 1 ? "y" : "ies"} · ${s.athletes.size} athlete${s.athletes.size === 1 ? "" : "s"}</div>
+                <label class="sd-inline">Starts
+                    <input type="datetime-local" value="${escapeHtml(dayDates[i] || "")}" onchange="setDayDate(${i}, this.value)">
+                </label>
+                ${s.cats === 0 && i > 0 ? `<div class="sd-warn">No categories yet — a day needs at least one.</div>` : ""}
+            </div>
+        `).join("");
+
+        // Athletes competing on more than one day.
+        const daysOf = {};
+        sums.forEach((s, i) => s.athletes.forEach(a => { (daysOf[a] = daysOf[a] || new Set()).add(i + 1); }));
+        const multi = Object.values(daysOf).filter(set => set.size > 1).length;
+        document.getElementById("multiDayNote").textContent = multi
+            ? `${multi} athlete${multi === 1 ? " competes" : "s compete"} on more than one day (registered in categories on different days).`
+            : "";
+    }
+
+    function dayButtons(current, onclick) {
+        return Array.from({ length: dayCount }, (_, i) => i + 1).map(d => `
+            <button type="button" class="sd-day-pill sd-day-pill--${d} ${current === d ? "sd-day-pill--on" : ""}" onclick="${onclick(d)}">${d}</button>
+        `).join("");
+    }
+
+    function renderCategories() {
+        const el = document.getElementById("categoryList");
+        if (categories.length === 0) {
+            el.innerHTML = `<p class="text-muted" style="padding: 1rem 0;">No registrations yet — nothing to split.</p>`;
+            return;
+        }
+        const filter = document.getElementById("filter").value.trim().toLowerCase();
+        const shown = categories.filter(c => !filter || c.categoryLabel.toLowerCase().includes(filter));
+
+        const groups = [];
+        shown.forEach(c => {
+            let g = groups.find(x => x.group === c.group);
+            if (!g) groups.push(g = { group: c.group, subs: [] });
+            let s = g.subs.find(x => x.sub === c.sub);
+            if (!s) g.subs.push(s = { sub: c.sub, cats: [] });
+            s.cats.push(c);
+        });
+        const js = v => escapeHtml(JSON.stringify(v));
+
+        el.innerHTML = groups.map(g => `
+            <div class="sd-group">
+                <div class="sd-group-head">
+                    <span class="sd-group-label">${escapeHtml(g.group)}</span>
+                    <span class="sd-group-actions">all → ${dayButtons(null, d => `assignGroup(${js(g.group)}, null, ${d})`)}</span>
+                </div>
+                ${g.subs.map(s => `
+                    <div class="sd-sub-head">
+                        <span>${escapeHtml(s.sub)}</span>
+                        <span class="sd-group-actions">${dayButtons(null, d => `assignGroup(${js(g.group)}, ${js(s.sub)}, ${d})`)}</span>
+                    </div>
+                    ${s.cats.map(c => `
+                        <div class="sd-cat">
+                            <span class="sd-cat-label" title="${escapeHtml(c.categoryLabel)} — ${escapeHtml(c.categoryCode)}">${escapeHtml(c.short)}</span>
+                            <span class="sd-count">${c.entries}</span>
+                            <span class="sd-cat-days">${dayButtons(assignment[c.categoryCode], d => `assignOne(${js(c.categoryCode)}, ${d})`)}</span>
+                        </div>
+                    `).join("")}
+                `).join("")}
+            </div>
+        `).join("") || `<p class="text-muted" style="padding: 1rem 0;">No categories match "${escapeHtml(filter)}".</p>`;
+    }
+
+    // ── preview + split ────────────────────────────────────────────────
+    function requestBody(dryRun) {
+        return {
+            dryRun,
+            dayLabel: DAY_LABEL,
+            days: Array.from({ length: dayCount }, (_, i) => {
+                const v = dayDates[i];
+                const d = v ? new Date(v) : null;
+                return { dateTime: d && !isNaN(d) ? d.toISOString() : null };
+            }),
+            assignments: Object.fromEntries(categories.map(c => [c.categoryCode, assignment[c.categoryCode] || 1])),
+        };
+    }
+
+    async function postSplit(dryRun) {
+        const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/split-days`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody(dryRun)),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.detail || `Failed (${res.status})`);
+        return body;
+    }
+
+    function planHtml(days, done) {
+        return days.map(d => `
+            <div class="sd-plan-day">
+                <div class="sd-day-head">
+                    <span class="sd-day-pill sd-day-pill--${d.day} sd-day-pill--on">${DAY_LABEL} ${d.day}</span>
+                    <strong>${escapeHtml(d.title)}</strong>
+                </div>
+                <div class="sd-day-meta">${escapeHtml(fmtDate(d.dateTime))} · ${d.day === 1 ? "this tournament" : done ? "new tournament" : "new tournament (will be created)"}
+                    · ${d.categories} categories · ${d.entries} entries · ${d.athletes} athletes</div>
+                ${done && d.tournamentId ? `
+                    <div class="sd-plan-links">
+                        <a class="btn btn-ghost btn-sm" href="/dashboard/tournaments/${encodeURIComponent(d.tournamentId)}">Open tournament</a>
+                    </div>` : ""}
+            </div>
+        `).join("");
+    }
+
+    async function previewSplit() {
+        const btn = document.getElementById("previewBtn");
+        btn.disabled = true;
+        try {
+            const plan = await postSplit(true);
+            const empty = plan.days.filter(d => d.day > 1 && d.categories === 0).map(d => d.day);
+            openModal(`
+                <div class="sd-modal-header">
+                    <h3>Split into ${plan.days.length} days?</h3>
+                    <button class="sd-modal-close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="sd-modal-body">
+                    ${planHtml(plan.days, false)}
+                    ${empty.length ? `<div class="sd-warn" style="margin-top:.5rem;">${DAY_LABEL} ${empty.join(", ")} has no categories — assign at least one category to every day.</div>` : ""}
+                    <p class="text-muted" style="font-size:.85rem; margin-top:.75rem;">
+                        The new days are created first and the registrations copied into them; only then are they
+                        removed from this tournament. Brackets, matches and live streams are not copied.
+                        This can't be undone from here.
+                    </p>
+                    <div class="sd-modal-actions">
+                        <button class="btn btn-primary" id="confirmSplitBtn" ${empty.length ? "disabled" : ""} onclick="runSplit(this)">Split tournament</button>
+                        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+                    </div>
+                </div>
+            `);
+        } catch (err) {
+            showFlash(err.message || "Preview failed.", true);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function runSplit(btn) {
+        btn.disabled = true;
+        btn.textContent = "Splitting…";
+        try {
+            const result = await postSplit(false);
+            try { localStorage.removeItem(STORE_KEY); } catch (e) { /* storage off */ }
+            openModal(`
+                <div class="sd-modal-header">
+                    <h3>Split into ${result.days.length} days ✓</h3>
+                    <button class="sd-modal-close" onclick="location.reload()">&times;</button>
+                </div>
+                <div class="sd-modal-body">
+                    ${planHtml(result.days, true)}
+                    <p class="text-muted" style="font-size:.85rem; margin-top:.75rem;">
+                        Each day is now its own tournament — build its brackets from that day's Category Manager.
+                    </p>
+                    <div class="sd-modal-actions">
+                        <a class="btn btn-primary" href="/dashboard/tournaments/${encodeURIComponent(TOURNAMENT_ID)}">Back to ${escapeHtml(result.days[0].title)}</a>
+                    </div>
+                </div>
+            `);
+        } catch (err) {
+            btn.disabled = false;
+            btn.textContent = "Split tournament";
+            showFlash(err.message || "Split failed.", true);
+        }
+    }
+
+    init();
+</script>
+
+<style>
+    :root {
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --muted: #64748b;
+        --text: #0f172a;
+        --accent: #4f46e5;
+        --green: #16a34a;
+        --green-bg: #dcfce7;
+        --radius: 14px;
+        --day1: #4f46e5;
+        --day2: #0891b2;
+        --day3: #16a34a;
+        --day4: #d97706;
+        --day5: #db2777;
+        --day6: #7c3aed;
+        --day7: #475569;
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    .text-muted {
+        color: var(--muted) !important;
+    }
+
+    .container {
+        max-width: none !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 1.5rem 2rem !important;
+        box-sizing: border-box !important;
+    }
+
+    body {
+        background: #f1f5f9;
+    }
+
+    .card-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 1px 4px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .04);
+    }
+
+    .panel-eyebrow {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--muted);
+        display: block;
+        margin-bottom: .25rem;
+    }
+
+    .panel-title {
+        margin: 0;
+        font-weight: 700;
+        color: var(--text);
+        line-height: 1.2;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .5rem 1rem;
+        border-radius: 8px;
+        font-size: .875rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        text-decoration: none;
+        transition: all .15s;
+        white-space: nowrap;
+    }
+
+    .btn:disabled {
+        opacity: .55;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #4338ca;
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+        background: #f8fafc;
+        color: var(--text);
+    }
+
+    .btn-sm {
+        font-size: .8rem;
+        padding: .35rem .8rem;
+    }
+
+    .flash-banner {
+        padding: .75rem 1rem;
+        border-radius: 8px;
+        background: var(--green-bg);
+        color: var(--green);
+        font-size: .9rem;
+        margin-bottom: 1rem;
+    }
+
+    .flash-banner--error {
+        background: #fef2f2;
+        color: #b91c1c;
+    }
+
+    .sd-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .sd-topbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: .75rem 1.25rem;
+    }
+
+    .sd-topbar-title {
+        flex: 1;
+        min-width: 220px;
+    }
+
+    .sd-hint {
+        margin: -.5rem 0 0;
+        font-size: .9rem;
+        max-width: 1100px;
+    }
+
+    .sd-blockers {
+        background: #fef2f2;
+        color: #b91c1c;
+        border: 1px solid #fecaca;
+        border-radius: 10px;
+        padding: .75rem 1rem;
+        font-size: .88rem;
+        display: flex;
+        flex-direction: column;
+        gap: .3rem;
+    }
+
+    .sd-board {
+        display: grid;
+        grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+        gap: 1.25rem;
+        align-items: start;
+    }
+
+    .sd-pane {
+        padding: 1.25rem;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    .sd-pane--cats {
+        max-height: calc(100vh - 230px);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sd-pane-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: .75rem;
+        flex-wrap: wrap;
+        margin-bottom: .9rem;
+    }
+
+    .sd-pane-title {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+
+    .sd-inline {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        font-size: .82rem;
+        color: var(--muted);
+    }
+
+    .sd-inline select,
+    .sd-inline input,
+    .sd-filter {
+        padding: .4rem .55rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: .85rem;
+        background: #fff;
+        color: var(--text);
+    }
+
+    .sd-filter {
+        min-width: 220px;
+    }
+
+    .sd-day-list {
+        display: flex;
+        flex-direction: column;
+        gap: .6rem;
+    }
+
+    .sd-day {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: .65rem .75rem;
+        display: flex;
+        flex-direction: column;
+        gap: .35rem;
+    }
+
+    .sd-day--empty {
+        border-color: #fcd34d;
+        background: #fffbeb;
+    }
+
+    .sd-day-head {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+    }
+
+    .sd-day-title {
+        font-weight: 600;
+        font-size: .9rem;
+    }
+
+    .sd-day-meta {
+        font-size: .78rem;
+        color: var(--muted);
+    }
+
+    .sd-note {
+        font-size: .8rem;
+        margin-top: .75rem;
+    }
+
+    .sd-warn {
+        font-size: .78rem;
+        font-weight: 600;
+        color: #b45309;
+    }
+
+    .sd-cat-list {
+        overflow-y: auto;
+        min-height: 0;
+        flex: 1;
+    }
+
+    .sd-group {
+        margin-bottom: 1rem;
+    }
+
+    .sd-group-head,
+    .sd-sub-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: .5rem;
+    }
+
+    .sd-group-head {
+        padding: .35rem 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .sd-group-label {
+        font-size: .72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: var(--muted);
+    }
+
+    .sd-sub-head {
+        font-size: .8rem;
+        font-weight: 600;
+        color: var(--text);
+        padding: .5rem 0 .2rem .25rem;
+    }
+
+    .sd-group-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: .25rem;
+        font-size: .72rem;
+        color: var(--muted);
+    }
+
+    .sd-cat {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        align-items: center;
+        gap: .6rem;
+        padding: .35rem .5rem;
+        border-radius: 8px;
+        font-size: .86rem;
+    }
+
+    .sd-cat:hover {
+        background: #f8fafc;
+    }
+
+    .sd-cat-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sd-cat-days {
+        display: inline-flex;
+        gap: .25rem;
+    }
+
+    .sd-count {
+        font-size: .76rem;
+        color: var(--muted);
+        background: #f1f5f9;
+        border-radius: 999px;
+        padding: .05rem .5rem;
+    }
+
+    .sd-day-pill {
+        min-width: 1.9rem;
+        padding: .15rem .45rem;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--muted);
+        font-size: .74rem;
+        font-weight: 700;
+        cursor: pointer;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    span.sd-day-pill {
+        cursor: default;
+    }
+
+    .sd-day-pill--on {
+        color: #fff;
+    }
+
+    .sd-day-pill--1.sd-day-pill--on {
+        background: var(--day1);
+        border-color: var(--day1);
+    }
+
+    .sd-day-pill--2.sd-day-pill--on {
+        background: var(--day2);
+        border-color: var(--day2);
+    }
+
+    .sd-day-pill--3.sd-day-pill--on {
+        background: var(--day3);
+        border-color: var(--day3);
+    }
+
+    .sd-day-pill--4.sd-day-pill--on {
+        background: var(--day4);
+        border-color: var(--day4);
+    }
+
+    .sd-day-pill--5.sd-day-pill--on {
+        background: var(--day5);
+        border-color: var(--day5);
+    }
+
+    .sd-day-pill--6.sd-day-pill--on {
+        background: var(--day6);
+        border-color: var(--day6);
+    }
+
+    .sd-day-pill--7.sd-day-pill--on {
+        background: var(--day7);
+        border-color: var(--day7);
+    }
+
+    button.sd-day-pill:not(.sd-day-pill--on):hover {
+        border-color: var(--muted);
+        color: var(--text);
+    }
+
+    .sd-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, .45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        padding: 1rem;
+    }
+
+    .sd-modal {
+        background: #fff;
+        border-radius: 14px;
+        width: 560px;
+        max-width: 100%;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 50px rgba(15, 23, 42, .25);
+    }
+
+    .sd-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .sd-modal-header h3 {
+        margin: 0;
+        font-size: 1.05rem;
+    }
+
+    .sd-modal-close {
+        background: none;
+        border: none;
+        font-size: 1.4rem;
+        cursor: pointer;
+        color: var(--muted);
+    }
+
+    .sd-modal-body {
+        padding: 1rem 1.25rem;
+    }
+
+    .sd-modal-actions {
+        display: flex;
+        gap: .5rem;
+        justify-content: flex-end;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .sd-plan-day {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: .6rem .75rem;
+        margin-bottom: .5rem;
+        display: flex;
+        flex-direction: column;
+        gap: .3rem;
+    }
+
+    .sd-plan-links {
+        display: flex;
+        gap: .4rem;
+    }
+
+    @media (max-width: 900px) {
+        .sd-board {
+            grid-template-columns: 1fr;
+        }
+
+        .sd-pane--cats {
+            max-height: none;
+        }
+    }
+</style>
+{% endblock %}

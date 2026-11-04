@@ -2088,6 +2088,7 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
         for athlete_id in r.get("athleteIds", []):
             a = athletes.get(athlete_id, {})
             sport_data = (a.get("sports") or {}).get(sport) or {}
+            birthday = a.get("birthday")
             club["entries"].append({
                 "athleteId": athlete_id,
                 "lastName": a.get("lastNameDisplay") or (a.get("lastName") or "").title(),
@@ -2096,6 +2097,22 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
                 "categoryLabel": r.get("categoryLabel"),
                 "birthYear": _birth_year(a),
                 "rank": sport_data.get("rank"),
+                # Extra columns for the CSV registration export
+                # (category_manager.html → Generate Registration Sheet → CSV).
+                "associationId": sport_data.get("associationId") or "",
+                "birthday": birthday.date().isoformat() if hasattr(birthday, "date") else (str(birthday)[:10] if birthday else ""),
+                "athleteGender": a.get("gender") or "",
+                "country": a.get("country") or "",
+                "clubName": sport_data.get("clubName") or club["clubName"] or "",
+                "categoryCode": r.get("categoryCode") or "",
+                "entryTypeCode": r.get("entryTypeCode") or "",
+                "isPara": bool(sport_data.get("isPara")),
+                "paraCategory": sport_data.get("paraCategory") or "",
+                "teammates": [
+                    (athletes.get(o) or {}).get("displayName")
+                    or f"{(athletes.get(o) or {}).get('firstName', '')} {(athletes.get(o) or {}).get('lastName', '')}".strip()
+                    for o in r.get("athleteIds", []) if o != athlete_id
+                ],
             })
 
     for club in by_club.values():
@@ -2113,6 +2130,309 @@ def get_weighin_data(tournament_id: str, repo: TournamentPort = Depends(get_tour
         "clubs": real_clubs,
         "unassigned": unassigned,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SPLIT A TOURNAMENT INTO DAYS
+# ═══════════════════════════════════════════════════════════════════════════
+# Staff pick a day for every category (dashboard: Category Manager → Split
+# into Days, templates/dashboard/split_days.html). Day 1 stays THIS
+# tournament (same id, " Day 1" added to the title); every other day becomes
+# a new tournament — a full copy of this one (settings, category schema,
+# coaches/referees, poomsae draw settings) dated one day later per day by
+# default — and that day's registrations move into it. Afterwards each day is
+# an ordinary, separate tournament (own brackets, matches, results).
+#
+# What moves for a category assigned to day N (N > 1):
+#   tournaments/{id}/registrations/{categoryCode}_{entryId}   (every status)
+#   tournaments/{id}/division_rosters/{ageCode}.athletes.{categoryCode}
+# Recomputed for every day from its active registrations:
+#   meta/categoryCounts, meta/registeredClubs
+# Copied to every new day: tournament_categories/{id}, official_registrations,
+#   meta/poomsaeDraw (pools, assignments, exclusions, draw).
+# Not copied: playlistId / streams (a broadcast belongs to one tournament),
+#   brackets, matches, equipment, printedResults.
+#
+# Refused when brackets or matches already exist (they'd still point at the
+# old categories), or when the tournament was already split. Every tournament
+# of the split carries splitGroup {groupId, day, days, tournamentIds,
+# parentTournamentId}.
+#
+# Order of writes is "copy first, remove last": the new tournaments and the
+# copied registrations exist before anything is deleted from Day 1, so an
+# interruption can leave duplicates but never loses a registration.
+
+SPLIT_MAX_DAYS = 7
+SPLIT_BATCH = 400
+
+
+class SplitDay(BaseModel):
+    # None → the original start + (day - 1) days. Day 1 keeps the original
+    # start unless a date is given.
+    dateTime: Optional[datetime] = None
+
+
+class SplitDaysRequest(BaseModel):
+    days: List[SplitDay]                 # index 0 = Day 1 (this tournament)
+    assignments: Dict[str, int] = {}     # categoryCode -> day number; missing → Day 1
+    dryRun: bool = True
+    dayLabel: str = "Day"                # "<title> Day 2"
+
+
+def _split_title_base(title: str, label: str) -> str:
+    """'Slovak Open Day 1' → 'Slovak Open' (so the suffix is never doubled)."""
+    t = (title or "").rstrip()
+    suffix = f" {label} 1"
+    return t[: -len(suffix)] if t.endswith(suffix) else t
+
+
+def _split_snapshot(tournament_id: str) -> Dict:
+    t_ref = db.collection("tournaments").document(tournament_id)
+    t_doc = t_ref.get()
+    if not t_doc.exists:
+        raise HTTPException(status_code=404, detail="Tournament not found.")
+    data = t_doc.to_dict() or {}
+
+    regs = {d.id: (d.to_dict() or {}) for d in t_ref.collection("registrations").stream()}
+    rosters = {d.id: (d.to_dict() or {}) for d in t_ref.collection("division_rosters").stream()}
+
+    # categoryCode -> summary (active entries only count; withdrawn/moved
+    # history still travels with its category)
+    categories: Dict[str, Dict] = {}
+    for r in regs.values():
+        code = r.get("categoryCode")
+        if not code:
+            continue
+        c = categories.setdefault(code, {
+            "categoryCode": code,
+            "categoryLabel": r.get("categoryLabel") or code,
+            "entryTypeCode": r.get("entryTypeCode"),
+            "ageCode": r.get("ageCode"),
+            "entries": 0,
+            "athleteIds": set(),
+            "history": 0,
+        })
+        if r.get("status", "active") == "active":
+            c["entries"] += 1
+            c["athleteIds"].update(r.get("athleteIds") or [])
+        else:
+            c["history"] += 1
+
+    blockers: List[str] = []
+    if data.get("splitGroup"):
+        blockers.append("This tournament was already split into days.")
+    if any(True for _ in t_ref.collection("brackets").limit(1).stream()):
+        blockers.append("Brackets are already pushed for this tournament — clean them in the bracket builder first, split, then build each day's brackets.")
+    sport = (data.get("sport") or "").lower()
+    discipline = (data.get("discipline") or "").lower()
+    if sport and discipline:
+        matches = (
+            db.collection("sports").document(sport).collection("disciplines").document(discipline)
+            .collection("matches").where("tournamentId", "==", tournament_id).limit(1)
+        )
+        if any(True for _ in matches.stream()):
+            blockers.append("Matches already exist for this tournament.")
+
+    return {"ref": t_ref, "data": data, "regs": regs, "rosters": rosters,
+            "categories": categories, "blockers": blockers}
+
+
+def _iso(v) -> Optional[str]:
+    return v.isoformat() if hasattr(v, "isoformat") else (str(v) if v is not None else None)
+
+
+@router.get("/tournaments/{tournament_id}/split-days",
+            dependencies=[Depends(require_operator("tournament:create"))])
+def split_days_overview(tournament_id: str):
+    """Everything the Split into Days page needs: categories with entries,
+    the current title/start and anything that blocks a split."""
+    snap = _split_snapshot(tournament_id)
+    data = snap["data"]
+    cats = sorted(snap["categories"].values(), key=lambda c: c["categoryLabel"])
+    return {
+        "tournamentId": tournament_id,
+        "title": data.get("title"),
+        "dateTime": _iso(data.get("dateTime")),
+        "sport": data.get("sport"),
+        "discipline": data.get("discipline"),
+        "splitGroup": data.get("splitGroup"),
+        "blockers": snap["blockers"],
+        "maxDays": SPLIT_MAX_DAYS,
+        "categories": [
+            {**{k: v for k, v in c.items() if k != "athleteIds"}, "athleteIds": sorted(c["athleteIds"])}
+            for c in cats
+        ],
+    }
+
+
+def _commit_in_batches(ops: List[Tuple[str, object, Optional[dict], bool]]) -> None:
+    """ops: (kind, ref, data, merge) with kind 'set' | 'update' | 'delete'."""
+    for i in range(0, len(ops), SPLIT_BATCH):
+        batch = db.batch()
+        for kind, ref, payload, merge in ops[i:i + SPLIT_BATCH]:
+            if kind == "set":
+                batch.set(ref, payload, merge=merge)
+            elif kind == "update":
+                batch.update(ref, payload)
+            else:
+                batch.delete(ref)
+        batch.commit()
+
+
+def _counts_and_clubs(regs: List[dict]) -> Tuple[Dict[str, int], Dict[str, dict]]:
+    counts: Dict[str, int] = {}
+    clubs: Dict[str, dict] = {}
+    for r in regs:
+        if r.get("status", "active") != "active":
+            continue
+        code = r.get("categoryCode")
+        if code:
+            counts[code] = counts.get(code, 0) + 1
+        cid = r.get("clubId")
+        if cid:
+            c = clubs.setdefault(cid, {"clubName": r.get("clubName") or "", "count": 0})
+            c["count"] += 1
+            if not c["clubName"] and r.get("clubName"):
+                c["clubName"] = r.get("clubName")
+    return counts, clubs
+
+
+@router.post("/tournaments/{tournament_id}/split-days",
+             dependencies=[Depends(require_operator("tournament:create"))])
+def split_days_endpoint(tournament_id: str, payload: SplitDaysRequest):
+    n_days = len(payload.days)
+    if n_days < 2 or n_days > SPLIT_MAX_DAYS:
+        raise HTTPException(status_code=400, detail=f"Choose between 2 and {SPLIT_MAX_DAYS} days.")
+    label = (payload.dayLabel or "Day").strip() or "Day"
+
+    snap = _split_snapshot(tournament_id)
+    data, regs, rosters, categories = snap["data"], snap["regs"], snap["rosters"], snap["categories"]
+    if snap["blockers"]:
+        raise HTTPException(status_code=409, detail=" ".join(snap["blockers"]))
+
+    for code, day in payload.assignments.items():
+        if not isinstance(day, int) or day < 1 or day > n_days:
+            raise HTTPException(status_code=400, detail=f"{code}: day must be between 1 and {n_days}.")
+    day_of = {code: payload.assignments.get(code, 1) for code in categories}
+
+    # ── dates and titles ───────────────────────────────────────────────
+    start = data.get("dateTime")
+    dates: List[Optional[datetime]] = []
+    for i, d in enumerate(payload.days):
+        if d.dateTime is not None:
+            dates.append(d.dateTime)
+        elif hasattr(start, "isoformat"):
+            dates.append(start + timedelta(days=i))
+        else:
+            dates.append(None)
+    base = _split_title_base(data.get("title") or "", label)
+    titles = [f"{base} {label} {i + 1}" for i in range(n_days)]
+
+    # ── plan ───────────────────────────────────────────────────────────
+    plan_days = []
+    for i in range(n_days):
+        day = i + 1
+        cats = [c for code, c in categories.items() if day_of[code] == day]
+        athletes = set().union(*[c["athleteIds"] for c in cats]) if cats else set()
+        plan_days.append({
+            "day": day,
+            "title": titles[i],
+            "dateTime": _iso(dates[i]),
+            "categories": len(cats),
+            "entries": sum(c["entries"] for c in cats),
+            "athletes": len(athletes),
+            "categoryCodes": sorted(c["categoryCode"] for c in cats),
+        })
+    empty_days = [d["day"] for d in plan_days if d["day"] > 1 and d["categories"] == 0]
+    if not payload.dryRun and empty_days:
+        raise HTTPException(status_code=400, detail=f"Day {', '.join(map(str, empty_days))} has no categories.")
+
+    if payload.dryRun:
+        return {"dryRun": True, "days": plan_days}
+
+    # ── 1. new tournaments (Day 2+), copied from this one ──────────────
+    t_ref = snap["ref"]
+    new_refs = [db.collection("tournaments").document() for _ in range(n_days - 1)]
+    all_ids = [tournament_id] + [r.id for r in new_refs]
+    group_id = secrets.token_hex(8)
+    split_group = lambda day: {
+        "groupId": group_id, "day": day, "days": n_days,
+        "tournamentIds": all_ids, "parentTournamentId": tournament_id,
+    }
+
+    cat_doc = db.collection("tournament_categories").document(tournament_id).get()
+    officials = [(d.id, d.to_dict() or {}) for d in t_ref.collection(OFFICIALS).stream()]
+    draw_doc = t_ref.collection("meta").document("poomsaeDraw").get()
+
+    ops: List[Tuple[str, object, Optional[dict], bool]] = []
+    for i, ref in enumerate(new_refs, start=1):
+        doc = copy.deepcopy(data)
+        doc.pop("playlistId", None)
+        doc.pop("streams", None)
+        doc["title"] = titles[i]
+        if dates[i] is not None:
+            doc["dateTime"] = dates[i]
+        doc["splitGroup"] = split_group(i + 1)
+        doc["splitAt"] = firestore.SERVER_TIMESTAMP
+        ops.append(("set", ref, doc, False))
+        if cat_doc.exists:
+            ops.append(("set", db.collection("tournament_categories").document(ref.id),
+                        {**(cat_doc.to_dict() or {}), "tournamentId": ref.id, "copiedFrom": tournament_id}, False))
+        for oid, odata in officials:
+            ops.append(("set", ref.collection(OFFICIALS).document(oid), {**odata, "tournamentId": ref.id}, False))
+        if draw_doc.exists:
+            ops.append(("set", ref.collection("meta").document("poomsaeDraw"), draw_doc.to_dict() or {}, False))
+    _commit_in_batches(ops)
+
+    # ── 2. copy registrations + roster entries into their day ──────────
+    regs_by_day: Dict[int, List[dict]] = {d: [] for d in range(1, n_days + 1)}
+    copy_ops, delete_ops = [], []
+    for doc_id, r in regs.items():
+        code = r.get("categoryCode")
+        day = day_of.get(code, 1)
+        if day == 1:
+            regs_by_day[1].append(r)
+            continue
+        target = new_refs[day - 2]
+        moved = {**r, "tournamentId": target.id, "splitFrom": tournament_id}
+        regs_by_day[day].append(moved)
+        copy_ops.append(("set", target.collection("registrations").document(doc_id), moved, False))
+        delete_ops.append(("delete", t_ref.collection("registrations").document(doc_id), None, False))
+
+    for age_code, roster in rosters.items():
+        athletes = roster.get("athletes") or {}
+        per_day: Dict[int, Dict[str, dict]] = {}
+        for code, entries in athletes.items():
+            day = day_of.get(code, 1)
+            if day > 1:
+                per_day.setdefault(day, {})[code] = entries
+        for day, cat_map in per_day.items():
+            target = new_refs[day - 2]
+            copy_ops.append(("set", target.collection("division_rosters").document(age_code),
+                             {"athletes": cat_map}, True))
+            delete_ops.append(("update", t_ref.collection("division_rosters").document(age_code),
+                               {f"athletes.{code}": firestore.DELETE_FIELD for code in cat_map}, False))
+    _commit_in_batches(copy_ops)
+
+    # ── 3. counts + clubs for every day ────────────────────────────────
+    meta_ops = []
+    for day in range(1, n_days + 1):
+        ref = t_ref if day == 1 else new_refs[day - 2]
+        counts, clubs = _counts_and_clubs(regs_by_day[day])
+        meta_ops.append(("set", ref.collection("meta").document("categoryCounts"), counts, False))
+        meta_ops.append(("set", ref.collection("meta").document("registeredClubs"), clubs, False))
+    _commit_in_batches(meta_ops)
+
+    # ── 4. only now remove the moved data from Day 1, then rename it ───
+    _commit_in_batches(delete_ops)
+    day1 = {"title": titles[0], "splitGroup": split_group(1), "splitAt": firestore.SERVER_TIMESTAMP}
+    if payload.days[0].dateTime is not None:
+        day1["dateTime"] = payload.days[0].dateTime
+    t_ref.set(day1, merge=True)
+
+    for d, tid in zip(plan_days, all_ids):
+        d["tournamentId"] = tid
+    return {"dryRun": False, "groupId": group_id, "days": plan_days}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

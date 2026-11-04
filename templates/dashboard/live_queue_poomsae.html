@@ -1,0 +1,18 @@
+{% extends "dashboard/live_queue_base.html" %}
+{# Poomsae live queue — shared layout: live_queue_base.html; shared JS:
+/static/js/live-queue-common.js. Poomsae JS, one file per way a match runs:
+live-queue-poomsae-cutoff.js solo cut-off performances (PR → SF → F)
+live-queue-poomsae-duel.js side-by-side bouts (single elimination / round robin)
+live-queue-poomsae.js shared poomsae helpers + start (load last) #}
+
+{% block queue_hint %}
+Every court's full running order, live, side by side — cut-off performances and side-by-side bouts. Drag the ⠿
+handle to reorder within a court or drop onto another court's column to re-court. Click a row to open its details
+or, once scored, its result.
+{% endblock %}
+
+{% block discipline_scripts %}
+<script src="/static/js/live-queue-poomsae-cutoff.js"></script>
+<script src="/static/js/live-queue-poomsae-duel.js"></script>
+<script src="/static/js/live-queue-poomsae.js"></script>
+{% endblock %}

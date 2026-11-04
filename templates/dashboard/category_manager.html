@@ -28,7 +28,7 @@
         either — both buttons open the generated PDF in a new tab and
         immediately trigger that tab's print dialog via jsPDF's
         autoPrint(). ─────────────────────────────────────────────── #}
-        <button type="button" class="btn btn-ghost btn-sm" onclick="generateRegistrationSheet(this)">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="openRegistrationSheetChooser(this)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                 <path d="M14 2v6h6" />
@@ -60,6 +60,20 @@
                 <path d="M6 16h4l2-2 2 2h4" />
             </svg>
             Create Brackets
+        </a>
+
+        {# Split one tournament into several days: pick a day per category;
+        Day 1 stays this tournament, the others become copies with their
+        registrations moved in (templates/dashboard/split_days.html). #}
+        <a href="/dashboard/tournaments/{{ tournament.id }}/split-days" class="btn btn-ghost btn-sm">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="4" width="18" height="17" rx="2" />
+                <path d="M3 9h18" />
+                <path d="M8 2v4" />
+                <path d="M16 2v4" />
+                <path d="M12 12v6" />
+            </svg>
+            Split into Days
         </a>
 
         {# Hidden by default — revealed only via the secret Ctrl+Alt+J
@@ -114,6 +128,27 @@
     </div>
 </div>
 <div id="addAthleteBackdrop" class="cm-add-backdrop hidden" onclick="closeAddAthlete()"></div>
+
+{# Generate Registration Sheet → PDF (printable, per club) or CSV (one row
+per athlete per category, association ID first — for federation imports). #}
+<div id="sheetChooser" class="cm-modal-overlay hidden" onclick="if (event.target === this) closeSheetChooser()">
+    <div class="cm-modal">
+        <div class="cm-modal-header">
+            <h3>Registration sheet</h3>
+            <button type="button" class="cm-modal-close" onclick="closeSheetChooser()">&times;</button>
+        </div>
+        <p class="text-muted" style="font-size:.85rem; margin:0 0 1rem;">
+            <strong>PDF</strong> — printable sheet, one page per club, with a signature column.<br>
+            <strong>CSV</strong> — every athlete on its own row (association ID, name, date of birth, …), ordered by
+            club like the PDF but without club headings. Opens in Excel.
+        </p>
+        <div class="cm-modal-actions">
+            <button type="button" class="btn btn-primary" onclick="chooseRegistrationSheet('pdf')">PDF</button>
+            <button type="button" class="btn btn-primary" onclick="chooseRegistrationSheet('csv')">CSV</button>
+            <button type="button" class="btn btn-ghost" onclick="closeSheetChooser()">Cancel</button>
+        </div>
+    </div>
+</div>
 
 {# jsPDF + autoTable — loaded synchronously (no defer/async) so the
 generation functions below can rely on window.jspdf being ready by
@@ -810,6 +845,101 @@ each browser's own print-to-PDF engine. #}
         return doc;
     }
 
+    // ── Registration sheet: PDF or CSV ─────────────────────────────────
+    let sheetChooserBtn = null;
+
+    function openRegistrationSheetChooser(btn) {
+        sheetChooserBtn = btn;
+        document.getElementById("sheetChooser").classList.remove("hidden");
+    }
+
+    function closeSheetChooser() {
+        document.getElementById("sheetChooser").classList.add("hidden");
+    }
+
+    function chooseRegistrationSheet(kind) {
+        closeSheetChooser();
+        if (kind === "csv") generateRegistrationCsv(sheetChooserBtn);
+        else generateRegistrationSheet(sheetChooserBtn);
+    }
+
+    // One row per ATHLETE — someone in an individual category and a pair /
+    // team is listed once, with all their categories in the Category column.
+    // Association ID first. Same order as the PDF — clubs A→Z, athletes A→Z
+    // within a club, athletes without a club last — but no club headings:
+    // just rows under each other. Works for kyorugi and poomsae alike (the
+    // category label carries weight / belt class / para class).
+    const CSV_COLUMNS = [
+        ["Association ID", e => e.associationId],
+        ["Last Name", e => e.lastName],
+        ["First Name", e => e.firstName],
+        ["Date of Birth", e => e.birthday || (e.birthYear != null ? String(e.birthYear) : "")],
+        ["Gender", e => ({ male: "Male", female: "Female" }[String(e.athleteGender || "").toLowerCase()] || e.athleteGender || "")],
+        ["Nationality", e => e.country],
+        ["Club", e => e.clubName],
+        ["Categories", e => e.categories.join(", ")],
+        ["Belt / Rank", e => formatRank(e.rank) || ""],
+        ["Para Class", e => (e.isPara ? e.paraCategory || "para" : "")],
+    ];
+
+    // Semicolon-separated with a UTF-8 BOM: opens straight in Excel with the
+    // Slovak / most European locales, diacritics intact.
+    const CSV_SEPARATOR = ";";
+
+    function csvCell(value) {
+        const s = String(value ?? "");
+        return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    }
+
+    function buildRegistrationCsv(data) {
+        const clubs = [...data.clubs, ...(data.unassigned ? [data.unassigned] : [])];
+        const byAthlete = new Map(); // athleteId -> row, in first-seen (PDF) order
+        clubs.forEach(c => c.entries.forEach(e => {
+            const key = e.athleteId || `${e.lastName}|${e.firstName}|${e.birthday}`;
+            let row = byAthlete.get(key);
+            if (!row) byAthlete.set(key, row = { ...e, clubName: e.clubName || c.clubName || "", categories: [] });
+            if (e.categoryLabel && !row.categories.includes(e.categoryLabel)) row.categories.push(e.categoryLabel);
+        }));
+        const rows = [...byAthlete.values()];
+        const lines = [
+            CSV_COLUMNS.map(([h]) => csvCell(h)).join(CSV_SEPARATOR),
+            ...rows.map(e => CSV_COLUMNS.map(([, get]) => csvCell(get(e))).join(CSV_SEPARATOR)),
+        ];
+        return { text: "\uFEFF" + lines.join("\r\n") + "\r\n", count: rows.length };
+    }
+
+    function downloadTextFile(text, filename, mime) {
+        const blob = new Blob([text], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function generateRegistrationCsv(btn) {
+        if (btn) btn.disabled = true;
+        showFlash("Preparing registration CSV…");
+        try {
+            const data = await fetchWeighInData();
+            const { text, count } = buildRegistrationCsv(data);
+            if (count === 0) {
+                showFlash("No active registrations to export.", true);
+                return;
+            }
+            downloadTextFile(text, pdfFilename("registration").replace(/\.pdf$/, ".csv"), "text/csv;charset=utf-8");
+            showFlash(`Registration CSV downloaded — ${count} athlete${count === 1 ? "" : "s"}.`);
+        } catch (err) {
+            console.error(err);
+            showFlash(err.message || "Failed to generate CSV.", true);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
     async function generateRegistrationSheet(btn) {
         if (btn) btn.disabled = true;
         showFlash("Preparing registration sheet…");
@@ -1401,6 +1531,53 @@ each browser's own print-to-PDF engine. #}
 
     .cm-add-result:hover {
         background: #f8fafc;
+    }
+
+    /* ── Registration sheet chooser ─────────────────────────────── */
+    .cm-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, .45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        padding: 1rem;
+    }
+
+    .cm-modal {
+        background: var(--surface);
+        border-radius: var(--radius);
+        width: 440px;
+        max-width: 100%;
+        padding: 1.1rem 1.25rem;
+        box-shadow: 0 20px 50px rgba(15, 23, 42, .25);
+    }
+
+    .cm-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: .6rem;
+    }
+
+    .cm-modal-header h3 {
+        margin: 0;
+        font-size: 1.05rem;
+    }
+
+    .cm-modal-close {
+        background: none;
+        border: none;
+        font-size: 1.4rem;
+        cursor: pointer;
+        color: var(--muted);
+    }
+
+    .cm-modal-actions {
+        display: flex;
+        gap: .5rem;
+        justify-content: flex-end;
     }
 
     .flash-banner {
