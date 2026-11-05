@@ -870,7 +870,7 @@ let draggedCategoryCode = null;
 
 const CATEGORY_BLOCK_PX_PER_MATCH = 16;
 
-const CATEGORY_BLOCK_MIN_H = 72;
+const CATEGORY_BLOCK_MIN_H = 82;
 
 function firstQueuePosition(bracket) {
     let min = Infinity;
