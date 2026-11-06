@@ -532,133 +532,14 @@ async function downloadAllBracketsPDF() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// CLUB SHEETS — one PDF page per club: every fighter, their category,
-// and every fight they could structurally have, one fixed column per
-// round phase (R32, R16, QF, SF, F), "B 308" / "R 312" format.
-// Elimination-shaped: cut_off / round_robin entries get blank phases.
+// CLUB SHEETS — one PDF page per club: every entrant, their category and
+// every match number they can have (elimination "B 308" per R32…F,
+// cut-off per PR / SF / F, round robin every bout). Drawn by
+// bracket-sheets.js — the live queue prints the very same sheet.
 // ══════════════════════════════════════════════════════════════════
-const CLUB_SHEET_MARGIN = 14; // mm
-
-const ROUND_PHASE_COLUMNS = ["R32", "R16", "QF", "SF", "F"];
-
-function computeEntryFightsByPhase(bracket, entryId) {
-    const slotIndex = bracket.entrySlotIndex ? bracket.entrySlotIndex[entryId] : undefined;
-    const byPhase = {};
-    if (slotIndex == null) return byPhase;
-
-    let matchIndex = Math.floor(slotIndex / 2);
-    let corner = slotIndex % 2 === 0 ? "blue" : "red";
-
-    for (let r = 0; r < bracket.rounds.length; r++) {
-        const match = bracket.rounds[r][matchIndex];
-        if (!match) break;
-
-        if (match.status !== "walkover" && match.displayNumber != null && match.roundPhase) {
-            const cornerLetter = corner === "blue" ? "B" : "R";
-            byPhase[match.roundPhase] = `${cornerLetter} ${match.displayNumber}`;
-        }
-
-        corner = matchIndex % 2 === 0 ? "blue" : "red";
-        matchIndex = Math.floor(matchIndex / 2);
-    }
-
-    return byPhase;
-}
-
-function collectClubSheetRows() {
-    const byClub = {};
-    generatedBrackets.forEach(b => {
-        b.entries.forEach(e => {
-            const clubKey = e.clubId || "__none__";
-            const bucket = byClub[clubKey] || (byClub[clubKey] = { clubName: null, rows: [] });
-            if (!bucket.clubName && e.clubName) bucket.clubName = e.clubName;
-
-            const phases = computeEntryFightsByPhase(b, e.entryId);
-            bucket.rows.push({ name: e.name, categoryLabel: b.categoryLabel, phases });
-        });
-    });
-    return byClub;
-}
-
-async function buildClubSheetsDoc() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
-    const font = await BracketSheets.applyPdfFont(doc); // Unicode font so č/ľ/ť print correctly
-    const t = str => BracketSheets.pdfText(doc, str);
-    let isFirstPage = true;
-
-    const byClub = collectClubSheetRows();
-    const clubKeys = Object.keys(byClub).filter(k => k !== "__none__")
-        .sort((a, b) => (byClub[a].clubName || "").localeCompare(byClub[b].clubName || ""));
-    if (byClub["__none__"]) clubKeys.push("__none__");
-
-    const columnWidths = { id: 8, participant: 60, phase: (182 - 8 - 60) / ROUND_PHASE_COLUMNS.length };
-    const PARTICIPANT_COL_INDEX = 1;
-
-    clubKeys.forEach(key => {
-        const club = byClub[key];
-        if (!isFirstPage) doc.addPage();
-        isFirstPage = false;
-
-        doc.setFont(font, "bold");
-        doc.setFontSize(14);
-        doc.setTextColor(17, 17, 17);
-        doc.text(t(TOURNAMENT_TITLE), CLUB_SHEET_MARGIN, 18);
-        doc.setFontSize(13);
-        doc.text(t(club.clubName || "No Club"), CLUB_SHEET_MARGIN, 26);
-
-        const body = club.rows.map((r, i) => [
-            String(i + 1), "",
-            ...ROUND_PHASE_COLUMNS.map(phase => r.phases[phase] || ""),
-        ]);
-
-        const columnStyles = {
-            0: { cellWidth: columnWidths.id, halign: "center" },
-            1: { cellWidth: columnWidths.participant, halign: "left" },
-        };
-        ROUND_PHASE_COLUMNS.forEach((_, i) => {
-            columnStyles[i + 2] = { cellWidth: columnWidths.phase, halign: "center" };
-        });
-
-        doc.autoTable({
-            startY: 32,
-            head: [["No.", "Participant", ...ROUND_PHASE_COLUMNS]],
-            body,
-            columnStyles,
-            styles: { font, fontSize: 8, cellPadding: 1.3, lineColor: [17, 17, 17], lineWidth: 0.2, minCellHeight: 10, valign: "middle" },
-            headStyles: { fillColor: [255, 255, 255], textColor: [17, 17, 17], fontStyle: "bold", lineWidth: 0.3, halign: "center", valign: "middle" },
-            theme: "grid",
-            margin: { left: CLUB_SHEET_MARGIN, right: CLUB_SHEET_MARGIN },
-            didDrawCell: (hook) => {
-                if (hook.section !== "body" || hook.column.index !== PARTICIPANT_COL_INDEX) return;
-                const r = club.rows[hook.row.index];
-                const { x, y, width, height } = hook.cell;
-                const padX = x + 1.8;
-
-                doc.setFont(font, "bold");
-                doc.setFontSize(8);
-                doc.setTextColor(17, 17, 17);
-                doc.text(t(r.name), padX, y + height / 2 - 1.8);
-
-                doc.setFont(font, "normal");
-                doc.setFontSize(6.5);
-                doc.setTextColor(100, 100, 100);
-                doc.text(t(r.categoryLabel), padX, y + height / 2 + 1.6, { maxWidth: width - 3.6 });
-                doc.setTextColor(17, 17, 17);
-            },
-        });
-    });
-
-    return doc;
-}
-
 async function downloadClubSheetsPDF() {
     if (generatedBrackets.length === 0) {
         showFlash("Generate brackets first.", true);
-        return;
-    }
-    if (!window.jspdf || !window.jspdf.jsPDF) {
-        showFlash("PDF library failed to load — check your connection and retry.", true);
         return;
     }
 
@@ -666,12 +547,11 @@ async function downloadClubSheetsPDF() {
     if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
 
     try {
-        const doc = await buildClubSheetsDoc();
         const safeTitle = (TOURNAMENT_TITLE || "tournament").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase();
-        doc.save(`${safeTitle || "tournament"}_club_sheets.pdf`);
+        await BracketSheets.downloadClubSheets(generatedBrackets, `${safeTitle || "tournament"}_club_sheets.pdf`, sheetOptions());
     } catch (err) {
         console.error("Failed to build club sheets PDF", err);
-        showFlash("Failed to build the PDF — try again.", true);
+        showFlash(err.message || "Failed to build the PDF — try again.", true);
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = "Download Club Sheets (PDF)"; }
     }

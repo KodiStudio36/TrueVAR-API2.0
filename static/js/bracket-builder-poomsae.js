@@ -195,6 +195,18 @@ function drawnPoomsaeFor(m) {
     return clean.length ? clean : null;
 }
 
+// Drawn poomsae as {key, name} on every generated match, so the bracket
+// sheets (round labels / cut-off stage titles) and the club sheets print
+// them. Only for the sheets — the push sends plain keys through
+// disciplineMatchFields. Freestyle performs its own routine: none.
+function attachDrawnPoomsaeToMatches() {
+    generatedMatches.forEach(m => {
+        const bracket = generatedBrackets.find(b => b.categoryCode === m.categoryCode);
+        const keys = bracket && !bracket.isFreestyle ? drawnPoomsaeFor(m) : null;
+        m.poomsae = keys ? keys.map(k => ({ key: k, name: POOMSAE_NAMES[k] || k })) : null;
+    });
+}
+
 // Written to tournaments/{id}/meta/equipment on push, so the settings
 // behind a published schedule are on record.
 function disciplineEquipmentPayload() {
@@ -837,6 +849,7 @@ async function generateEverything() {
     const orderingResult = generatePoomsaeCourtOrdering(generatedBrackets);
     computeMatchNumbersPoomsae();
     rebuildMatchById();
+    attachDrawnPoomsaeToMatches();
     const lockReport = refreshHardLockReport();
 
     const systemsUsed = {};

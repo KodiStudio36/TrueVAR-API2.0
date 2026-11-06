@@ -2622,6 +2622,77 @@ class CategoryResultSummary(BaseModel):
     detail: Optional[str] = None
 
 
+CUT_OFF_PHASE_ORDER = ("F", "SF", "PR")
+NOT_PERFORMED_STATUSES = {"withdrawn", "dns", "dsq", "disqualified", "cancelled", "walkover"}
+ 
+ 
+def _is_cut_off_category(system: Optional[str], matches: List[Dict], is_poomsae: bool) -> bool:
+    if system:
+        return system == "cut_off"
+    # No bracket doc (e.g. inserted performances): solo poomsae matches only.
+    return is_poomsae and bool(matches) and all(
+        m.get("format") == "solo" or (m.get("format") != "duel" and not m.get("red"))
+        for m in matches
+    )
+ 
+ 
+def _cut_off_score(m: Dict) -> Optional[float]:
+    s = (m.get("blue") or {}).get("finalScore")
+    if isinstance(s, bool) or not isinstance(s, (int, float)):
+        return None
+    return s if m.get("status") == "completed" else None
+ 
+ 
+def _cut_off_placements(matches: List[Dict]) -> Optional[Dict[str, int]]:
+    """entryId -> placement, or None while the Final is still running."""
+    by_phase: Dict[str, List[Dict]] = {}
+    for m in matches:
+        by_phase.setdefault(m.get("roundPhase"), []).append(m)
+    final = by_phase.get("F") or []
+    if not final:
+        return None
+    if not all(
+        m.get("status") == "completed" or m.get("status") in NOT_PERFORMED_STATUSES or (m.get("blue") or {}).get("empty")
+        for m in final
+    ):
+        return None
+ 
+    placements: Dict[str, int] = {}
+    placed = set()
+    offset = 0
+    for phase in CUT_OFF_PHASE_ORDER:
+        group = [
+            m for m in by_phase.get(phase, [])
+            if (m.get("blue") or {}).get("entryId") and m["blue"]["entryId"] not in placed
+        ]
+ 
+        def _key(m):
+            score = _cut_off_score(m)
+            rank = m.get("rank")
+            return (
+                rank if rank is not None else float("inf"),
+                -(score if score is not None else -1),
+                m.get("matchNumber") or m.get("bracketMatchNumber") or 0,
+            )
+ 
+        group.sort(key=_key)
+        prev = None  # (rank, score, place) of the previous placed athlete
+        for i, m in enumerate(group):
+            entry_id = m["blue"]["entryId"]
+            placed.add(entry_id)
+            score = _cut_off_score(m)
+            if score is None:
+                prev = None
+                continue
+            rank = m.get("rank")
+            same = prev is not None and (rank == prev[0] if rank is not None else score == prev[1])
+            place = prev[2] if same else offset + i + 1
+            placements[entry_id] = place
+            prev = (rank, score, place)
+        offset += len(group)
+    return placements
+ 
+ 
 @router.post("/tournaments/{tournament_id}/results/compute",
              dependencies=[Depends(require_operator("matches:manage"))])
 def compute_tournament_results_endpoint(
@@ -2629,29 +2700,30 @@ def compute_tournament_results_endpoint(
     repo: TournamentPort = Depends(get_tournament_repo),
 ):
     """
-    Walks every category's completed single-elimination bracket and
-    derives final placements (1st, 2nd, joint-3rd, joint-5th, ...) from
-    bracketRound + winnerEntryId, then writes each entry's placement onto
-    its division_rosters entry.
-
-    A match counts as decided when its status is "done", "walkover", or
-    "completed" (TkStrike's FirebaseSyncPlugin).
-
-    Loser at bracketRound r is placed at 2 ** (totalRounds - r) + 1; the
-    final's winner is 1. A category is only processed once its final is
-    decided. Idempotent per category.
+    Derives every category's final placements and writes each entry's
+    placement onto its division_rosters entry:
+ 
+      single elimination  from bracketRound + winnerEntryId — loser at
+                          bracketRound r is placed 2 ** (totalRounds - r) + 1,
+                          the final's winner is 1. Processed once the final
+                          is decided ("done" / "walkover" / "completed").
+      cut-off (poomsae)   from the Final ranking, then the athletes who
+                          didn't go through (see _cut_off_placements).
+                          Processed once every Final performance is in.
+ 
+    Idempotent per category.
     """
     tournament = repo.getTournament(tournament_id)
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
-
+ 
     matches_ref = (
         db.collection("sports").document(tournament.sport)
         .collection("disciplines").document(tournament.discipline)
         .collection("matches")
         .where("tournamentId", "==", tournament_id)
     )
-
+ 
     by_category: Dict[str, List[Dict]] = {}
     match_docs_by_category: Dict[str, List] = {}
     for doc in matches_ref.stream():
@@ -2661,15 +2733,22 @@ def compute_tournament_results_endpoint(
             continue
         by_category.setdefault(code, []).append(m)
         match_docs_by_category.setdefault(code, []).append(doc.reference)
-
+ 
     tournament_ref = db.collection("tournaments").document(tournament_id)
     results: List[CategoryResultSummary] = []
-
+ 
+    bracket_systems: Dict[str, Optional[str]] = {}
+    for bdoc in tournament_ref.collection("brackets").stream():
+        bd = bdoc.to_dict() or {}
+        if bd.get("categoryCode"):
+            bracket_systems[bd["categoryCode"]] = bd.get("system")
+    is_poomsae = "poomsae" in (tournament.discipline or "").lower()
+ 
     DECIDED_STATUSES = ("done", "walkover", "completed")
-
+ 
     # ageCode -> {"athletes": {categoryCode: {entryId: {"placement": n}}}}
     roster_updates: Dict[str, Dict] = {}
-
+ 
     def _queue_placement(category_code: str, entry_id: str, placement: int) -> bool:
         reg_doc = tournament_ref.collection("registrations").document(f"{category_code}_{entry_id}").get()
         if not reg_doc.exists:
@@ -2680,8 +2759,28 @@ def compute_tournament_results_endpoint(
         bucket = roster_updates.setdefault(age_code, {"athletes": {}})
         bucket["athletes"].setdefault(category_code, {})[entry_id] = {"placement": placement}
         return True
-
+ 
     for category_code, matches in by_category.items():
+        # ── cut-off ──────────────────────────────────────────────────
+        if _is_cut_off_category(bracket_systems.get(category_code), matches, is_poomsae):
+            phase_count = len({m.get("roundPhase") for m in matches if m.get("roundPhase")})
+            placements = _cut_off_placements(matches)
+            if placements is None:
+                results.append(CategoryResultSummary(
+                    categoryCode=category_code, totalRounds=phase_count, placementsAssigned=0,
+                    incompleteMatches=len([m for m in matches if m.get("status") not in DECIDED_STATUSES
+                                           and m.get("status") not in NOT_PERFORMED_STATUSES]),
+                    status="skipped", detail="Cut-off Final not finished yet.",
+                ))
+                continue
+            assigned = sum(1 for entry_id, place in placements.items() if _queue_placement(category_code, entry_id, place))
+            results.append(CategoryResultSummary(
+                categoryCode=category_code, totalRounds=phase_count, placementsAssigned=assigned,
+                incompleteMatches=0, status="complete", detail="Cut-off",
+            ))
+            continue
+ 
+        # ── single elimination ───────────────────────────────────────
         rounds = [m.get("bracketRound") for m in matches if m.get("bracketRound") is not None]
         if not rounds:
             results.append(CategoryResultSummary(
@@ -2691,7 +2790,7 @@ def compute_tournament_results_endpoint(
             ))
             continue
         total_rounds = max(rounds)
-
+ 
         final_matches = [m for m in matches if m.get("bracketRound") == total_rounds]
         final_match = final_matches[0] if final_matches else None
         final_decided = bool(
@@ -2704,7 +2803,7 @@ def compute_tournament_results_endpoint(
                 detail="Final has not been decided yet.",
             ))
             continue
-
+ 
         assigned = 0
         incomplete = 0
         for m in matches:
@@ -2715,7 +2814,7 @@ def compute_tournament_results_endpoint(
             if not decided:
                 incomplete += 1
                 continue
-
+ 
             blue_id = (m.get("blue") or {}).get("entryId")
             red_id = (m.get("red") or {}).get("entryId")
             winner_id = m.get("winnerEntryId")
@@ -2723,24 +2822,24 @@ def compute_tournament_results_endpoint(
                 incomplete += 1
                 continue
             loser_id = red_id if winner_id == blue_id else blue_id
-
+ 
             if _queue_placement(category_code, loser_id, 2 ** (total_rounds - r) + 1):
                 assigned += 1
             if r == total_rounds and _queue_placement(category_code, winner_id, 1):
                 assigned += 1
-
+ 
         results.append(CategoryResultSummary(
             categoryCode=category_code, totalRounds=total_rounds, placementsAssigned=assigned,
             incompleteMatches=incomplete, status="complete" if incomplete == 0 else "partial",
         ))
-
+ 
     roster_items = list(roster_updates.items())
     for i in range(0, len(roster_items), 400):
         batch = db.batch()
         for age_code, data in roster_items[i:i + 400]:
             batch.set(tournament_ref.collection("division_rosters").document(age_code), data, merge=True)
         batch.commit()
-
+ 
     decided_categories = {r.categoryCode for r in results if r.status in ("complete", "partial")}
     flag_refs = [ref for cat, refs in match_docs_by_category.items() if cat in decided_categories for ref in refs]
     for i in range(0, len(flag_refs), 400):
@@ -2748,7 +2847,7 @@ def compute_tournament_results_endpoint(
         for ref in flag_refs[i:i + 400]:
             batch.set(ref, {"resultsProcessed": True}, merge=True)
         batch.commit()
-
+ 
     return {
         "tournamentId": tournament_id,
         "categoriesProcessed": len([r for r in results if r.status != "skipped"]),

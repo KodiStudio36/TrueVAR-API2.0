@@ -3,12 +3,13 @@
 /static/js/live-queue-common.js. Poomsae JS, one file per way a match runs:
 live-queue-poomsae-cutoff.js solo cut-off performances (PR → SF → F)
 live-queue-poomsae-duel.js side-by-side bouts (single elimination / round robin)
-live-queue-poomsae.js shared poomsae helpers + start (load last) #}
+live-queue-poomsae.js shared poomsae helpers, sheet renderer + start (load last)
+(jspdf-autotable is loaded by live_queue_base.html.) #}
 
 {% block queue_hint %}
 Every court's full running order, live, side by side — cut-off performances and side-by-side bouts. Drag the ⠿
 handle to reorder within a court or drop onto another court's column to re-court. Click a row to open its details
-or, once scored, its result.
+or, once scored, its result. Use the 📄 icon to download that category's bracket.
 {% endblock %}
 
 {% block discipline_scripts %}

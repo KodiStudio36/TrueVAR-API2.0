@@ -40,6 +40,9 @@ Blocks: queue_hint, toolbar_extra, discipline_libs, discipline_scripts.
         <button type="button" class="btn btn-ghost" onclick="openBulkEditModal()">⚙ Bulk Edit Category</button>
         <button type="button" class="btn btn-ghost" onclick="openComputeResultsModal()">🏅 Compute Results</button>
         <button type="button" class="btn btn-ghost" onclick="openBracketPdfModal()">📄 Bracket PDFs</button>
+        <button type="button" class="btn btn-ghost" onclick="downloadLiveClubSheets(this)"
+            title="One page per club: every entrant and the numbers of every match they can have">👥 Club
+            Sheets</button>
         <button type="button" class="btn btn-primary" id="print-new-results-btn" onclick="printNewResults()"
             title="Prints every category finished since the last time this button was used — and any whose result was corrected since">🖨
             Print New Results</button>
@@ -852,6 +855,7 @@ code and finally the discipline's own files (the last one starts the page).
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 {% block discipline_libs %}{% endblock %}
 <script src="/static/js/category-schema.js"></script>
 <script src="/static/js/bracket-core.js"></script>

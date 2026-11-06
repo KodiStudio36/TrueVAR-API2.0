@@ -21,9 +21,18 @@
  *   insert                    {requiresRed, roundPhases, fieldsHtml(),
  *                              read() -> extra fields, format(hasRed),
  *                              actions: [{id, label, after(newMatch)}]}
- *   resultKinds               [{kind, collect() -> items, print(items)}] —
- *                             extra "Print New Results" kinds. The shared
- *                             single-elimination bracket sheet is built in.
+ *   sheetKinds                [{kind, title, fileSuffix,
+ *                               collect(bracketDocs) -> [{code, label, …}],
+ *                               print(items), download(items, filename)}] —
+ *                             draw sheets for systems BracketSheets has no
+ *                             layout for (poomsae: round robin). Single
+ *                             elimination and cut-off sheets are built in —
+ *                             the same sheets the bracket builder prints.
+ *   resultKinds               [{kind, title, fileSuffix,
+ *                               collect() -> items, print(items),
+ *                               download(items, filename)}] — extra
+ *                             "Print New Results" kinds. Single-elimination
+ *                             and cut-off sheets are built in.
  *
  * FORMAT module (one per way a match is run):
  *   key                       "kyorugi" | "poomsae_cutoff" | "poomsae_duel"
@@ -88,6 +97,7 @@ async function startLiveQueue(discipline) {
         conflicts: () => new Map(),
         bulkFields: [],
         insert: { requiresRed: true, roundPhases: FORMAT_DEFAULTS.roundPhases, fieldsHtml: () => "", read: () => ({}), format: () => null, actions: [] },
+        sheetKinds: [],
         resultKinds: [],
         ...discipline,
     };
@@ -296,7 +306,8 @@ async function applyBulkEdit() {
 // ═══════════════════════════════════════════════════════════════════
 // COMPUTE RESULTS — the "🏅 Compute Results" button. Delegates to the
 // backend's compute_tournament_results_endpoint, which writes placements
-// onto tournaments/{id}/division_rosters. Safe to run repeatedly.
+// onto tournaments/{id}/division_rosters (single elimination AND cut-off).
+// Safe to run repeatedly.
 // ═══════════════════════════════════════════════════════════════════
 
 function openComputeResultsModal() {
@@ -307,10 +318,10 @@ function openComputeResultsModal() {
         </div>
         <div class="lq-modal-body">
             <p class="lq-field-hint" style="margin-bottom:1rem;">
-                Scans every category's bracket and derives 1st/2nd/joint-3rd/joint-5th/etc. from match
-                results, then writes them onto each athlete's roster entry so they show up on the public
-                tournament page. Categories whose final hasn't been decided yet are skipped — safe to run
-                again later as more finals finish.
+                Scans every category and derives the placements — from the bracket for elimination
+                categories, from the round ranks for cut-off categories — then writes them onto each
+                athlete's roster entry so they show up on the public tournament page and in the club
+                standings. Categories whose final isn't finished yet are skipped — safe to run again later.
             </p>
             <div id="results-compute-output"></div>
             <div class="lq-modal-actions">
@@ -340,7 +351,7 @@ async function runComputeResults() {
             const color = r.status === "complete" ? "var(--lq-green)" : r.status === "partial" ? "var(--lq-amber)" : "var(--lq-muted)";
             return `
                 <div style="display:flex; justify-content:space-between; gap:.5rem; padding:.3rem 0; border-bottom:1px solid var(--lq-border); font-size:.82rem;">
-                    <span>${escapeHtml(r.categoryCode)}</span>
+                    <span>${escapeHtml(resolveCategoryLabel(r.categoryCode))}</span>
                     <span style="color:${color}; font-weight:700; text-transform:uppercase; text-align:right;">${escapeHtml(r.status)}${r.detail ? " — " + escapeHtml(r.detail) : ""}</span>
                 </div>`;
         }).join("");
@@ -353,7 +364,8 @@ async function runComputeResults() {
             <div style="max-height:260px; overflow-y:auto;">${rows || '<p class="lq-field-hint">No categories found for this tournament yet.</p>'}</div>
             ${data.categoriesProcessed > 0 ? `
                 <div class="lq-modal-actions" style="margin-top:.75rem;">
-                    <button type="button" class="btn btn-ghost btn-sm" id="results-print-brackets-btn" onclick="printResultsBracketsPdf()">🖨 Print Bracket PDFs (with Results)</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="printResultsBracketsPdf(this)">🖨 Print Bracket PDFs (with Results)</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="downloadResultsBracketsPdf(this)">⬇ Download Bracket PDFs (with Results)</button>
                 </div>
                 <div class="lq-modal-actions" style="margin-top:.5rem;">
                     <button type="button" class="btn btn-ghost btn-sm" onclick="openClubStandingsModal()">🏆 Club Standings</button>
@@ -370,17 +382,25 @@ async function runComputeResults() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// BRACKET PDF EXPORT — the "📄 Bracket PDFs" button. Single-elimination
-// draw sheets (kyorugi and side-by-side poomsae) rebuilt from the saved
-// bracket docs: BracketCore re-runs the same seeded placement, then every
-// match is overlaid with its live doc (status, corners incl. replaced
-// athletes, court, result). Drawing / PDF / print: BracketSheets.
-// Cut-off and round robin have no draw sheet — their results print from
-// "Print New Results" instead.
+// BRACKET PDF EXPORT — the "📄 Bracket PDFs" button, the compute-results
+// shortcuts and the per-category bracket buttons on rows / modals.
+//
+//   single elimination  built in: BracketCore re-runs the same seeded
+//                       placement, then every match is overlaid with its
+//                       live doc (status, corners incl. replaced athletes,
+//                       court, result).
+//   cut-off             built in: the saved bracket doc + this category's
+//                       live match docs, round by round (PR → SF → F) in
+//                       running order. The scores the court saved fill
+//                       the sheet's Poomsae 1 / Poomsae 2 / Total / Place
+//                       columns.
+//   Both are drawn by BracketSheets — the exact sheets the bracket builder
+//   prints. Anything else: the discipline's sheetKinds (round robin).
 // ═══════════════════════════════════════════════════════════════════
 
 let bracketDocsByCategoryCode = {};
 let reconstructedBrackets = [];   // rebuilt every time — see prepareBracketPdfData()
+let sheetItems = [];              // what the 📄 Bracket PDFs modal lists — see collectSheetItems()
 
 async function loadBracketDocsForPdf() {
     bracketDocsByCategoryCode = {};
@@ -407,10 +427,51 @@ async function loadDivisionRostersForPdf() {
     return rostersByAgeCode;
 }
 
+// ── cut-off: rounds straight from the live match docs ────────────────
+const CUT_OFF_ROUND_ORDER = ["PR", "SF", "F"];
+
+function reconstructCutOffFromFirestore(bracketDoc) {
+    const matches = [];
+    matchesById.forEach(m => { if (m.categoryCode === bracketDoc.categoryCode) matches.push(m); });
+    if (matches.length === 0) return null;
+
+    const byPhase = {};
+    matches.forEach(m => { const p = m.roundPhase || "F"; (byPhase[p] = byPhase[p] || []).push(m); });
+    const phases = [
+        ...CUT_OFF_ROUND_ORDER.filter(p => byPhase[p]),
+        ...Object.keys(byPhase).filter(p => !CUT_OFF_ROUND_ORDER.includes(p)),
+    ];
+    const rounds = phases.map(p => byPhase[p].slice()
+        .sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0) || (a.displayNumber ?? 0) - (b.displayNumber ?? 0))
+        .map(m => ({ ...m, matchId: m.id })));
+
+    // Saved entries, plus anyone on a live corner the saved list doesn't
+    // have (a replaced athlete).
+    const entries = (bracketDoc.entries || []).slice().sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
+    const known = new Set(entries.map(e => e.entryId));
+    rounds.flat().forEach(m => {
+        const b = m.blue;
+        if (!b || !b.entryId || known.has(b.entryId)) return;
+        known.add(b.entryId);
+        entries.push({ entryId: b.entryId, athleteIds: b.athleteIds, name: b.name, clubId: b.clubId, clubName: b.clubName, country: b.country });
+    });
+
+    return {
+        categoryCode: bracketDoc.categoryCode,
+        categoryLabel: bracketDoc.categoryLabel || bracketDoc.categoryCode,
+        system: "cut_off",
+        entries,
+        rounds,
+        bracketSize: entries.length,
+        placements: {},
+    };
+}
+
 function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
+    if (bracketDoc.system === "cut_off") return reconstructCutOffFromFirestore(bracketDoc);
     const entries = (bracketDoc.entries || []).slice().sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
     if (entries.length < 2) return null;
-    if (bracketDoc.system && bracketDoc.system !== "single_elimination") return null; // cut-off / round robin: no draw sheet
+    if (bracketDoc.system && bracketDoc.system !== "single_elimination") return null; // round robin: sheetKinds
 
     const placementFn = BracketCore.PLACEMENT_STRATEGIES[bracketDoc.placementStrategy] || BracketCore.PLACEMENT_STRATEGIES.standard;
     const built = BracketCore.generateSingleElimination(bracketDoc.categoryCode, entries, placementFn);
@@ -447,6 +508,7 @@ function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
         m.win = live.win || null;
         m.win_score = live.win_score || null;
         m.win_type = live.win_type || null;
+        m.poomsae = live.poomsae || null; // drawn poomsae — round labels + club sheets
     }));
 
     const currentEntries = entries.map(e => {
@@ -475,9 +537,17 @@ function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
         delete placements[oldId];
     });
 
+    // Slot of every entry, also under a replacing athlete's id (club sheets).
+    const entrySlotIndex = { ...(built.entrySlotIndex || {}) };
+    Object.entries(replaced).forEach(([oldId, now]) => {
+        if (entrySlotIndex[oldId] != null && entrySlotIndex[now.entryId] == null) entrySlotIndex[now.entryId] = entrySlotIndex[oldId];
+    });
+
     return {
         categoryCode: bracketDoc.categoryCode,
         categoryLabel: bracketDoc.categoryLabel || bracketDoc.categoryCode,
+        system: "single_elimination",
+        entrySlotIndex,
         entries: currentEntries,
         rounds: built.rounds,
         bracketSize: built.bracketSize,
@@ -494,10 +564,110 @@ async function prepareBracketPdfData() {
     reconstructedBrackets = Object.values(bracketDocsByCategoryCode)
         .map(bracketDoc => reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode))
         .filter(Boolean)
-        .sort((a, b) => a.categoryLabel.localeCompare(b.categoryLabel));
+        .sort((a, b) => compareCategories(a.categoryCode, a.categoryLabel, b.categoryCode, b.categoryLabel));
 }
 
-const BRACKET_SHEET_OPTIONS = { title: TOURNAMENT_TITLE };
+// Same numbering as the bracket builder: poomsae "001", kyorugi "101".
+const MATCH_NUMBER_PAD = String(DISCIPLINE).toLowerCase().includes("poomsae") ? 3 : 0;
+// Order of every sheet list / print / PDF. Poomsae: by the category's
+// first match number (001, 002…), so the sheets come out in the order the
+// categories run — numbers interleave across courts, so this is event order.
+// A category without numbered matches goes last. Kyorugi: by label, as before.
+function firstMatchNumberOf(categoryCode) {
+    let min = Infinity;
+    matchesById.forEach(m => {
+        if (m.categoryCode === categoryCode && typeof m.displayNumber === "number" && m.displayNumber < min) min = m.displayNumber;
+    });
+    return min;
+}
+
+function compareCategories(codeA, labelA, codeB, labelB) {
+    if (MATCH_NUMBER_PAD) {
+        const a = firstMatchNumberOf(codeA), b = firstMatchNumberOf(codeB);
+        if (a !== b) return a === Infinity ? 1 : b === Infinity ? -1 : a - b;
+    }
+    return String(labelA).localeCompare(String(labelB));
+}
+
+const BRACKET_SHEET_OPTIONS = {
+    title: TOURNAMENT_TITLE,
+    formatNumber: m => (m.displayNumber == null ? "" : MATCH_NUMBER_PAD ? String(m.displayNumber).padStart(MATCH_NUMBER_PAD, "0") : String(m.displayNumber)),
+};
+
+// ── Sheets of every system (call prepareBracketPdfData() first) ─────
+// -> [{kind: "bracket", code, label, bracket} | {kind: <sheetKind>, code, label, …}]
+async function collectSheetItems() {
+    const items = reconstructedBrackets.map(b => ({ kind: "bracket", code: b.categoryCode, label: b.categoryLabel, bracket: b }));
+    const seen = new Set(items.map(i => i.code));
+    for (const sk of LQ.sheetKinds) {
+        const found = (await sk.collect(bracketDocsByCategoryCode)) || [];
+        found.forEach(i => {
+            if (seen.has(i.code)) return;
+            seen.add(i.code);
+            items.push({ ...i, kind: sk.kind });
+        });
+    }
+    items.sort((a, b) => compareCategories(a.code, a.label, b.code, b.label));
+    return items;
+}
+
+// Prints items of any kind: single-elimination brackets via BracketSheets,
+// the rest via the matching kind module (sheetKinds or resultKinds).
+async function printItems(items, kinds) {
+    const brackets = items.filter(i => i.kind === "bracket").map(i => i.bracket);
+    if (brackets.length) await BracketSheets.print(brackets, BRACKET_SHEET_OPTIONS);
+    for (const k of kinds) {
+        const mine = items.filter(i => i.kind === k.kind);
+        if (mine.length) await k.print(mine);
+    }
+}
+
+// One PDF per kind: "<base>.pdf" when there's only one, else
+// "<base>_<suffix>.pdf" each.
+async function downloadItems(items, kinds, baseName) {
+    const groups = [];
+    const brackets = items.filter(i => i.kind === "bracket").map(i => i.bracket);
+    if (brackets.length) groups.push({ suffix: "brackets", run: (f) => BracketSheets.downloadPdf(brackets, f, BRACKET_SHEET_OPTIONS) });
+    for (const k of kinds) {
+        const mine = items.filter(i => i.kind === k.kind);
+        if (!mine.length) continue;
+        if (!k.download) throw new Error(`${k.title || k.kind} can't be downloaded as a PDF.`);
+        groups.push({ suffix: k.fileSuffix || k.kind, run: (f) => k.download(mine, f) });
+    }
+    if (!groups.length) throw new Error("Nothing to download.");
+    for (const g of groups) await g.run(groups.length === 1 ? `${baseName}.pdf` : `${baseName}_${g.suffix}.pdf`);
+}
+
+function safeFilePart(str, fallback) {
+    return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || fallback;
+}
+
+function tournamentFileBase() {
+    return safeFilePart(TOURNAMENT_TITLE, "tournament");
+}
+
+// Disables the button while fn runs, alerts on failure, restores it.
+async function runWithButton(btn, busyLabel, fn) {
+    const original = btn ? btn.innerHTML : null;
+    if (btn) { btn.disabled = true; btn.textContent = busyLabel; }
+    try {
+        await fn();
+        return true;
+    } catch (err) {
+        console.error(err);
+        alert(err.message || "Failed — try again.");
+        return false;
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = original; }
+    }
+}
+
+function sheetKindTitle(item) {
+    if (item.kind === "bracket") return item.bracket.system === "cut_off" ? "Cut-off" : "Elimination";
+    const k = LQ.sheetKinds.find(s => s.kind === item.kind);
+    return (k && k.title) || item.kind;
+}
 
 // ── Printing through a hidden iframe ─────────────────────────────────
 // Every "generate something then print it" on this page goes through
@@ -577,10 +747,10 @@ async function openBracketPdfModal() {
         </div>
         <div class="lq-modal-body">
             <p class="lq-field-hint" style="margin-bottom:1rem;">
-                Single-elimination draw sheets, rebuilt live from what's currently saved — seeding plus every
-                match's current status, corners, court and (once decided) its result. The Classification box
-                is filled in once 🏅 Compute Results has run. Cut-off and round-robin categories have no draw
-                sheet — their results print from 🖨 Print New Results.
+                Every category's sheet — the same sheets the bracket builder prints — rebuilt live from
+                what's currently saved. Elimination: every match's corners and result; the Classification
+                box is filled in once 🏅 Compute Results has run. Cut-off: each round's running order with
+                every saved score and place written in. Round robin: every bout and the standings.
             </p>
             <div id="bracket-pdf-list"><p class="lq-field-hint">Loading brackets…</p></div>
             <div class="lq-modal-actions">
@@ -591,92 +761,149 @@ async function openBracketPdfModal() {
         </div>
     `);
 
-    await prepareBracketPdfData();
-
-    const listEl = document.getElementById("bracket-pdf-list");
-    if (!listEl) return; // modal was closed while loading
-    const printAllBtn = document.getElementById("bracket-pdf-print-all-btn");
-
-    if (reconstructedBrackets.length === 0) {
-        listEl.innerHTML = `<p class="lq-field-hint">No single-elimination brackets for this tournament.</p>`;
+    try {
+        await prepareBracketPdfData();
+        sheetItems = await collectSheetItems();
+    } catch (err) {
+        console.error("Failed to build sheets", err);
+        sheetItems = [];
+        const el = document.getElementById("bracket-pdf-list");
+        if (el) el.innerHTML = `<div class="lq-alert-error">Couldn't build the sheets: ${escapeHtml(err.message)}</div>`;
         return;
     }
 
-    printAllBtn.disabled = false;
+    const listEl = document.getElementById("bracket-pdf-list");
+    if (!listEl) return; // modal was closed while loading
+
+    if (sheetItems.length === 0) {
+        listEl.innerHTML = `<p class="lq-field-hint">No categories with pushed brackets for this tournament yet.</p>`;
+        return;
+    }
+
+    document.getElementById("bracket-pdf-print-all-btn").disabled = false;
     document.getElementById("bracket-pdf-download-btn").disabled = false;
-    listEl.innerHTML = reconstructedBrackets.map(b => {
-        const missing = b.rounds.some(r => r.some(m => m.notInDatabase));
+    listEl.innerHTML = sheetItems.map((item, i) => {
+        const missing = item.kind === "bracket" && item.bracket.rounds.some(r => r.some(m => m.notInDatabase));
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; gap:.5rem; padding:.4rem 0; border-bottom:1px solid var(--lq-border); font-size:.85rem;">
-                <span>${escapeHtml(b.categoryLabel)}${missing ? ` <span style="color:var(--lq-amber);">· some matches missing from DB</span>` : ""}</span>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="printSingleBracketPdf('${escapeAttr(b.categoryCode)}', this)">🖨 Print</button>
+                <span>${escapeHtml(item.label)}
+                    <span style="color:var(--lq-muted); font-size:.75rem;"> · ${escapeHtml(sheetKindTitle(item))}</span>
+                    ${missing ? ` <span style="color:var(--lq-amber);">· some matches missing from DB</span>` : ""}</span>
+                <span style="display:flex; gap:.35rem; flex-shrink:0;">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="printSheetItemAt(${i}, this)">🖨 Print</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="downloadSheetItemAt(${i}, this)">⬇ PDF</button>
+                </span>
             </div>
         `;
     }).join("");
 }
 
-async function printSingleBracketPdf(categoryCode, btnEl) {
-    const bracket = reconstructedBrackets.find(b => b.categoryCode === categoryCode);
-    if (!bracket) return;
-
-    const originalText = btnEl ? btnEl.textContent : null;
-    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Printing…"; }
-
-    try {
-        await BracketSheets.print([bracket], BRACKET_SHEET_OPTIONS);
-    } catch (err) {
-        console.error("Failed to print bracket sheet", err);
-        alert(err.message || "Failed to print — try again.");
-    } finally {
-        if (btnEl) { btnEl.disabled = false; btnEl.textContent = originalText; }
-    }
+function printSheetItemAt(index, btnEl) {
+    const item = sheetItems[index];
+    if (!item) return;
+    return runWithButton(btnEl, "Printing…", () => printItems([item], LQ.sheetKinds));
 }
 
-async function buildAndPrintAllBracketsPdf() {
-    if (reconstructedBrackets.length === 0) throw new Error("No brackets to print.");
-    await BracketSheets.print(reconstructedBrackets, BRACKET_SHEET_OPTIONS);
+function downloadSheetItemAt(index, btnEl) {
+    const item = sheetItems[index];
+    if (!item) return;
+    return runWithButton(btnEl, "Building…", () =>
+        downloadItems([item], LQ.sheetKinds, `${tournamentFileBase()}_${safeFilePart(item.label, item.code)}`));
 }
 
-async function downloadAllBracketsPDF() {
-    const btn = document.getElementById("bracket-pdf-download-btn");
-    if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
-    try {
-        const safeTitle = (TOURNAMENT_TITLE || "brackets").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "brackets";
-        await BracketSheets.downloadPdf(reconstructedBrackets, `${safeTitle}_brackets.pdf`, BRACKET_SHEET_OPTIONS);
-    } catch (err) {
-        console.error("Failed to build brackets PDF", err);
-        alert(err.message || "Failed to build the PDF — try again.");
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = "⬇ Download PDF"; }
-    }
+function printAllBracketsPDF() {
+    return runWithButton(document.getElementById("bracket-pdf-print-all-btn"), "Printing…", () => {
+        if (sheetItems.length === 0) throw new Error("No sheets to print.");
+        return printItems(sheetItems, LQ.sheetKinds);
+    });
 }
 
-async function printAllBracketsPDF() {
-    const btn = document.getElementById("bracket-pdf-print-all-btn");
-    if (btn) { btn.disabled = true; btn.textContent = "Printing…"; }
-    try {
-        await buildAndPrintAllBracketsPdf();
-    } catch (err) {
-        console.error("Failed to print brackets PDF", err);
-        alert(err.message || "Failed to print — try again.");
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = "🖨 Print All"; }
-    }
+function downloadAllBracketsPDF() {
+    return runWithButton(document.getElementById("bracket-pdf-download-btn"), "Building…", () =>
+        downloadItems(sheetItems, LQ.sheetKinds, `${tournamentFileBase()}_brackets`));
 }
 
-// Shortcut from the 🏅 Compute Results modal.
-async function printResultsBracketsPdf() {
-    const btn = document.getElementById("results-print-brackets-btn");
-    if (btn) { btn.disabled = true; btn.textContent = "Printing…"; }
-    try {
+// Shortcuts from the 🏅 Compute Results modal.
+function printResultsBracketsPdf(btnEl) {
+    return runWithButton(btnEl, "Printing…", async () => {
         await prepareBracketPdfData();
-        await buildAndPrintAllBracketsPdf();
-    } catch (err) {
-        console.error("Failed to print brackets PDF from results modal", err);
-        alert(err.message || "Failed to print — try again.");
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = "🖨 Print Bracket PDFs (with Results)"; }
-    }
+        const items = await collectSheetItems();
+        if (items.length === 0) throw new Error("No sheets to print.");
+        await printItems(items, LQ.sheetKinds);
+    });
+}
+
+function downloadResultsBracketsPdf(btnEl) {
+    return runWithButton(btnEl, "Building…", async () => {
+        await prepareBracketPdfData();
+        const items = await collectSheetItems();
+        await downloadItems(items, LQ.sheetKinds, `${tournamentFileBase()}_brackets`);
+    });
+}
+
+// ── One category's sheet — row buttons and match modals ──────────────
+async function sheetItemForCategory(categoryCode) {
+    await prepareBracketPdfData();
+    const item = (await collectSheetItems()).find(i => i.code === categoryCode);
+    if (!item) throw new Error(`No bracket for ${resolveCategoryLabel(categoryCode)} yet — push its brackets first.`);
+    return item;
+}
+
+function printCategorySheet(categoryCode, btnEl, busyLabel) {
+    return runWithButton(btnEl, busyLabel || "…", async () =>
+        printItems([await sheetItemForCategory(categoryCode)], LQ.sheetKinds));
+}
+
+function downloadCategorySheet(categoryCode, btnEl, busyLabel) {
+    return runWithButton(btnEl, busyLabel || "…", async () => {
+        const item = await sheetItemForCategory(categoryCode);
+        await downloadItems([item], LQ.sheetKinds, `${tournamentFileBase()}_${safeFilePart(item.label, categoryCode)}`);
+    });
+}
+
+function categorySheetButtonsHtml(categoryCode) {
+    const code = escapeAttr(categoryCode || "");
+    return `
+        <button class="btn btn-ghost" onclick="printCategorySheet('${code}', this, 'Printing…')">🖨 Bracket</button>
+        <button class="btn btn-ghost" onclick="downloadCategorySheet('${code}', this, 'Building…')">⬇ Bracket PDF</button>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CLUB SHEETS — the "👥 Club Sheets" button: the bracket builder's own
+// club sheet (BracketSheets.downloadClubSheets), from what's saved now —
+// one page per club, every entrant with the match numbers of every match
+// they can have: elimination "B 308" per R32 … F, cut-off per
+// Preliminary / Semi-Final / Final (filled in once they've qualified into
+// a round), round robin every bout.
+// ═══════════════════════════════════════════════════════════════════
+
+// Round robin has no draw sheet, so it isn't in reconstructedBrackets —
+// built here for the club sheet only.
+function roundRobinBracketsForClubSheets() {
+    return Object.values(bracketDocsByCategoryCode)
+        .filter(doc => doc.system === "round_robin")
+        .map(doc => {
+            const matches = [];
+            matchesById.forEach(m => { if (m.categoryCode === doc.categoryCode) matches.push(m); });
+            matches.sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
+            const entries = (doc.entries || []).slice();
+            const known = new Set(entries.map(e => e.entryId));
+            matches.forEach(m => ["blue", "red"].forEach(side => {
+                const c = m[side];
+                if (c && c.entryId && !known.has(c.entryId)) { known.add(c.entryId); entries.push({ ...c }); }
+            }));
+            return { categoryCode: doc.categoryCode, categoryLabel: doc.categoryLabel || doc.categoryCode, system: "round_robin", entries, rounds: [matches] };
+        });
+}
+
+function downloadLiveClubSheets(btnEl) {
+    return runWithButton(btnEl, "Building…", async () => {
+        await prepareBracketPdfData();
+        const brackets = [...reconstructedBrackets, ...roundRobinBracketsForClubSheets()]
+            .sort((a, b) => compareCategories(a.categoryCode, a.categoryLabel, b.categoryCode, b.categoryLabel));
+        if (brackets.length === 0) throw new Error("No pushed brackets for this tournament yet.");
+        await BracketSheets.downloadClubSheets(brackets, `${tournamentFileBase()}_club_sheets.pdf`, BRACKET_SHEET_OPTIONS);
+    });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -686,8 +913,9 @@ async function printResultsBracketsPdf() {
 //
 //   single elimination  built in here: the bracket sheet with results +
 //                       Classification, once the Final is decided
-//   anything else       the discipline's resultKinds (poomsae: cut-off
-//                       results table, round-robin standings)
+//   cut-off             built in here: the cut-off sheet with every score
+//                       and place written in, once the Final is over
+//   anything else       the discipline's resultKinds (round-robin standings)
 //
 // MEMORY: tournaments/{id}/meta/printedResults →
 //   { categories: { categoryCode: { fingerprint, printedAt, label } } }
@@ -735,8 +963,7 @@ function fingerprintOf(value) {
     return (h >>> 0).toString(36);
 }
 
-// Plain printable results page (title, category, bordered table) — used
-// by the discipline result kinds so every results printout looks alike.
+// Plain printable results page (title, category, bordered table).
 function resultsTablePageHtml(label, headers, rowsHtml, note) {
     const th = (h) => `<th style="border:1px solid #111; padding:5px 7px; font-weight:700; text-align:${h.left ? "left" : "center"};">${escapeHtml(h.label)}</th>`;
     return `
@@ -758,6 +985,10 @@ function resultCellHtml(content, extra) {
 
 // ── single elimination ───────────────────────────────────────────────
 function isBracketFinished(bracket) {
+    if (bracket.system === "cut_off") {
+        const final = bracket.rounds[bracket.rounds.length - 1] || [];
+        return final.length > 0 && final.every(m => m.status === "completed" || NOT_PERFORMED.has(m.status) || (m.blue && m.blue.empty));
+    }
     const lastRound = bracket.rounds[bracket.rounds.length - 1] || [];
     const final = lastRound[0];
     if (!final) return false;
@@ -771,6 +1002,7 @@ function bracketFingerprint(bracket) {
         rounds: bracket.rounds.map(r => r.map(m => [
             m.matchId, m.status, m.winnerEntryId || null, m.win || null, m.win_score || null, m.win_type || null,
             m.blue && m.blue.name || null, m.red && m.red.name || null,
+            m.blue && m.blue.finalScore != null ? m.blue.finalScore : null, m.rank ?? null, m.qualified ?? null,
         ])),
     });
 }
@@ -794,22 +1026,17 @@ async function collectFinishedResults() {
         const items = await rk.collect(bracketDocsByCategoryCode);
         (items || []).forEach(i => finished.push({ ...i, kind: rk.kind }));
     }
-    finished.sort((a, b) => a.label.localeCompare(b.label));
+    finished.sort((a, b) => compareCategories(a.code, a.label, b.code, b.label));
     return { finished, computeNote };
 }
 
-async function printResultItems(items) {
-    const brackets = items.filter(i => i.kind === "bracket").map(i => i.bracket);
-    if (brackets.length) await BracketSheets.print(brackets, BRACKET_SHEET_OPTIONS);
-    for (const rk of LQ.resultKinds) {
-        const mine = items.filter(i => i.kind === rk.kind);
-        if (mine.length) await rk.print(mine);
-    }
+function printResultItems(items) {
+    return printItems(items, LQ.resultKinds);
 }
 
 async function printNewResults() {
     const btn = document.getElementById("print-new-results-btn");
-    const label = btn ? btn.textContent : "";
+    const label = btn ? btn.innerHTML : "";
     if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
     try {
         const [{ finished, computeNote }, printed] = await Promise.all([collectFinishedResults(), loadPrintedResults()]);
@@ -830,26 +1057,29 @@ async function printNewResults() {
         console.error("Print new results failed", err);
         alert(err.message || "Failed to print — try again.");
     } finally {
-        if (btn) { btn.disabled = false; btn.textContent = label; }
+        if (btn) { btn.disabled = false; btn.innerHTML = label; }
     }
 }
 
 // "Print everything again" — for a lost or jammed printout.
 async function reprintAllResults(btnEl) {
-    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Printing…"; }
-    try {
+    const ok = await runWithButton(btnEl, "Printing…", async () => {
         const { finished } = await collectFinishedResults();
-        if (finished.length === 0) { alert("No finished categories yet."); return; }
+        if (finished.length === 0) throw new Error("No finished categories yet.");
         await printResultItems(finished);
         const now = new Date().toISOString();
         await savePrintedResults(Object.fromEntries(finished.map(i => [i.code, { fingerprint: i.fingerprint, printedAt: now, label: i.label }])));
-        closeModal();
-    } catch (err) {
-        console.error("Reprint failed", err);
-        alert(err.message || "Failed to print — try again.");
-    } finally {
-        if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Print everything again"; }
-    }
+    });
+    if (ok) closeModal();
+}
+
+// Every finished category's results as PDF files (doesn't mark anything printed).
+function downloadAllResults(btnEl) {
+    return runWithButton(btnEl, "Building…", async () => {
+        const { finished } = await collectFinishedResults();
+        if (finished.length === 0) throw new Error("No finished categories yet.");
+        await downloadItems(finished, LQ.resultKinds, `${tournamentFileBase()}_results`);
+    });
 }
 
 function showNewResultsSummary({ printed, changedCodes, finished, printedBefore, computeNote, storage }) {
@@ -872,6 +1102,7 @@ function showNewResultsSummary({ printed, changedCodes, finished, printedBefore,
             ${storage === "local" ? `<div class="lq-alert-error" style="margin-bottom:.5rem;">Couldn't save to Firestore — only THIS browser remembers what was printed.</div>` : ""}
             <div class="lq-modal-actions">
                 <button class="btn btn-ghost" onclick="reprintAllResults(this)">Print everything again</button>
+                <button class="btn btn-ghost" onclick="downloadAllResults(this)">⬇ Download all results</button>
                 <button class="btn btn-primary" onclick="closeModal()">Close</button>
             </div>
         </div>

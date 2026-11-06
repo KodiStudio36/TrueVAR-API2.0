@@ -1,7 +1,7 @@
 /* live-queue-poomsae-cutoff.js — POOMSAE CUT-OFF (solo performances).
  * Loaded by templates/dashboard/live_queue_poomsae.html after
  * live-queue-common.js and before live-queue-poomsae.js, which uses
- * PoomsaeCutOff (the format module) and CutOffResults (the results kind).
+ * PoomsaeCutOff (the format module).
  *
  * A cut-off category is a list of solo performances per round
  * (PR → SF → F). Firebase Sync writes the score (blue.finalScore +
@@ -9,17 +9,28 @@
  * (Cloud Function) ranks the round once its last performance is in,
  * writes `rank`, `qualified` and `tieAtCutLine`, and fills the next
  * round's placeholder slots (blue.pendingAdvancement) in performance order.
+ *
+ * Its bracket sheet is the bracket builder's own cut-off sheet
+ * (BracketSheets), rebuilt in live-queue-common.js with every saved score
+ * and place written into its columns — printed and downloaded from
+ * 📄 Bracket PDFs, the 📄 row button and Print New Results. Placements go
+ * onto the rosters through 🏅 Compute Results, like side by side.
+ *
  * Shared poomsae helpers (poomsaeScoreText, poomsaePerformanceTableHtml,
- * poomsaeDrawnHtml, poomsaeRoundSecondsField…) live in live-queue-poomsae.js. */
+ * poomsaeDrawnHtml, poomsaeRoundSecondsField…) live in live-queue-poomsae.js
+ * — only called at run time, so load order is fine. */
 "use strict";
 
-const CUT_OFF_PHASES = ["F", "SF", "PR"]; // results print order: Final first
 const CUT_OFF_PHASE_NAMES = { F: "Final", SF: "Semi-Final", PR: "Preliminary" };
 
 // Score of one finished performance, or null.
 function cutOffScore(m) {
     const s = m.blue && m.blue.finalScore;
     return typeof s === "number" && m.status === "completed" ? s : null;
+}
+
+function cutOffMatchesOf(categoryCode) {
+    return [...matchesById.values()].filter(m => m.categoryCode === categoryCode && poomsaeFormatOf(m) === PoomsaeCutOff);
 }
 
 // ── Row ──────────────────────────────────────────────────────────────
@@ -87,6 +98,7 @@ function openCutOffResultModal(matchId) {
 
             <div class="lq-modal-actions">
                 ${notPerformed ? `<button class="btn btn-primary" id="cutoff-reset-btn">Set back to Ready</button>` : ""}
+                ${categorySheetButtonsHtml(m.categoryCode)}
                 <button class="btn btn-ghost" onclick="closeModal()">Close</button>
             </div>
         </div>
@@ -122,98 +134,11 @@ const PoomsaeCutOff = {
     ],
     winnerStatuses: [],
     rowExtraHtml: cutOffRowExtraHtml,
+    rowButtons: () => [POOMSAE_SHEET_ROW_BUTTON],
+    onRowButton: (kind, m, btn) => poomsaeOnRowButton(kind, m, btn),
     detailFieldsHtml: (m) => poomsaeRoundSecondsField(m),
     detailUpdates: () => poomsaeRoundSecondsUpdate(),
     detailReadonlyHtml: (m) => poomsaeDrawnHtml(m),
+    detailActionsHtml: (m) => categorySheetButtonsHtml(m.categoryCode),
     openResult: openCutOffResultModal,
-};
-
-// ═══════════════════════════════════════════════════════════════════
-// RESULTS — one "Print New Results" item per cut-off category, ready once
-// every Final performance is in: Final ranking first, then the
-// Semi-Final and Preliminary athletes who didn't go through, each with
-// their score per round. Equal rank = equal place.
-// ═══════════════════════════════════════════════════════════════════
-
-function buildCutOffResult(categoryCode) {
-    const matches = [...matchesById.values()].filter(m => m.categoryCode === categoryCode && poomsaeFormatOf(m) === PoomsaeCutOff);
-    const byPhase = {};
-    matches.forEach(m => { (byPhase[m.roundPhase] = byPhase[m.roundPhase] || []).push(m); });
-    const final = byPhase.F || [];
-    if (final.length === 0) return null;
-    const finalOver = final.every(m => m.status === "completed" || NOT_PERFORMED.has(m.status) || (m.blue && m.blue.empty));
-    if (!finalOver) return null;
-
-    // entryId -> { name, club, country, scores: {phase: score} }
-    const athletes = {};
-    matches.forEach(m => {
-        const b = m.blue || {};
-        if (!b.entryId) return;
-        const a = athletes[b.entryId] || (athletes[b.entryId] = { entryId: b.entryId, name: b.name, club: b.clubName || "", country: b.country || "", scores: {} });
-        a.name = b.name || a.name;
-        a.scores[m.roundPhase] = cutOffScore(m);
-    });
-
-    const rows = [];
-    const placed = new Set();
-    let offset = 0;
-    CUT_OFF_PHASES.forEach(phase => {
-        const group = (byPhase[phase] || [])
-            .filter(m => m.blue && m.blue.entryId && !placed.has(m.blue.entryId))
-            .map(m => ({ m, score: cutOffScore(m) }))
-            .sort((x, y) => (x.m.rank ?? Infinity) - (y.m.rank ?? Infinity)
-                || (y.score ?? -1) - (x.score ?? -1)
-                || (x.m.matchNumber ?? 0) - (y.m.matchNumber ?? 0));
-        group.forEach((g, i) => {
-            const prev = group[i - 1];
-            const same = prev && prev.score != null && g.score != null
-                && (g.m.rank != null ? g.m.rank === prev.m.rank : g.score === prev.score);
-            const place = g.score == null ? null : (same ? rows[rows.length - 1].place : offset + i + 1);
-            rows.push({ ...athletes[g.m.blue.entryId], place, phase });
-            placed.add(g.m.blue.entryId);
-        });
-        offset += group.length;
-    });
-    const phases = CUT_OFF_PHASES.filter(p => byPhase[p] && byPhase[p].length);
-    return { categoryCode, rows, phases };
-}
-
-function cutOffResultHtml(result, label) {
-    const fmt = v => (typeof v === "number" ? poomsaeScoreText(v) : "—");
-    const body = result.rows.map(r => `<tr>
-            ${resultCellHtml(r.place == null ? "—" : escapeHtml(String(r.place)))}
-            ${resultCellHtml(`<strong>${escapeHtml(r.name || "—")}</strong>`, "text-align:left;")}
-            ${resultCellHtml(escapeHtml(r.club || ""), "text-align:left;")}
-            ${resultCellHtml(escapeHtml(r.country || ""))}
-            ${result.phases.map(p => resultCellHtml(fmt(r.scores[p]), p === r.phase ? "text-align:center; font-weight:700;" : "text-align:center; color:#555;")).join("")}
-        </tr>`).join("");
-    const headers = [
-        { label: "Place" }, { label: "Athlete", left: true }, { label: "Club", left: true }, { label: "NOC" },
-        ...result.phases.map(p => ({ label: CUT_OFF_PHASE_NAMES[p] || p })),
-    ];
-    return resultsTablePageHtml(label, headers, body);
-}
-
-// Cut-off categories: from the bracket docs (system "cut_off"), plus any
-// category whose matches are solo performances without a bracket doc.
-function cutOffCategoryCodes(bracketDocs) {
-    const codes = new Set(Object.values(bracketDocs).filter(d => d.system === "cut_off").map(d => d.categoryCode));
-    matchesById.forEach(m => {
-        if (m.categoryCode && !bracketDocs[m.categoryCode] && poomsaeFormatOf(m) === PoomsaeCutOff) codes.add(m.categoryCode);
-    });
-    return [...codes];
-}
-
-const CutOffResults = {
-    kind: "cutoff",
-    collect: (bracketDocs) => cutOffCategoryCodes(bracketDocs).map(code => {
-        const result = buildCutOffResult(code);
-        if (!result) return null;
-        const doc = bracketDocs[code];
-        return {
-            code, label: (doc && doc.categoryLabel) || resolveCategoryLabel(code),
-            result, fingerprint: fingerprintOf(result.rows),
-        };
-    }).filter(Boolean),
-    print: (items) => printHtmlInFrame(items.map(i => cutOffResultHtml(i.result, i.label)).join("")),
 };

@@ -23,7 +23,8 @@
  * still builds with Helvetica and non-WinAnsi letters are transliterated
  * (č → c) instead of printing garbage.
  *
- * DEPENDS ON: window.jspdf (jsPDF 2.x) for PDF export only.
+ * DEPENDS ON: window.jspdf (jsPDF 2.x) for PDF export only; club sheets
+ *             also need the jspdf-autotable plugin.
  *             bracket-core.js is NOT required at runtime.
  *
  * BRACKET SHAPE the renderers accept:
@@ -35,6 +36,11 @@
  *   }
  *   match: { matchId, status, blue, red, winnerCorner?, displayNumber,
  *            roundPhase, win?, win_score?, win_type? }
+ *   drawn poomsae (optional): match.poomsae [{key, name}] — printed in the
+ *     round labels (elimination) / stage titles (cut-off) and club sheets.
+ *   cut-off results (optional, from the live match doc): blue.points[]
+ *     (one per poomsae: {points}), blue.finalScore, rank, qualified —
+ *     printed in the Poomsae 1 / Poomsae 2 / Total score / Place columns.
  *
  * ASSOCIATION ID: when an entry carries associationIds (one per member),
  * the last 4 characters of each are printed small and light on top of the
@@ -380,6 +386,19 @@
         return assocTag((e && (e.associationIds || e.associationId)) || p.associationIds || p.associationId);
     }
 
+    // Drawn poomsae on a match (Poomsae Draw page → match.poomsae, as
+    // [{key, name}] or plain keys) → "Koryo + Taebaek"; "" when none.
+    function poomsaeNames(m) {
+        const list = m && Array.isArray(m.poomsae) ? m.poomsae : [];
+        return list.map(p => (p && typeof p === "object" ? (p.name || p.key) : p) || "").filter(Boolean).join(" + ");
+    }
+
+    // Drawn poomsae of a round: the first real match that carries them.
+    function roundPoomsaeNames(round) {
+        const m = (round || []).find(x => x && x.status !== "walkover" && poomsaeNames(x));
+        return m ? poomsaeNames(m) : "";
+    }
+
     function fitFontSize(s, str, start, min, maxWidth, bold) {
         let size = start;
         while (size > min && s.measure(str, size, bold) > maxWidth) size -= 0.5;
@@ -469,7 +488,8 @@
         if (bracketSize <= 2) {
             const fm = rounds[0][0];
             const cy = HEADER_H + (H - HEADER_H - FOOTER_H) / 2;
-            s.text(centerX, 82, "Final", { anchor: "middle", bold: true, size: 9 });
+            const finalLabel = roundPoomsaeNames(rounds[0]) ? `Final: ${roundPoomsaeNames(rounds[0])}` : "Final";
+            s.text(centerX, 82, finalLabel, { anchor: "middle", bold: true, size: fitFontSize(s, finalLabel, 9, 6, 2 * (centerX - MARGIN_X - 40), true) });
             const bx = nameBlock(MARGIN_X, cy, 1, fm.blue, 11, 10, centerX - MARGIN_X - 40);
             const rx = nameBlock(W - MARGIN_X, cy, -1, fm.red, 11, 10, centerX - MARGIN_X - 40);
             s.line(bx, cy, centerX, cy);
@@ -540,12 +560,18 @@
         badge(centerX, yFinal, rounds[numRounds - 1][0]);
 
         // Round labels
+        // (poomsae: "Semifinals: Koryo" — the drawn poomsae of that round,
+        // shrunk to fit its column)
         for (let r = 0; r < numRounds; r++) {
-            const text = BracketLabels.round(bracketSize / Math.pow(2, r));
-            if (r === numRounds - 1) s.text(centerX, 82, text, { anchor: "middle", bold: true, size: 9 });
-            else {
-                s.text(xL(r), 82, text, { anchor: "middle", bold: true, size: 9 });
-                s.text(xR(r), 82, text, { anchor: "middle", bold: true, size: 9 });
+            const roundName = BracketLabels.round(bracketSize / Math.pow(2, r));
+            const drawn = roundPoomsaeNames(rounds[r]);
+            const text = drawn ? `${roundName}: ${drawn}` : roundName;
+            if (r === numRounds - 1) {
+                s.text(centerX, 82, text, { anchor: "middle", bold: true, size: fitFontSize(s, text, 9, 5.5, 2 * FINAL_GAP + 40, true) });
+            } else {
+                const size = fitFontSize(s, text, 9, 5.5, Math.max(40, ROUND_W - 6), true);
+                s.text(xL(r), 82, text, { anchor: "middle", bold: true, size });
+                s.text(xR(r), 82, text, { anchor: "middle", bold: true, size });
             }
         }
 
@@ -589,6 +615,57 @@
     // ── Cut-off running sheet (A4 portrait, paginates) ──────────────────
     const CUT_OFF_STAGE_NAMES = { PR: "Preliminary Round", SF: "Semi-Final", F: "Final" };
 
+    // Result columns of one cut-off row, filled from the match doc once the
+    // court has saved it (Firebase Sync: blue.points[] one per poomsae,
+    // blue.finalScore; processCutOffPerformance: rank, qualified). Empty for
+    // a match that hasn't been performed — so a freshly generated sheet
+    // (bracket builder) prints blank columns exactly as before.
+    const CUT_OFF_NOT_PERFORMED = { withdrawn: "WDR", dns: "DNS", dsq: "DSQ", disqualified: "DSQ", cancelled: "—", walkover: "—" };
+    function scoreText(v) {
+        return typeof v === "number" && Number.isFinite(v) ? v.toFixed(3) : "";
+    }
+    const CELL_FONT = 8, CELL_TAG_SIZE = 6, CELL_LINE_H = 10;
+
+    // Splits text into lines that fit maxWidth at `size`: pairs / teams
+    // break after each " & " first ("Jana Nová &" / "Eva Malá"), then
+    // between words. A single word still too wide is shrunk when drawn.
+    function wrapCellText(s, text, size, maxWidth) {
+        const str = String(text || "");
+        if (!str || s.measure(str, size) <= maxWidth) return [str];
+        const tokens = [];
+        str.split(/(?<= & )/).forEach(part => {
+            if (s.measure(part.trim(), size) <= maxWidth) tokens.push(part);
+            else tokens.push(...part.split(/(?<= )/));
+        });
+        const lines = [];
+        let cur = "";
+        tokens.forEach(t => {
+            if (cur && s.measure((cur + t).trimEnd(), size) > maxWidth) {
+                lines.push(cur.trimEnd());
+                cur = t;
+            } else {
+                cur += t;
+            }
+        });
+        if (cur.trim()) lines.push(cur.trimEnd());
+        return lines.length ? lines : [str];
+    }
+
+    function cutOffResultValues(m) {
+        const blue = (m && m.blue) || {};
+        const notPerformed = m && CUT_OFF_NOT_PERFORMED[m.status];
+        if (notPerformed) return { p1: "", p2: "", total: notPerformed, place: "" };
+        const points = Array.isArray(blue.points) ? blue.points : [];
+        const poomsaeScore = p => (p ? scoreText(typeof p.points === "number" ? p.points : p.total) : "");
+        const place = m && m.rank != null ? `${m.rank}${m.qualified === true ? " Q" : ""}` : "";
+        return {
+            p1: poomsaeScore(points[0]),
+            p2: poomsaeScore(points[1]),
+            total: scoreText(blue.finalScore),
+            place,
+        };
+    }
+
     function layoutCutOff(pager, bracket, o) {
         const W = CUT_W, H = CUT_H, MARGIN = 32, HEADER_H = 92;
         const STAGE_TITLE_H = 22, TABLE_HEAD_H = 22, ROW_H = 20, STAGE_GAP = 22, BOTTOM = H - MARGIN;
@@ -597,10 +674,10 @@
             { key: "matchNo", label: "Match No", w: 55, center: true },
             { key: "competitor", label: "Competitor", w: 165 },
             { key: "org", label: "Organization", w: 175 },
-            { key: "p1", label: "Poomsae 1", w: 55 },
-            { key: "p2", label: "Poomsae 2", w: 55 },
-            { key: "total", label: "Total score", w: 55 },
-            { key: "place", label: "Place", w: 45 },
+            { key: "p1", label: "Poomsae 1", w: 55, center: true },
+            { key: "p2", label: "Poomsae 2", w: 55, center: true },
+            { key: "total", label: "Total score", w: 55, center: true },
+            { key: "place", label: "Place", w: 45, center: true },
         ];
         const tableW = cols.reduce((a, c) => a + c.w, 0);
         const tableX = (W - tableW) / 2, centerX = W / 2;
@@ -642,37 +719,59 @@
         newPage();
         bracket.rounds.forEach((round, ri) => {
             const code = round[0] ? round[0].roundPhase : null;
-            const stageName = CUT_OFF_STAGE_NAMES[code] || `Stage ${ri + 1}`;
+            const drawn = roundPoomsaeNames(round);
+            const stageName = `${CUT_OFF_STAGE_NAMES[code] || `Stage ${ri + 1}`}${drawn ? ` — ${drawn}` : ""}`;
             if (y + STAGE_TITLE_H + TABLE_HEAD_H + ROW_H > BOTTOM) newPage();
             stageTitle(stageName);
 
             round.forEach((m, i) => {
-                if (y + ROW_H > BOTTOM) { newPage(); stageTitle(`${stageName} (cont.)`); }
                 const entry = m.blue && m.blue.entryId ? findEntry(bracket, m.blue.entryId) : null;
+                const blue = m.blue || {};
                 const values = {
                     no: String(i + 1), matchNo: o.formatNumber(m),
-                    competitor: entry ? entry.name : "", org: entry && entry.clubName ? entry.clubName : "",
+                    // Live match docs can carry an athlete the saved entries
+                    // don't (a replaced corner) — fall back on the corner itself.
+                    competitor: entry ? entry.name : (blue.entryId && blue.name) || "",
+                    org: (entry && entry.clubName) || (blue.entryId && blue.clubName) || "",
+                    ...cutOffResultValues(m),
                 };
                 const tag = entryAssocTag(entry);
+                const tagW = tag ? s.measure(tag, CELL_TAG_SIZE) + 3 : 0;
+
+                // A name or club too long for its column (pairs / teams)
+                // wraps onto more lines; the row grows to fit them.
+                const lines = {};
+                cols.forEach(c => {
+                    const v = values[c.key];
+                    if (!v) return;
+                    lines[c.key] = c.key === "competitor" || c.key === "org"
+                        ? wrapCellText(s, v, CELL_FONT, c.w - 10 - (c.key === "competitor" ? tagW : 0))
+                        : [v];
+                });
+                const lineCount = Math.max(1, ...Object.values(lines).map(l => l.length));
+                const rowH = Math.max(ROW_H, lineCount * CELL_LINE_H + 8);
+
+                if (y + rowH > BOTTOM) { newPage(); stageTitle(`${stageName} (cont.)`); }
                 let cx = tableX;
                 cols.forEach(c => {
-                    s.rect(cx, y, c.w, ROW_H, { strokeWidth: 0.75 });
-                    const v = values[c.key];
-                    const baseY = y + ROW_H / 2 + 3.5;
-                    if (v && c.key === "competitor" && tag) {
-                        // Name, then the small association-ID tag right after it.
-                        const tagSize = 6;
-                        const tagW = s.measure(tag, tagSize) + 3;
-                        const size = fitFontSize(s, v, 8, 6, c.w - 10 - tagW);
-                        s.text(cx + 6, baseY, v, { size });
-                        s.text(cx + 6 + s.measure(v, size) + 3, baseY - 2, tag, { size: tagSize, color: SUBTLE });
-                    } else if (v) {
-                        const size = fitFontSize(s, v, 8, 6, c.w - 10);
-                        s.text(c.center ? cx + c.w / 2 : cx + 6, baseY, v, { anchor: c.center ? "middle" : "start", size });
+                    s.rect(cx, y, c.w, rowH, { strokeWidth: 0.75 });
+                    const l = lines[c.key];
+                    if (l) {
+                        const firstBaseY = y + rowH / 2 - (l.length - 1) * CELL_LINE_H / 2 + 3.5;
+                        const maxW = c.w - 10 - (c.key === "competitor" ? tagW : 0);
+                        l.forEach((text, li) => {
+                            const size = fitFontSize(s, text, CELL_FONT, 6, maxW);
+                            const ly = firstBaseY + li * CELL_LINE_H;
+                            s.text(c.center ? cx + c.w / 2 : cx + 6, ly, text, { anchor: c.center ? "middle" : "start", size });
+                            // Association-ID tag right after the name's last line.
+                            if (c.key === "competitor" && tag && li === l.length - 1) {
+                                s.text(cx + 6 + s.measure(text, size) + 3, ly - 2, tag, { size: CELL_TAG_SIZE, color: SUBTLE });
+                            }
+                        });
                     }
                     cx += c.w;
                 });
-                y += ROW_H;
+                y += rowH;
             });
             y += STAGE_GAP;
         });
@@ -781,6 +880,198 @@
         });
     }
 
+    // ── Club sheets (A4 portrait, one page per club) ────────────────────
+    // Every entrant of the club, their category, and the match numbers of
+    // every match they can have, one column per round. One table per
+    // system the club's entrants are in:
+    //   elimination  R32 · R16 · QF · SF · F, "B 308" / "R 312" — every match
+    //                the slot can structurally reach, decided or not
+    //   cut-off      PR · SF · F, the number of their performance in that
+    //                round (no corners — they perform alone), "-" for a
+    //                round of the category they aren't in (yet)
+    //   poomsae      the drawn poomsae of that match / round, small, under
+    //                the number (and under the "-")
+    //   round robin  every bout, "B 012, R 015"
+    // Shared by the bracket builder and the live queue.
+    const CLUB_MARGIN = 14; // mm
+    const CLUB_ELIM_PHASES = ["R32", "R16", "QF", "SF", "F"];
+    const CLUB_CUT_OFF_PHASES = [["PR", "Preliminary"], ["SF", "Semi-Final"], ["F", "Final"]];
+
+    // A club-sheet cell: `top` = match number(s), `sub` = the drawn poomsae
+    // printed small underneath (poomsae only).
+    function elimFightsByPhase(bracket, entry, fmt) {
+        const idx = bracket.entrySlotIndex || {};
+        let slot = idx[entry.entryId];
+        if (slot == null && entry.replacedEntryId != null) slot = idx[entry.replacedEntryId];
+        const out = {};
+        if (slot == null) return out;
+        let matchIndex = Math.floor(slot / 2);
+        let corner = slot % 2 === 0 ? "B" : "R";
+        for (let r = 0; r < bracket.rounds.length; r++) {
+            const match = bracket.rounds[r][matchIndex];
+            if (!match) break;
+            const num = fmt(match);
+            if (match.status !== "walkover" && num && match.roundPhase) {
+                out[match.roundPhase] = { top: `${corner} ${num}`, sub: poomsaeNames(match) };
+            }
+            corner = matchIndex % 2 === 0 ? "B" : "R";
+            matchIndex = Math.floor(matchIndex / 2);
+        }
+        return out;
+    }
+
+    // Every round of the category gets a cell: the athlete's performance
+    // number in it, or "-" for a round they aren't in (yet) — and under
+    // both the poomsae drawn for that round.
+    function cutOffFightsByPhase(bracket, entry, fmt) {
+        const out = {};
+        bracket.rounds.forEach(round => {
+            const phase = round[0] && round[0].roundPhase;
+            if (!phase) return;
+            const mine = round.find(m => m.blue && m.blue.entryId === entry.entryId);
+            out[phase] = { top: mine ? (fmt(mine) || "-") : "-", sub: roundPoomsaeNames(round) };
+        });
+        return out;
+    }
+
+    function roundRobinFights(bracket, entry, fmt) {
+        const list = [];
+        bracket.rounds.forEach(r => r.forEach(m => {
+            const side = m.blue && m.blue.entryId === entry.entryId ? "B" : m.red && m.red.entryId === entry.entryId ? "R" : null;
+            const num = fmt(m);
+            if (side && num) list.push(`${side} ${num}`);
+        }));
+        return { top: list.join(", "), sub: roundPoomsaeNames(bracket.rounds.flat()) };
+    }
+
+    function collectClubRows(brackets, fmt) {
+        const byClub = {};
+        (brackets || []).forEach(b => {
+            const system = b.system || "single_elimination";
+            (b.entries || []).forEach(e => {
+                const key = e.clubId || "__none__";
+                const club = byClub[key] || (byClub[key] = { clubName: null, elim: [], cutOff: [], roundRobin: [] });
+                if (!club.clubName && e.clubName) club.clubName = e.clubName;
+                const row = { name: e.name || "", categoryLabel: b.categoryLabel || "" };
+                if (system === "cut_off") club.cutOff.push({ ...row, phases: cutOffFightsByPhase(b, e, fmt) });
+                else if (system === "round_robin") club.roundRobin.push({ ...row, matches: roundRobinFights(b, e, fmt) });
+                else club.elim.push({ ...row, phases: elimFightsByPhase(b, e, fmt) });
+            });
+        });
+        return byClub;
+    }
+
+    async function buildClubSheetsPdf(brackets, opts) {
+        if (!global.jspdf || !global.jspdf.jsPDF) throw new Error("PDF library failed to load — check your connection and retry.");
+        const o = normalizeOpts(opts);
+        const byClub = collectClubRows(brackets, o.formatNumber);
+        const keys = Object.keys(byClub).filter(k => k !== "__none__")
+            .sort((a, b) => (byClub[a].clubName || "").localeCompare(byClub[b].clubName || ""));
+        if (byClub.__none__) keys.push("__none__");
+        if (keys.length === 0) throw new Error("No entrants to list.");
+
+        await prepareAssets();
+        const doc = new global.jspdf.jsPDF({ unit: "mm", format: "a4", compress: true });
+        if (typeof doc.autoTable !== "function") throw new Error("PDF table plugin failed to load — check your connection and retry.");
+        const font = await applyPdfFont(doc);
+        const t = str => pdfText(doc, str);
+        doc.setProperties({ title: o.title ? `${o.title} — Club sheets` : "Club sheets", creator: "TrueVAR" });
+
+        const ID_W = 8, NAME_W = 60, TABLE_W = 182;
+        const TOP_SIZE = 8, SUB_SIZE = 6.5, TOP_LH = 3.4, SUB_LH = 2.8;
+        const split = (str, size, bold, width) => {
+            if (!str) return [];
+            doc.setFont(font, bold ? "bold" : "normal"); doc.setFontSize(size);
+            return doc.splitTextToSize(t(str), width);
+        };
+        const blockH = (top, sub) => top.length * TOP_LH + sub.length * SUB_LH;
+
+        // One table. Every body cell except "No." is drawn by hand: the
+        // participant (bold name + small category) and each round (number
+        // + small drawn poomsae), both wrapping; row height set in didParseCell.
+        function table(startY, rows, phaseHead, phaseCells, startNo) {
+            const phaseW = (TABLE_W - ID_W - NAME_W) / phaseHead.length;
+            const columnStyles = { 0: { cellWidth: ID_W, halign: "center" }, 1: { cellWidth: NAME_W, halign: "left" } };
+            phaseHead.forEach((_, i) => { columnStyles[i + 2] = { cellWidth: phaseW, halign: "center" }; });
+
+            const laid = rows.map(r => {
+                const cells = [
+                    { top: split(r.name, TOP_SIZE, true, NAME_W - 3.6), sub: split(r.categoryLabel, SUB_SIZE, false, NAME_W - 3.6), bold: true, left: true },
+                    ...phaseCells(r).map(c => ({
+                        top: split(c && c.top, TOP_SIZE, false, phaseW - 2.6),
+                        sub: split(c && c.sub, SUB_SIZE, false, phaseW - 2.6),
+                    })),
+                ];
+                return { cells, h: Math.max(...cells.map(c => blockH(c.top, c.sub))) + 3 };
+            });
+
+            doc.autoTable({
+                startY,
+                head: [["No.", "Participant", ...phaseHead].map(t)],
+                body: rows.map((r, i) => [String(startNo + i), "", ...phaseHead.map(() => "")]),
+                columnStyles,
+                styles: { font, fontSize: 8, cellPadding: 1.3, lineColor: [17, 17, 17], lineWidth: 0.2, minCellHeight: 10, valign: "middle", textColor: [17, 17, 17] },
+                headStyles: { font, fillColor: [255, 255, 255], textColor: [17, 17, 17], fontStyle: "bold", lineWidth: 0.3, halign: "center", valign: "middle" },
+                theme: "grid",
+                margin: { left: CLUB_MARGIN, right: CLUB_MARGIN },
+                didParseCell: hook => {
+                    if (hook.section === "body" && hook.column.index === 1) {
+                        hook.cell.styles.minCellHeight = Math.max(10, laid[hook.row.index].h);
+                    }
+                },
+                didDrawCell: hook => {
+                    if (hook.section !== "body" || hook.column.index < 1) return;
+                    const c = laid[hook.row.index].cells[hook.column.index - 1];
+                    if (!c) return;
+                    const { x, y, width, height } = hook.cell;
+                    const tx = c.left ? x + 1.8 : x + width / 2;
+                    const align = c.left ? "left" : "center";
+                    let ly = y + (height - blockH(c.top, c.sub)) / 2 + TOP_LH - 0.8;
+                    doc.setFont(font, c.bold ? "bold" : "normal"); doc.setFontSize(TOP_SIZE); doc.setTextColor(17, 17, 17);
+                    c.top.forEach(line => { doc.text(line, tx, ly, { align }); ly += TOP_LH; });
+                    doc.setFont(font, "normal"); doc.setFontSize(SUB_SIZE); doc.setTextColor(100, 100, 100);
+                    c.sub.forEach(line => { doc.text(line, tx, ly - 0.4, { align }); ly += SUB_LH; });
+                    doc.setTextColor(17, 17, 17);
+                },
+            });
+            return doc.lastAutoTable.finalY;
+        }
+
+        keys.forEach((key, ci) => {
+            const club = byClub[key];
+            if (ci > 0) doc.addPage();
+            doc.setFont(font, "bold"); doc.setFontSize(14); doc.setTextColor(17, 17, 17);
+            doc.text(t(o.title), CLUB_MARGIN, 18);
+            doc.setFontSize(13);
+            doc.text(t(club.clubName || "No Club"), CLUB_MARGIN, 26);
+
+            const sections = [
+                club.elim.length && { title: "Elimination", rows: club.elim, head: CLUB_ELIM_PHASES, cells: r => CLUB_ELIM_PHASES.map(p => r.phases[p] || null) },
+                club.cutOff.length && { title: "Cut-off", rows: club.cutOff, head: CLUB_CUT_OFF_PHASES.map(([, label]) => label), cells: r => CLUB_CUT_OFF_PHASES.map(([code]) => r.phases[code] || null) },
+                club.roundRobin.length && { title: "Round robin", rows: club.roundRobin, head: ["Matches"], cells: r => [r.matches] },
+            ].filter(Boolean);
+            const titled = sections.length > 1;
+            let y = 32, no = 1;
+            sections.forEach(sec => {
+                if (titled) {
+                    if (y > doc.internal.pageSize.getHeight() - 30) { doc.addPage(); y = 18; }
+                    doc.setFont(font, "bold"); doc.setFontSize(10.5); doc.setTextColor(17, 17, 17);
+                    doc.text(t(sec.title), CLUB_MARGIN, y + 2);
+                    y += 5;
+                }
+                y = table(y, sec.rows, sec.head, sec.cells, no) + 8;
+                no += sec.rows.length;
+            });
+        });
+        return doc;
+    }
+
+    async function downloadClubSheets(brackets, filename, opts) {
+        const doc = await buildClubSheetsPdf(brackets, opts);
+        doc.save(filename || "club_sheets.pdf");
+        return doc;
+    }
+
     // Loaded logos ({dataUrl, width, height, alias} or null per side) —
     // for other PDFs (e.g. the poomsae draw) to reuse the same header art.
     function getLogoAssets() {
@@ -790,6 +1081,7 @@
     global.BracketSheets = {
         configure, prepareAssets, applyPdfFont, pdfText, getLogoAssets,
         toSVG, toSVGPages, buildPdf, downloadPdf, print,
+        buildClubSheetsPdf, downloadClubSheets,
         isPrintable, matchResultLabel, assocTag,
         PAGE: { ELIMINATION: { width: ELIM_W, height: ELIM_H }, CUT_OFF: { width: CUT_W, height: CUT_H } },
     };

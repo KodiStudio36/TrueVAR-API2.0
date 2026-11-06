@@ -2,7 +2,8 @@
  * single elimination or round robin). Loaded by
  * templates/dashboard/live_queue_poomsae.html after live-queue-common.js
  * and before live-queue-poomsae.js, which uses PoomsaeDuel (the format
- * module) and RoundRobinResults (the results kind).
+ * module), RoundRobinSheets (bracket sheet kind) and RoundRobinResults
+ * (results kind).
  *
  * Both athletes perform at the same time; Firebase Sync writes each
  * corner's finalScore + points[] per poomsae, `win` ("blue"/"red"),
@@ -12,7 +13,8 @@
  *   ALL  tie → higher total of all judges
  * A tie that is still undecided has no `win` and is settled on the floor.
  * Single-elimination draw sheets come from the common file (📄 Bracket
- * PDFs / Print New Results); round robin prints a standings table here. */
+ * PDFs / Print New Results); round robin gets its own sheet here (bouts +
+ * standings), printed and downloaded through live-queue-poomsae.js. */
 "use strict";
 
 const DUEL_WIN_TYPES = [
@@ -109,6 +111,7 @@ function openDuelResultModal(matchId) {
 
             <div class="lq-modal-actions">
                 <button class="btn btn-primary" id="duel-save-btn" ${canPickWinner ? "" : "disabled"}>Save Result</button>
+                ${categorySheetButtonsHtml(m.categoryCode)}
                 <button class="btn btn-ghost" onclick="closeModal()">Close</button>
             </div>
         </div>
@@ -162,24 +165,32 @@ const PoomsaeDuel = {
     statusOptions: [["pending", "Pending"], ["ready", "Ready"], ["completed", "Completed"], ["walkover", "Walkover"]],
     winnerStatuses: ["completed", "done", "walkover"],
     rowExtraHtml: duelRowExtraHtml,
+    rowButtons: () => [POOMSAE_SHEET_ROW_BUTTON],
+    onRowButton: (kind, m, btn) => poomsaeOnRowButton(kind, m, btn),
     detailFieldsHtml: (m) => poomsaeRoundSecondsField(m),
     detailUpdates: () => poomsaeRoundSecondsUpdate(),
     detailReadonlyHtml: (m) => poomsaeDrawnHtml(m),
+    detailActionsHtml: (m) => categorySheetButtonsHtml(m.categoryCode),
     openResult: openDuelResultModal,
 };
 
 // ═══════════════════════════════════════════════════════════════════
-// RESULTS — round robin standings, once every bout of the category is
-// decided: wins first, then total score of all bouts, then fewer losses.
-// Equal wins + total = equal place. (Single-elimination side-by-side
+// ROUND ROBIN — standings: wins first, then total score of all decided
+// bouts, then fewer losses. Equal wins + total = equal place. The sheet
+// (bouts + standings) works mid-competition too; the result is ready
+// once every bout is decided. (Single-elimination side-by-side
 // categories print as bracket sheets from the common file.)
 // ═══════════════════════════════════════════════════════════════════
 
-function buildRoundRobinResult(categoryCode) {
-    const matches = [...matchesById.values()].filter(m => m.categoryCode === categoryCode && poomsaeFormatOf(m) === PoomsaeDuel);
-    if (matches.length === 0) return null;
-    if (!matches.every(m => isDone(m) && (m.winnerEntryId || NOT_PERFORMED.has(m.status)))) return null;
+function duelMatchesOf(categoryCode) {
+    return [...matchesById.values()].filter(m => m.categoryCode === categoryCode && poomsaeFormatOf(m) === PoomsaeDuel);
+}
 
+function roundRobinBoutOver(m) {
+    return isDone(m) && (!!m.winnerEntryId || NOT_PERFORMED.has(m.status));
+}
+
+function roundRobinStandings(matches) {
     const table = {}; // entryId -> row
     const rowFor = (c) => table[c.entryId] || (table[c.entryId] = {
         entryId: c.entryId, name: c.name, club: c.clubName || "", country: c.country || "",
@@ -191,6 +202,7 @@ function buildRoundRobinResult(categoryCode) {
             if (!c || !c.entryId) return;
             const row = rowFor(c);
             row.name = c.name || row.name;
+            if (!isDone(m)) return; // listed, but nothing counted yet
             row.bouts += 1;
             if (m.winnerEntryId === c.entryId) row.wins += 1;
             else if (m.winnerEntryId) row.losses += 1;
@@ -205,38 +217,97 @@ function buildRoundRobinResult(categoryCode) {
         r.place = prev && prev.wins === r.wins && Math.abs(prev.total - r.total) < 1e-9 ? prev.place : i + 1;
         r.total = Math.round(r.total * 1000) / 1000;
     });
-    return { categoryCode, rows };
+    return rows;
 }
 
-function roundRobinResultHtml(result, label) {
-    const body = result.rows.map(r => `<tr>
-            ${resultCellHtml(escapeHtml(String(r.place)))}
-            ${resultCellHtml(`<strong>${escapeHtml(r.name || "—")}</strong>`, "text-align:left;")}
-            ${resultCellHtml(escapeHtml(r.club), "text-align:left;")}
-            ${resultCellHtml(escapeHtml(r.country))}
-            ${resultCellHtml(r.bouts)}
-            ${resultCellHtml(`<strong>${r.wins}</strong>`)}
-            ${resultCellHtml(r.losses)}
-            ${resultCellHtml(poomsaeScoreText(r.total))}
-        </tr>`).join("");
-    return resultsTablePageHtml(label, [
-        { label: "Place" }, { label: "Athlete", left: true }, { label: "Club", left: true }, { label: "NOC" },
-        { label: "Bouts" }, { label: "Won" }, { label: "Lost" }, { label: "Total score" },
-    ], body, "Round robin — ranked by bouts won, then by total score.");
+function buildRoundRobinResult(categoryCode) {
+    const matches = duelMatchesOf(categoryCode);
+    if (matches.length === 0) return null;
+    if (!matches.every(roundRobinBoutOver)) return null;
+    return { categoryCode, rows: roundRobinStandings(matches) };
 }
 
+function roundRobinWinnerText(m) {
+    if (m.winnerEntryId) {
+        const c = m.blue && m.blue.entryId === m.winnerEntryId ? m.blue : m.red;
+        return participantLabel(c);
+    }
+    if (m.status === "completed") return "Tie — undecided";
+    return statusInfo(m)[1];
+}
+
+function buildRoundRobinSheet(categoryCode, label) {
+    const matches = duelMatchesOf(categoryCode).sort((a, b) =>
+        (a.queuePosition ?? 0) - (b.queuePosition ?? 0) || (a.displayNumber ?? 0) - (b.displayNumber ?? 0));
+    if (matches.length === 0) return null;
+    const finished = matches.every(roundRobinBoutOver);
+    const score = (c) => (duelScore(c) != null ? poomsaeScoreText(duelScore(c)) : "—");
+
+    return {
+        label,
+        subtitle: finished ? "Round robin — final results" : "Round robin — in progress",
+        sections: [
+            {
+                heading: finished ? "Standings" : "Standings so far",
+                columns: [
+                    { label: "Place" }, { label: "Athlete", align: "left" }, { label: "Club", align: "left" }, { label: "NOC" },
+                    { label: "Bouts" }, { label: "Won" }, { label: "Lost" }, { label: "Total score" },
+                ],
+                rows: roundRobinStandings(matches).map(r => [
+                    String(r.place), { text: r.name || "—", bold: true }, r.club, r.country,
+                    String(r.bouts), { text: String(r.wins), bold: true }, String(r.losses), poomsaeScoreText(r.total),
+                ]),
+                note: "Ranked by bouts won, then by total score.",
+            },
+            {
+                heading: "Bouts",
+                columns: [
+                    { label: "Match" }, { label: "Blue", align: "left" }, { label: "Score" },
+                    { label: "Red", align: "left" }, { label: "Score" }, { label: "Winner", align: "left" }, { label: "Decided by" },
+                ],
+                rows: matches.map(m => [
+                    m.displayNumber != null ? String(m.displayNumber) : "—",
+                    { text: participantLabel(m.blue), bold: m.win === "blue" },
+                    score(m.blue),
+                    { text: participantLabel(m.red), bold: m.win === "red" },
+                    score(m.red),
+                    roundRobinWinnerText(m),
+                    m.win_type ? String(m.win_type).toUpperCase() : "",
+                ]),
+            },
+        ],
+    };
+}
+
+function roundRobinDocs(bracketDocs) {
+    return Object.values(bracketDocs).filter(doc => doc.system === "round_robin");
+}
+
+// 📄 Bracket PDFs / row button — every round-robin category.
+const RoundRobinSheets = {
+    kind: "round_robin_sheet",
+    title: "Round robin",
+    fileSuffix: "round_robin",
+    collect: (bracketDocs) => roundRobinDocs(bracketDocs).map(doc => {
+        const label = doc.categoryLabel || resolveCategoryLabel(doc.categoryCode);
+        const page = buildRoundRobinSheet(doc.categoryCode, label);
+        return page ? { code: doc.categoryCode, label, page } : null;
+    }).filter(Boolean),
+    print: (items) => printPoomsaeSheets(items.map(i => i.page)),
+    download: (items, filename) => downloadPoomsaeSheetsPdf(items.map(i => i.page), filename),
+};
+
+// 🖨 Print New Results — finished round-robin categories.
 const RoundRobinResults = {
     kind: "round_robin",
-    collect: (bracketDocs) => Object.values(bracketDocs)
-        .filter(doc => doc.system === "round_robin")
-        .map(doc => {
-            const result = buildRoundRobinResult(doc.categoryCode);
-            if (!result) return null;
-            return {
-                code: doc.categoryCode, label: doc.categoryLabel || resolveCategoryLabel(doc.categoryCode),
-                result, fingerprint: fingerprintOf(result.rows),
-            };
-        })
-        .filter(Boolean),
-    print: (items) => printHtmlInFrame(items.map(i => roundRobinResultHtml(i.result, i.label)).join("")),
+    title: "Round robin",
+    fileSuffix: "round_robin_results",
+    collect: (bracketDocs) => roundRobinDocs(bracketDocs).map(doc => {
+        const result = buildRoundRobinResult(doc.categoryCode);
+        if (!result) return null;
+        const label = doc.categoryLabel || resolveCategoryLabel(doc.categoryCode);
+        return { code: doc.categoryCode, label, result, page: buildRoundRobinSheet(doc.categoryCode, label), fingerprint: fingerprintOf(result.rows) };
+    }).filter(Boolean),
+    print: (items) => printPoomsaeSheets(items.map(i => i.page)),
+    download: (items, filename) => downloadPoomsaeSheetsPdf(items.map(i => i.page), filename),
 };
