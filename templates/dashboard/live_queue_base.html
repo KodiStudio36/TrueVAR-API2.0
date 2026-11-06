@@ -4,6 +4,7 @@ Live Match Queue — shared layout for every discipline. Mirrors the bracket
 builder split:
 live_queue_base.html markup, styles, page constants (this file)
 /static/js/live-queue-common.js everything every discipline shares
+/static/js/live-queue-bracket-sync.js bracket docs follow athlete replacements
 live_queue_kyorugi.html + live-queue-kyorugi.js
 live_queue_poomsae.html + live-queue-poomsae-cutoff.js (solo cut-off)
 + live-queue-poomsae-duel.js (side by side)
@@ -43,6 +44,8 @@ Blocks: queue_hint, toolbar_extra, discipline_libs, discipline_scripts.
         <button type="button" class="btn btn-ghost" onclick="downloadLiveClubSheets(this)"
             title="One page per club: every entrant and the numbers of every match they can have">👥 Club
             Sheets</button>
+        <button type="button" class="btn btn-ghost" onclick="openBracketSyncModal()"
+            title="Fix brackets that still show athletes replaced in the live queue">🔧 Sync Brackets</button>
         <button type="button" class="btn btn-primary" id="print-new-results-btn" onclick="printNewResults()"
             title="Prints every category finished since the last time this button was used — and any whose result was corrected since">🖨
             Print New Results</button>
@@ -174,6 +177,7 @@ STYLES
 
     .lq-toolbar-row {
         display: flex;
+        flex-wrap: wrap;
         gap: .5rem;
         margin: -0.25rem 0 0;
     }
@@ -844,7 +848,8 @@ STYLES
 
 {# ═══════════════════════════════════════════════════════════════════════
 JAVASCRIPT — constants first, then the shared libraries, the common queue
-code and finally the discipline's own files (the last one starts the page).
+code, the bracket sync and finally the discipline's own files (the last
+one starts the page).
 ═══════════════════════════════════════════════════════════════════════ #}
 <script>
     const TOURNAMENT_ID = {{ tournament.id | string | tojson }};
@@ -861,6 +866,7 @@ code and finally the discipline's own files (the last one starts the page).
 <script src="/static/js/bracket-core.js"></script>
 <script src="/static/js/bracket-sheets.js"></script>
 <script src="/static/js/live-queue-common.js"></script>
+<script src="/static/js/live-queue-bracket-sync.js"></script>
 {% block discipline_scripts %}{% endblock %}
 
 {% endblock %}

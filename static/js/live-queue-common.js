@@ -7,9 +7,13 @@
  *
  * Loaded by templates/dashboard/live_queue_base.html AFTER the page
  * constants (TOURNAMENT_ID, SPORT, DISCIPLINE, TOURNAMENT_TITLE) and
- * category-schema.js / bracket-core.js / bracket-sheets.js; BEFORE the
- * discipline's own files. The last discipline file calls
- * startLiveQueue(discipline).
+ * category-schema.js / bracket-core.js / bracket-sheets.js; BEFORE
+ * live-queue-bracket-sync.js and the discipline's own files. The last
+ * discipline file calls startLiveQueue(discipline).
+ *
+ * Corner replacements are written to the bracket doc too — see
+ * live-queue-bracket-sync.js (syncBracketForReplacement,
+ * eliminationTreeFor, 🔧 Sync Brackets).
  *
  * CONTRACT — the discipline object passed to startLiveQueue():
  *   init()                    async, optional — extra loads after the
@@ -386,9 +390,10 @@ async function runComputeResults() {
 // shortcuts and the per-category bracket buttons on rows / modals.
 //
 //   single elimination  built in: BracketCore re-runs the same seeded
-//                       placement, then every match is overlaid with its
-//                       live doc (status, corners incl. replaced athletes,
-//                       court, result).
+//                       placement (or the saved slotOrder, once a bracket
+//                       sync has frozen it), then every match is overlaid
+//                       with its live doc (status, corners incl. replaced
+//                       athletes, court, result).
 //   cut-off             built in: the saved bracket doc + this category's
 //                       live match docs, round by round (PR → SF → F) in
 //                       running order. The scores the court saved fill
@@ -473,8 +478,9 @@ function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
     if (entries.length < 2) return null;
     if (bracketDoc.system && bracketDoc.system !== "single_elimination") return null; // round robin: sheetKinds
 
-    const placementFn = BracketCore.PLACEMENT_STRATEGIES[bracketDoc.placementStrategy] || BracketCore.PLACEMENT_STRATEGIES.standard;
-    const built = BracketCore.generateSingleElimination(bracketDoc.categoryCode, entries, placementFn);
+    // The tree as pushed — from the saved slotOrder once a bracket sync has
+    // frozen it (live-queue-bracket-sync.js), else the seeded placement.
+    const built = eliminationTreeFor(bracketDoc);
 
     const liveMatchByKey = {};
     matchesById.forEach(m => {
@@ -532,6 +538,10 @@ function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
     Object.entries(rosterEntries).forEach(([entryId, entry]) => {
         if (entry && entry.placement != null) placements[entryId] = entry.placement;
     });
+    // A synced entry inherits the placement computed for the entry it replaced.
+    entries.forEach(e => (e.replacedEntryIds || []).forEach(oldId => {
+        if (placements[oldId] != null && placements[e.entryId] == null) placements[e.entryId] = placements[oldId];
+    }));
     Object.entries(replaced).forEach(([oldId, now]) => {
         if (placements[oldId] != null && placements[now.entryId] == null) placements[now.entryId] = placements[oldId];
         delete placements[oldId];
@@ -1900,8 +1910,10 @@ async function onColumnDrop(event, column, courtId, courtMatches) {
 // Every field of an UNDECIDED match, saved in one write straight to
 // Firestore (Firestore rules gate who may write). Corners are replaced
 // by searching for an athlete, never typed by hand; a corner still fed
-// by an earlier match is read-only. A decided match opens its format's
-// result view instead (format.openResult).
+// by an earlier match is read-only. A replaced athlete is also replaced
+// in the bracket doc and in every other match of the category (same
+// batch — live-queue-bracket-sync.js). A decided match opens its
+// format's result view instead (format.openResult).
 let pendingCornerReplacement = { blue: null, red: null };
 let cornerSearchTimers = { blue: null, red: null };
 let cornerSearchResults = { blue: [], red: [] };
@@ -2126,11 +2138,16 @@ async function saveMatchEdits(matchId) {
 
     // A corner is only written when a replacement athlete was picked.
     // (merge write: a solo qualifier slot also drops its placeholder flag)
+    const replacedNow = {}; // old entryId -> new corner (bracket sync)
     if (pendingCornerReplacement.blue) {
         updates.blue = cornerFromAthlete(pendingCornerReplacement.blue);
         if (fmt.solo && m.blue && m.blue.pendingAdvancement) updates.blue.pendingAdvancement = firebase.firestore.FieldValue.delete();
+        if (m.blue && m.blue.entryId) replacedNow[m.blue.entryId] = updates.blue;
     }
-    if (pendingCornerReplacement.red) updates.red = cornerFromAthlete(pendingCornerReplacement.red);
+    if (pendingCornerReplacement.red) {
+        updates.red = cornerFromAthlete(pendingCornerReplacement.red);
+        if (m.red && m.red.entryId) replacedNow[m.red.entryId] = updates.red;
+    }
 
     const saveBtn = document.getElementById("detail-save-btn");
     saveBtn.disabled = true;
@@ -2139,9 +2156,15 @@ async function saveMatchEdits(matchId) {
     try {
         const batch = fsDb.batch();
         if (!fmt.solo) propagateWinnerChangeIfNeeded(m, winnerEntryId, batch);
+        // A replaced athlete is replaced everywhere: the bracket doc's entries
+        // and every other match of this category (live-queue-bracket-sync.js).
+        const syncNotes = Object.keys(replacedNow).length
+            ? await syncBracketForReplacement(m, updates, replacedNow, batch)
+            : [];
         batch.set(matchDocRef(matchId), updates, { merge: true });
         await batch.commit();
         closeModal();
+        if (syncNotes.length) alert("Saved, but check the bracket:\n\n" + syncNotes.join("\n"));
     } catch (err) {
         console.error("Save failed", err);
         errEl.textContent = "Save failed: " + err.message;
