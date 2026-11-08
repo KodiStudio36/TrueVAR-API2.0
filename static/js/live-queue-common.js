@@ -11,9 +11,9 @@
  * live-queue-bracket-sync.js and the discipline's own files. The last
  * discipline file calls startLiveQueue(discipline).
  *
- * Corner replacements are written to the bracket doc too — see
- * live-queue-bracket-sync.js (syncBracketForReplacement,
- * eliminationTreeFor, 🔧 Sync Brackets).
+ * Corner replacements and deleted matches are written to the bracket doc
+ * too — see live-queue-bracket-sync.js (syncBracketForReplacement,
+ * eliminationTreeFor, 🔧 Sync Brackets, 🗑 Delete Match).
  *
  * CONTRACT — the discipline object passed to startLiveQueue():
  *   init()                    async, optional — extra loads after the
@@ -496,7 +496,11 @@ function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
     built.rounds.forEach(round => round.forEach(m => {
         if (m.status === "walkover") return;
         const live = liveMatchByKey[`${m.round}_${m.matchNumber}`];
-        if (!live) { m.notInDatabase = true; return; }
+        if (!live) {
+            // Both feeders deleted (🗑 Delete Match) — this one was removed on purpose.
+            if (!isEmptyCorner(m.blue) || !isEmptyCorner(m.red)) m.notInDatabase = true;
+            return;
+        }
         ["blue", "red"].forEach(side => {
             const was = m[side], now = live[side];
             if (!now || !now.entryId) return;
@@ -1121,12 +1125,26 @@ function showNewResultsSummary({ printed, changedCodes, finished, printedBefore,
 
 // ═══════════════════════════════════════════════════════════════════
 // CLUB STANDINGS — the "🏆 Club Standings" button. Tallies every club's
-// 1st/2nd/3rd places (division_rosters "placement") plus won matches
-// (every decided duel in matchesById), weighted by the points chosen.
-// Ties share a place (1, 1, 3).
+// 1st/2nd/3rd places (division_rosters "placement"), won matches (every
+// decided duel in matchesById) and athletes who were alone in their
+// category, weighted by the points chosen. Ties share a place (1, 1, 3).
+//
+// Alone in a category: they get the "alone" points INSTEAD of 1st-place
+// points (no one to beat) — even if Compute Results gave them 1st.
+// Poomsae cut-off has no won matches, so that field / column only shows
+// when the tournament has head-to-head bouts (kyorugi, side by side).
 // ═══════════════════════════════════════════════════════════════════
 
+const IS_POOMSAE = String(DISCIPLINE).toLowerCase().includes("poomsae");
+
+// Head-to-head bouts only — a cut-off performance has no red corner.
+function hasDuelMatches() {
+    for (const m of matchesById.values()) if (m.red && (m.red.entryId || m.red.source)) return true;
+    return false;
+}
+
 function openClubStandingsModal() {
+    const showWon = hasDuelMatches();
     openModal(`
         <div class="lq-modal-header">
             <h3>Club Standings (PDF)</h3>
@@ -1134,18 +1152,16 @@ function openClubStandingsModal() {
         </div>
         <div class="lq-modal-body">
             <p class="lq-field-hint" style="margin-bottom:1rem;">
-                Ranks every club by a weighted score: 1st/2nd/3rd-place finishes (from 🏅 Compute Results)
-                plus total won matches, each worth whatever points you set below. Ties share the same place.
+                Ranks every club by a weighted score: 1st/2nd/3rd-place finishes (from 🏅 Compute Results)${showWon ? ", won matches" : ""}
+                and athletes who were alone in their category, each worth the points you set below. An athlete alone
+                in a category gets only the "alone" points, not 1st-place points. Ties share the same place.
             </p>
             <div class="lq-detail-grid">
                 <label>Points per 1st <input type="number" id="cs-pts-first" value="7" step="any"></label>
                 <label>Points per 2nd <input type="number" id="cs-pts-second" value="3" step="any"></label>
                 <label>Points per 3rd <input type="number" id="cs-pts-third" value="1" step="any"></label>
-                <label>Points per won match <input type="number" id="cs-pts-won" value="1" step="any"></label>
-                <label class="lq-checkbox-label lq-span-2">
-                    <input type="checkbox" id="cs-include-single">
-                    Include categories with only one registered athlete (awarded 1st automatically — no match was needed for that medal)
-                </label>
+                <label>Points when alone in category <input type="number" id="cs-pts-alone" value="${IS_POOMSAE ? 3 : 0}" step="any"></label>
+                ${showWon ? `<label>Points per won match <input type="number" id="cs-pts-won" value="${IS_POOMSAE ? 0 : 1}" step="any"></label>` : ""}
             </div>
             <div id="club-standings-error" class="lq-alert-error hidden"></div>
             <div class="lq-modal-actions">
@@ -1172,11 +1188,13 @@ async function printClubStandingsPdf() {
     const errEl = document.getElementById("club-standings-error");
     errEl.classList.add("hidden");
 
-    const ptsFirst = Number(document.getElementById("cs-pts-first").value) || 0;
-    const ptsSecond = Number(document.getElementById("cs-pts-second").value) || 0;
-    const ptsThird = Number(document.getElementById("cs-pts-third").value) || 0;
-    const ptsWon = Number(document.getElementById("cs-pts-won").value) || 0;
-    const includeSingle = document.getElementById("cs-include-single").checked;
+    const num = id => { const el = document.getElementById(id); return el ? Number(el.value) || 0 : 0; };
+    const ptsFirst = num("cs-pts-first");
+    const ptsSecond = num("cs-pts-second");
+    const ptsThird = num("cs-pts-third");
+    const ptsAlone = num("cs-pts-alone");
+    const showWon = !!document.getElementById("cs-pts-won");
+    const ptsWon = num("cs-pts-won");
 
     const btn = document.getElementById("club-standings-print-btn");
     btn.disabled = true;
@@ -1191,43 +1209,46 @@ async function printClubStandingsPdf() {
         const tally = {};
         const bump = (clubId, field, amount) => {
             if (!clubId) return;
-            const row = tally[clubId] || (tally[clubId] = { first: 0, second: 0, third: 0, wonFights: 0 });
+            const row = tally[clubId] || (tally[clubId] = { first: 0, second: 0, third: 0, alone: 0, wonFights: 0 });
             row[field] += amount;
         };
+        const clubOf = entry => (entry && entry.members && entry.members[0] ? entry.members[0].clubId : null);
 
         Object.values(rostersByAgeCode).forEach(categoriesForAge => {
             Object.values(categoriesForAge).forEach(entriesForCategory => {
                 const entries = Object.values(entriesForCategory || {});
-                entries.forEach(entry => {
-                    const clubId = entry.members && entry.members[0] ? entry.members[0].clubId : null;
-                    if (entry.placement === 1) bump(clubId, "first", 1);
-                    else if (entry.placement === 2) bump(clubId, "second", 1);
-                    else if (entry.placement === 3) bump(clubId, "third", 1);
-                });
-                if (includeSingle && entries.length === 1 && entries[0].placement == null) {
-                    const clubId = entries[0].members && entries[0].members[0] ? entries[0].members[0].clubId : null;
-                    bump(clubId, "first", 1);
+                if (entries.length === 1) {
+                    bump(clubOf(entries[0]), "alone", 1); // alone — not counted as a 1st
+                    return;
                 }
+                entries.forEach(entry => {
+                    if (entry.placement === 1) bump(clubOf(entry), "first", 1);
+                    else if (entry.placement === 2) bump(clubOf(entry), "second", 1);
+                    else if (entry.placement === 3) bump(clubOf(entry), "third", 1);
+                });
             });
         });
 
-        matchesById.forEach(m => {
-            if (!m.winnerEntryId) return;
-            const winnerCorner = m.blue && m.blue.entryId === m.winnerEntryId ? m.blue
-                : m.red && m.red.entryId === m.winnerEntryId ? m.red
-                    : null;
-            if (winnerCorner && winnerCorner.clubId) bump(winnerCorner.clubId, "wonFights", 1);
-        });
+        if (showWon) {
+            matchesById.forEach(m => {
+                if (!m.winnerEntryId || m.status === "walkover") return; // a walkover isn't a won fight
+                const winnerCorner = m.blue && m.blue.entryId === m.winnerEntryId ? m.blue
+                    : m.red && m.red.entryId === m.winnerEntryId ? m.red
+                        : null;
+                if (winnerCorner && winnerCorner.clubId) bump(winnerCorner.clubId, "wonFights", 1);
+            });
+        }
 
         const rows = Object.entries(tally).map(([clubId, counts]) => ({
             clubId,
             clubName: clubNameById[clubId] || clubId,
             ...counts,
-            points: counts.first * ptsFirst + counts.second * ptsSecond + counts.third * ptsThird + counts.wonFights * ptsWon,
-        })).filter(r => r.first || r.second || r.third || r.wonFights);
+            points: counts.first * ptsFirst + counts.second * ptsSecond + counts.third * ptsThird
+                + counts.alone * ptsAlone + (showWon ? counts.wonFights * ptsWon : 0),
+        })).filter(r => r.first || r.second || r.third || r.alone || (showWon && r.wonFights));
 
         if (rows.length === 0) {
-            errEl.textContent = "Nothing to rank yet — run 🏅 Compute Results first, or check the box to include single-athlete categories.";
+            errEl.textContent = "Nothing to rank yet — run 🏅 Compute Results first.";
             errEl.classList.remove("hidden");
             return;
         }
@@ -1239,7 +1260,7 @@ async function printClubStandingsPdf() {
             r.place = place;
         });
 
-        await printHtmlInFrame(buildClubStandingsHtml(rows));
+        await printHtmlInFrame(buildClubStandingsHtml(rows, { showWon }));
         closeModal();
     } catch (err) {
         console.error("Failed to print club standings PDF", err);
@@ -1251,7 +1272,8 @@ async function printClubStandingsPdf() {
     }
 }
 
-function buildClubStandingsHtml(rows) {
+function buildClubStandingsHtml(rows, opts) {
+    const showWon = !opts || opts.showWon !== false;
     const cell = (content, extra) => `<td style="border:1px solid #111; padding:6px 8px; ${extra || "text-align:center;"}">${content}</td>`;
     const rowsHtml = rows.map(r => `
         <tr>
@@ -1260,7 +1282,8 @@ function buildClubStandingsHtml(rows) {
             ${cell(r.first)}
             ${cell(r.second)}
             ${cell(r.third)}
-            ${cell(r.wonFights)}
+            ${cell(r.alone)}
+            ${showWon ? cell(r.wonFights) : ""}
             ${cell(r.points)}
         </tr>
     `).join("");
@@ -1279,7 +1302,8 @@ function buildClubStandingsHtml(rows) {
                         ${th("1st")}
                         ${th("2nd")}
                         ${th("3rd")}
-                        ${th("Won Matches")}
+                        ${th("Alone")}
+                        ${showWon ? th("Won Matches") : ""}
                         ${th("Points")}
                     </tr>
                 </thead>
@@ -1389,7 +1413,8 @@ function openInsertModal(courtId, prevMatch, nextMatch) {
                 ${ins.fieldsHtml()}
                 <label class="lq-checkbox-label lq-span-2">
                     <input type="checkbox" id="insert-isRanked">
-                    Ranked / official (counts toward standings) — off by default for inserted matches
+                    Ranked / official (counts toward standings) — off by default for inserted matches.
+                    A ranked solo performance in a cut-off category is also added to that category's bracket.
                 </label>
             </div>
 
@@ -1405,10 +1430,36 @@ function openInsertModal(courtId, prevMatch, nextMatch) {
 
     wireInsertCornerSearch("blue");
     wireInsertCornerSearch("red");
-    document.getElementById("insert-category").onchange = () => {
-        document.getElementById("insert-category-custom").classList.toggle(
-            "hidden", document.getElementById("insert-category").value !== "__custom__"
-        );
+
+    // Category and round default to the neighbouring match's; picking
+    // another category picks the round its latest match is in.
+    const categorySelect = document.getElementById("insert-category");
+    const phaseSelect = document.getElementById("insert-roundPhase");
+    const setPhase = (phase) => {
+        if (!phase) return;
+        if (![...phaseSelect.options].some(o => o.value === phase)) {
+            phaseSelect.insertAdjacentHTML("afterbegin", `<option value="${escapeAttr(phase)}">${escapeHtml(phase)}</option>`);
+        }
+        phaseSelect.value = phase;
+    };
+    const latestPhaseOf = (code) => {
+        let latest = null;
+        matchesById.forEach(m => {
+            if (m.categoryCode === code && (!latest || (m.queuePosition ?? 0) > (latest.queuePosition ?? 0))) latest = m;
+        });
+        return latest && latest.roundPhase;
+    };
+    const anchor = [prevMatch, nextMatch].find(x => x && x.categoryCode && categoriesPresent.has(x.categoryCode));
+    if (anchor) {
+        categorySelect.value = anchor.categoryCode;
+        setPhase(anchor.roundPhase);
+    } else if (categorySelect.value && categorySelect.value !== "__custom__") {
+        setPhase(latestPhaseOf(categorySelect.value));
+    }
+    categorySelect.onchange = () => {
+        const v = categorySelect.value;
+        document.getElementById("insert-category-custom").classList.toggle("hidden", v !== "__custom__");
+        if (v !== "__custom__") setPhase(latestPhaseOf(v));
     };
     document.getElementById("insert-submit-btn").onclick = (e) => submitInsertMatch(courtId, prevMatch, nextMatch, null, e.currentTarget);
     (ins.actions || []).forEach(a => {
@@ -1536,7 +1587,12 @@ async function submitInsertMatch(courtId, prevMatch, nextMatch, action, activeBt
     if (activeBtn) activeBtn.textContent = "Creating…";
 
     try {
-        await matchDocRef(`${TOURNAMENT_ID}_${displayNumber}`).set(newMatch);
+        // A ranked solo performance in a cut-off category also joins its
+        // bracket (live-queue-bracket-sync.js) — same batch.
+        const batch = fsDb.batch();
+        await syncCutOffEntryForRanked(null, newMatch, batch);
+        batch.set(matchDocRef(`${TOURNAMENT_ID}_${displayNumber}`), newMatch);
+        await batch.commit();
         closeModal();
         if (action && action.after) action.after(newMatch);
     } catch (err) {
@@ -1924,7 +1980,7 @@ function openDetailModal(matchId) {
     if (!m) return;
     const fmt = formatOf(m);
 
-    if (isDone(m) && fmt.openResult) { fmt.openResult(matchId); return; }
+    if (isDone(m) && fmt.openResult) { fmt.openResult(matchId); appendDeleteMatchButton(matchId); return; }
 
     currentDetailMatchId = matchId;
     pendingCornerReplacement = { blue: null, red: null };
@@ -2029,6 +2085,8 @@ function openDetailModal(matchId) {
                 <button class="btn btn-primary" id="detail-save-btn">Save Changes</button>
                 ${fmt.detailActionsHtml(m)}
                 <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+                ${fillByeButtonsHtml(matchId)}
+                ${deleteMatchButtonHtml(matchId)}
             </div>
         </div>
     `);
@@ -2161,6 +2219,17 @@ async function saveMatchEdits(matchId) {
         const syncNotes = Object.keys(replacedNow).length
             ? await syncBracketForReplacement(m, updates, replacedNow, batch)
             : [];
+        // Ranked ticked / unticked on a cut-off performance: join / leave
+        // its bracket. (Not together with a corner replacement — that
+        // already rewrites the bracket's entries in this batch.)
+        if (fmt.solo && !Object.keys(replacedNow).length && (m.isRanked !== false) !== updates.isRanked) {
+            const after = { ...m, ...updates };
+            await syncCutOffEntryForRanked(m, after, batch);
+            if (after.bracketRound != null && m.bracketRound == null) {
+                updates.bracketRound = after.bracketRound;
+                updates.bracketMatchNumber = after.bracketMatchNumber;
+            }
+        }
         batch.set(matchDocRef(matchId), updates, { merge: true });
         await batch.commit();
         closeModal();
@@ -2198,6 +2267,23 @@ function applyCornerUpdateDownstream(originMatchId, cornerData, batch, visited) 
             const otherCorner = m[side === "blue" ? "red" : "blue"];
             const bothKnown = !!cornerData.entryId && !!(otherCorner && otherCorner.entryId);
             const update = { [side]: cornerData };
+
+            // The other side is a BYE (its match was deleted): whoever arrives
+            // here goes straight through on a walkover.
+            if (otherCorner && otherCorner.bye) {
+                const winnerId = cornerData.entryId || null;
+                update.status = winnerId ? "walkover" : "pending";
+                update.winnerEntryId = winnerId;
+                update.win = null;
+                update.win_score = null;
+                update.win_type = null;
+                visited.add(m.id);
+                batch.set(matchDocRef(m.id), update, { merge: true });
+                applyCornerUpdateDownstream(m.id, winnerId
+                    ? { ...cornerData, source: { matchId: m.id, slot: "winner" } }
+                    : { entryId: null, source: { matchId: m.id, slot: "winner" } }, batch, visited);
+                return;
+            }
 
             const invalidatesExistingResult = m.winnerEntryId && corner.entryId
                 && corner.entryId === m.winnerEntryId && corner.entryId !== cornerData.entryId;

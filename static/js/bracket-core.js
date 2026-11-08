@@ -6,7 +6,9 @@
  * Used by:
  *   - bracket_builder.html  → generates brackets before push
  *   - live_queue.html       → rebuilds the SAME tree from the saved bracket
- *                             doc (entries + seed + placementStrategy)
+ *                             doc (entries + seed + placementStrategy, or
+ *                             the frozen slotOrder once the live queue has
+ *                             replaced or removed athletes)
  *
  * Both pages MUST run this exact code. The live queue reconstructs the
  * tree by re-running placement on the saved seed order; if its placement
@@ -261,9 +263,16 @@
     // Match ids follow "{categoryCode}_r{round}_m{matchNumber}" — depends
     // only on structure, never on who sits in a slot, which is why a saved
     // `source.matchId` resolves against a freshly rebuilt tree.
-    function generateSingleElimination(categoryCode, entries, placementFn) {
+    //
+    // fixedBracketSize (optional, a power of two ≥ entries.length): keeps
+    // the tree at that size instead of the smallest that fits. The live
+    // queue passes it once athletes have been removed from a pushed
+    // bracket, so the tree keeps the shape it was pushed with. The bracket
+    // builder never passes it.
+    function generateSingleElimination(categoryCode, entries, placementFn, fixedBracketSize) {
         placementFn = placementFn || PLACEMENT_STRATEGIES.standard;
-        const bracketSize = nextPowerOfTwo(entries.length);
+        const fits = fixedBracketSize >= entries.length && fixedBracketSize >= 2 && (fixedBracketSize & (fixedBracketSize - 1)) === 0;
+        const bracketSize = fits ? fixedBracketSize : nextPowerOfTwo(entries.length);
         const slots = placementFn(entries, bracketSize);
 
         const entrySlotIndex = {};

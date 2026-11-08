@@ -170,13 +170,15 @@
 {#
 `tournaments` should hold active-status tournaments; `now` (a
 tz-aware UTC datetime) must be in the template context. Filtering
-happens here so a tournament whose date has passed never shows as
+happens here so a tournament whose DAY has passed never shows as
 "upcoming," even if its status hasn't been flipped to archived yet.
+Compared by calendar day, not by time: today's tournament stays in the
+rail all day, also after its start time.
 #}
-{% set cutoff = now if now is defined and now else None %}
+{% set today = now.date() if now is defined and now else None %}
 {% set upcoming = [] %}
 {% for t in (tournaments or []) %}
-{% if t.dateTime and (cutoff is none or t.dateTime >= cutoff) %}
+{% if t.dateTime and (today is none or t.dateTime.date() >= today) %}
 {% set _ = upcoming.append(t) %}
 {% endif %}
 {% endfor %}
@@ -213,6 +215,7 @@ happens here so a tournament whose date has passed never shows as
             <div class="panel rail-card">
                 <div>
                     <span class="tag tag-navy">{{ t.sport | default('Multi-Sport') }}</span>
+                    {% if today and t.dateTime.date() == today %}<span class="tag tag-neutral">Today</span>{% endif %}
                     <h3 style="margin-top: 0.9rem; margin-bottom: 0.7rem;">{{ t.title }}</h3>
                     <p class="text-muted" style="font-size: 0.95rem; margin-bottom: 0.25rem;">
                         {{ t.location | default('Location to be announced') }}
