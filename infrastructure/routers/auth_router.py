@@ -231,6 +231,29 @@ async def logout(response: Response):
 
 # ── PAGES ─────────────────────────────────────────────────────────────────────
 
+def _all_tournaments(tournament_repo, status: str, page_size: int = 100, cap: int = 2000) -> list:
+    """Every public tournament with this status, page by page.
+    getTournamentsPaginated returns them in the repo's own order (oldest
+    first), so a single small page would cut off the NEWEST ones."""
+    out = []
+    while len(out) < cap:
+        page = tournament_repo.getTournamentsPaginated(
+            status=status, limit=page_size, offset=len(out), isExternalPublic=True
+        )
+        out.extend(page)
+        if len(page) < page_size:
+            break
+    return out
+
+
+def _by_date_desc(tournaments: list) -> list:
+    return sorted(
+        tournaments,
+        key=lambda t: t.dateTime or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+
 @router.get("/")
 async def main_page(
     request: Request, 
@@ -240,28 +263,16 @@ async def main_page(
     """
     Renders the landing page with two feeds:
       - `tournaments`: active-status tournaments for the horizontal
-        "upcoming" rail. main.html additionally filters these down to
-        dateTime >= now, since "active" just means not-yet-archived, not
+        "upcoming" rail. main.html additionally keeps only those whose day
+        is today or later, since "active" just means not-yet-archived, not
         necessarily still in the future.
-      - `archived_tournaments`: a small preview of past tournaments for
-        the "Past Tournaments" grid, newest-first. getTournamentsPaginated
-        doesn't expose an ordering parameter, so we sort client-side here
-        rather than assume what order the repo returns — sorting is
-        cheap at this size (limit=6) and keeps this page correct
-        regardless of the repo's internal default.
+      - `archived_tournaments`: EVERY past tournament, newest first.
+        main.html shows 6 and reveals 6 more per "Show more" click, so it
+        needs the whole list — a limit here would hide the newest ones
+        (the repo returns oldest first).
     """
-    tournaments = tournament_repo.getTournamentsPaginated(
-        status="active", limit=10, offset=0, isExternalPublic=True
-    )
-
-    archived_tournaments = tournament_repo.getTournamentsPaginated(
-        status="archived", limit=6, offset=0, isExternalPublic=True
-    )
-    archived_tournaments = sorted(
-        archived_tournaments,
-        key=lambda t: t.dateTime or datetime.min.replace(tzinfo=timezone.utc),
-        reverse=True,
-    )
+    tournaments = _all_tournaments(tournament_repo, "active")
+    archived_tournaments = _by_date_desc(_all_tournaments(tournament_repo, "archived"))
 
     return templates.TemplateResponse(request, "main.html", {
         "request": request,

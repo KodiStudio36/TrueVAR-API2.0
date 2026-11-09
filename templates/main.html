@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_contact.html" as contact %}
 
 {% block title %}TrueVAR — Tournaments{% endblock %}
 
@@ -148,6 +149,155 @@
         justify-content: center;
         margin-top: clamp(1.25rem, 4vw, 2rem);
     }
+
+    /* !important: the cards carry an inline display:flex, which would
+       otherwise beat this rule and keep "hidden" cards visible. */
+    .show-more-link {
+        background: none;
+        border: none;
+        padding: 0.25rem 0.5rem;
+        font: inherit;
+        font-weight: 600;
+        color: var(--ink);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+    }
+
+    .show-more-link:hover {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+    }
+
+    .archived-card[hidden] {
+        display: none !important;
+    }
+
+    /* ── CONTACT ─────────────────────────────────────────────── */
+    .contact-section {
+        padding-top: clamp(2.5rem, 7vw, 4rem);
+        padding-bottom: clamp(2.5rem, 7vw, 4rem);
+        border-top: 1px solid var(--border);
+    }
+
+    .contact-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: clamp(0.85rem, 2.5vw, 1.25rem);
+        margin-top: clamp(1.1rem, 4vw, 1.75rem);
+    }
+
+    .contact-card {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+        padding: clamp(0.9rem, 3vw, 1.25rem);
+        text-decoration: none;
+        color: var(--ink);
+        transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+
+    .contact-card:hover {
+        border-color: var(--border-strong);
+        transform: translateY(-1px);
+    }
+
+    .contact-icon {
+        flex-shrink: 0;
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--page-bg);
+        color: var(--ink);
+    }
+
+    .contact-label {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+
+    .contact-value {
+        font-weight: 600;
+        overflow-wrap: break-word;
+    }
+
+    @media (max-width: 760px) {
+        .contact-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    /* WhatsApp community — highlighted, but quietly */
+    .contact-card--whatsapp {
+        grid-column: 1 / -1;
+        position: relative;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid rgba(37, 211, 102, 0.45);
+    }
+
+    .contact-card--whatsapp:hover {
+        border-color: #25d366;
+    }
+
+    .contact-card--whatsapp .contact-icon {
+        background: #e9f9ef;
+        color: #1da851;
+    }
+
+    .contact-card--whatsapp .contact-cta {
+        position: relative;
+        z-index: 1;
+        margin-left: auto;
+        flex-shrink: 0;
+        background: var(--surface);
+        color: #138a43;
+        border: 1px solid rgba(37, 211, 102, 0.6);
+        font-weight: 600;
+        font-size: 0.92rem;
+        padding: 0.45rem 1rem;
+        border-radius: 999px;
+        white-space: nowrap;
+        transition: background-color 0.15s ease;
+    }
+
+    .contact-card--whatsapp:hover .contact-cta {
+        background: #e9f9ef;
+    }
+
+    /* the sketched pattern: straight + wavy diagonals, right before the button */
+    .contact-deco {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        right: 11.5rem;
+        height: 100%;
+        width: 150px;
+        color: #25d366;
+        opacity: 0.35;
+        pointer-events: none;
+    }
+
+    @media (max-width: 520px) {
+        .contact-card--whatsapp {
+            flex-wrap: wrap;
+        }
+
+        .contact-deco {
+            display: none;
+        }
+
+        .contact-card--whatsapp .contact-cta {
+            margin-left: 0;
+            width: 100%;
+            box-sizing: border-box;
+            text-align: center;
+        }
+    }
 </style>
 
 <!-- ═══════════════════════════ HERO ═══════════════════════════ -->
@@ -238,16 +388,19 @@ rail all day, also after its start time.
 
 <!-- ═══════════════════════════ PAST ════════════════════════════ -->
 {#
-`archived_tournaments` should be passed in separately, sorted
-latest → furthest. Only the first 6 are shown; "View more" only
-appears if there are actually more than that to see. If there's no
-upcoming rail, this section steps up to be the one directly under
-the hero — hence the `--first` modifier dropping its top divider.
+`archived_tournaments` holds the archived tournaments (all of them —
+"Show more" reveals what was rendered, it doesn't fetch). Sorted here,
+newest first; tournaments without a date go last. 6 are shown, each
+"Show more" click reveals 6 more. If there's no upcoming rail, this
+section is the one directly under the hero — hence `--first`.
 #}
-{% set archived_all = archived_tournaments or [] %}
-{% set archived_preview = archived_all[:6] %}
+{% set archived_dated = (archived_tournaments or []) | selectattr("dateTime") | sort(attribute="dateTime", reverse=true)
+| list %}
+{% set archived_undated = (archived_tournaments or []) | rejectattr("dateTime") | list %}
+{% set archived_all = archived_dated + archived_undated %}
+{% set archived_page = 6 %}
 
-{% if archived_preview %}
+{% if archived_all %}
 <div class="archived-section{{ ' archived-section--first' if not upcoming else '' }}">
     <div style="margin-bottom: clamp(1.1rem, 4vw, 1.75rem);">
         <h2>Past Tournaments</h2>
@@ -256,10 +409,11 @@ the hero — hence the `--first` modifier dropping its top divider.
         </p>
     </div>
 
-    <div class="card-grid">
-        {% for t in archived_preview %}
-        <div class="panel"
-            style="padding: clamp(0.9rem, 3vw, 1.5rem); display: flex; flex-direction: column; justify-content: space-between;">
+    <div class="card-grid" id="archivedGrid">
+        {% for t in archived_all %}
+        <div class="panel archived-card" {% if loop.index> archived_page %}hidden{% endif %}
+            style="padding: clamp(0.9rem, 3vw, 1.5rem); display: flex; flex-direction: column; justify-content:
+            space-between;">
             <div>
                 <span class="tag tag-neutral">{{ t.sport | default('Multi-Sport') }}</span>
                 <h3 style="margin-top: 0.9rem; margin-bottom: 0.7rem;">{{ t.title }}</h3>
@@ -279,13 +433,116 @@ the hero — hence the `--first` modifier dropping its top divider.
         {% endfor %}
     </div>
 
-    {% if archived_all | length > archived_preview | length %}
+    {% if archived_all | length > archived_page %}
     <div class="view-more-row">
-        <a href="/tournaments/archived" class="btn btn-secondary">View all archived tournaments</a>
+        <button type="button" class="show-more-link" id="archivedMore" data-page="{{ archived_page }}">
+            Show more
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.5 6L8 10.5L12.5 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                    stroke-linejoin="round" />
+            </svg>
+        </button>
     </div>
     {% endif %}
 </div>
 {% endif %}
+
+<!-- ═══════════════════════════ CONTACT ═════════════════════════ -->
+{#
+Contact details — from templates/_contact.html (shared with the tournament
+page), unless the route passes contact_phone / contact_email / contact_whatsapp.
+phone shown as written; the tel: link drops spaces, dashes, brackets
+whatsapp the community's invite link (https://chat.whatsapp.com/…)
+#}
+{% set contact_phone = contact_phone if contact_phone is defined and contact_phone else contact.phone %}
+{% set contact_email = contact_email if contact_email is defined and contact_email else contact.email %}
+{% set contact_whatsapp = contact_whatsapp if contact_whatsapp is defined and contact_whatsapp else
+contact.whatsapp_community %}
+{% set phone_href = contact_phone | replace(" ", "") | replace("-", "") | replace("(", "") | replace(")", "") %}
+{# WhatsApp 1:1 chat — international number, digits only (wa.me needs no "+").
+Defaults to the phone number above; pass contact_whatsapp_chat to use another. #}
+{% set contact_whatsapp_chat = contact_whatsapp_chat if contact_whatsapp_chat is defined and contact_whatsapp_chat else
+contact.whatsapp_chat %}
+{% set whatsapp_chat_digits = contact_whatsapp_chat | replace("+", "") | replace(" ", "") | replace("-", "") |
+replace("(", "") | replace(")", "") %}
+
+<div class="contact-section">
+    <h2>Contact</h2>
+    <p class="text-muted" style="font-size: 1.05rem; margin-top: 0.5rem;">
+        Questions about a tournament, registration or results? Get in touch.
+    </p>
+
+    <div class="contact-grid">
+        <a class="panel contact-card contact-card--whatsapp" href="{{ contact_whatsapp }}" target="_blank"
+            rel="noopener">
+            <span class="contact-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2c-1.5 0-3-.4-4.2-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 2.9 2.9 0 0 0-.9 2.2 5 5 0 0 0 1.1 2.7 11.4 11.4 0 0 0 4.4 3.9c1.6.7 2.3.7 3.1.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z" />
+                </svg>
+            </span>
+            <span>
+                <span class="contact-label">WhatsApp community</span><br>
+                <span class="contact-value">News, schedules and results first</span>
+            </span>
+            <svg class="contact-deco" viewBox="0 0 198 96" preserveAspectRatio="xMidYMid slice" aria-hidden="true"
+                fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 96 L44 0" />
+                <path
+                    d="M32.0 96.0 L35.8 92.9 L38.7 89.4 L39.9 85.3 L39.6 80.7 L38.6 75.8 L37.7 71.0 L38.0 66.6 L39.9 62.8 L43.2 59.5 L47.2 56.4 L50.7 53.1 L53.0 49.4 L53.6 45.1 L52.9 40.4 L51.7 35.5 L51.2 30.8 L52.2 26.6 L54.7 23.0 L58.4 19.8 L62.3 16.7 L65.4 13.3 L67.0 9.4 L67.0 4.9 L66.0 0.0" />
+                <path d="M54 96 L88 0" />
+                <path
+                    d="M76.0 96.0 L79.8 92.9 L82.7 89.4 L83.9 85.3 L83.6 80.7 L82.6 75.8 L81.7 71.0 L82.0 66.6 L83.9 62.8 L87.2 59.5 L91.2 56.4 L94.7 53.1 L97.0 49.4 L97.6 45.1 L96.9 40.4 L95.7 35.5 L95.2 30.8 L96.2 26.6 L98.7 23.0 L102.4 19.8 L106.3 16.7 L109.4 13.3 L111.0 9.4 L111.0 4.9 L110.0 0.0" />
+                <path d="M98 96 L132 0" />
+                <path
+                    d="M120.0 96.0 L123.8 92.9 L126.7 89.4 L127.9 85.3 L127.6 80.7 L126.6 75.8 L125.7 71.0 L126.0 66.6 L127.9 62.8 L131.2 59.5 L135.2 56.4 L138.7 53.1 L141.0 49.4 L141.6 45.1 L140.9 40.4 L139.7 35.5 L139.2 30.8 L140.2 26.6 L142.7 23.0 L146.4 19.8 L150.3 16.7 L153.4 13.3 L155.0 9.4 L155.0 4.9 L154.0 0.0" />
+                <path d="M142 96 L176 0" />
+            </svg>
+            <span class="contact-cta">Join community</span>
+        </a>
+
+        <a class="panel contact-card" href="tel:{{ phone_href }}">
+            <span class="contact-icon" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path
+                        d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2Z" />
+                </svg>
+            </span>
+            <span>
+                <span class="contact-label">Phone</span><br>
+                <span class="contact-value">{{ contact_phone }}</span>
+            </span>
+        </a>
+
+        <a class="panel contact-card" href="https://wa.me/{{ whatsapp_chat_digits }}" target="_blank" rel="noopener">
+            <span class="contact-icon" aria-hidden="true" style="color:#1da851;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2c-1.5 0-3-.4-4.2-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 2.9 2.9 0 0 0-.9 2.2 5 5 0 0 0 1.1 2.7 11.4 11.4 0 0 0 4.4 3.9c1.6.7 2.3.7 3.1.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z" />
+                </svg>
+            </span>
+            <span>
+                <span class="contact-label">WhatsApp chat</span><br>
+                <span class="contact-value">Message us directly</span>
+            </span>
+        </a>
+
+        <a class="panel contact-card" href="mailto:{{ contact_email }}">
+            <span class="contact-icon" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="4" width="20" height="16" rx="2" />
+                    <path d="m22 7-10 6L2 7" />
+                </svg>
+            </span>
+            <span>
+                <span class="contact-label">Email</span><br>
+                <span class="contact-value">{{ contact_email }}</span>
+            </span>
+        </a>
+    </div>
+</div>
 
 <script>
     // Arrow-button scrolling for the upcoming rail. Native touch/trackpad
@@ -320,6 +577,20 @@ the hero — hence the `--first` modifier dropping its top divider.
         rail.addEventListener("scroll", updateButtons, { passive: true });
         window.addEventListener("resize", updateButtons);
         updateButtons();
+    })();
+
+    // "Show more" on past tournaments: reveals the next 6 each click,
+    // disappears once everything is shown.
+    (function () {
+        var btn = document.getElementById("archivedMore");
+        var grid = document.getElementById("archivedGrid");
+        if (!btn || !grid) return;
+        var page = parseInt(btn.getAttribute("data-page"), 10) || 6;
+        btn.addEventListener("click", function () {
+            var hidden = grid.querySelectorAll(".archived-card[hidden]");
+            for (var i = 0; i < hidden.length && i < page; i++) hidden[i].hidden = false;
+            if (hidden.length <= page) btn.parentNode.remove();
+        });
     })();
 </script>
 {% endblock %}
