@@ -1,0 +1,340 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ item.name }} — Inventory — TrueCNTRL{% endblock %}
+{% block content %}
+
+<a href="/dashboard/inventory" class="text-link inv-back">← Inventory</a>
+<p id="item-message" class="ops-message" role="status" hidden></p>
+
+<section class="item-head" data-id="{{ item.id }}" data-name="{{ item.name }}"
+    data-is-case="{{ 'true' if item.isCase else 'false' }}">
+    <div class="item-photo">
+        {% if item.photoUrl %}
+        <img src="{{ item.photoUrl }}" alt="{{ item.name }}" referrerpolicy="no-referrer"
+            onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'inv-photo-missing', textContent: 'Photo unavailable'}))">
+        {% else %}
+        <span class="inv-photo-missing">No photo</span>
+        {% endif %}
+    </div>
+
+    <div class="item-info">
+        <div class="item-title-row">
+            <div>
+                <span class="inv-type inv-type-{{ item.type }}">{{ item.typeLabel }}</span>
+                <h2 class="item-name">{{ item.name or "Unnamed" }}</h2>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="text-link link-button" id="item-edit">Edit</button>
+                <button type="button" class="text-link link-button op-danger" id="item-delete">Delete</button>
+            </div>
+        </div>
+
+        {% if item.description %}
+        <p class="item-description">{{ item.description }}</p>
+        {% else %}
+        <p class="item-description is-empty">No description yet.</p>
+        {% endif %}
+
+        {% if item.isCase %}
+        <dl class="item-facts">
+            <div>
+                <dt>Licence key</dt>
+                <dd><code>{{ item.id }}</code>
+                    <button type="button" class="text-link link-button inv-copy" data-copy="{{ item.id }}">Copy</button>
+                </dd>
+            </div>
+            <div>
+                <dt>Booted into</dt>
+                <dd>
+                    {% if item.tournamentId and not item.tournamentMissing %}
+                    <span class="inv-dot is-on"></span>
+                    <a href="/dashboard/tournaments/{{ item.tournamentId }}">{{ item.tournamentTitle }}</a>{% if
+                    item.courtId %} · Court {{ item.courtId }}{% endif %}
+                    {% if item.chosenLabel %}<span class="item-chosen">chosen on the case {{ item.chosenLabel
+                        }}</span>{% endif %}
+                    {% elif item.tournamentId %}
+                    <span class="inv-dot is-warn"></span> A deleted tournament — clears at next boot
+                    {% else %}
+                    <span class="inv-dot"></span> Not assigned
+                    {% endif %}
+                </dd>
+            </div>
+        </dl>
+        {% endif %}
+    </div>
+</section>
+
+{# ── Schedule (inventory/{id}.scheduledTournaments, read live) ───────── #}
+{% macro schedule_row(t) %}
+<li class="sched-row{% if t.missing %} is-missing{% endif %}" data-tournament="{{ t.id }}" data-title="{{ t.title }}">
+    <span class="sched-date">{{ t.dateLabel or "—" }}</span>
+    {% if t.missing %}
+    <span class="sched-title">Deleted tournament</span>
+    {% else %}
+    <a class="sched-title" href="/dashboard/tournaments/{{ t.id }}">{{ t.title }}</a>
+    {% endif %}
+    {% if t.isToday %}<span class="sched-today">Today</span>{% endif %}
+    {% if t.status == "archived" %}<span class="sched-archived">archived</span>{% endif %}
+    <button type="button" class="eq-remove sched-remove" aria-label="Remove from {{ t.title }}">×</button>
+</li>
+{% endmacro %}
+
+<div class="list-divider" id="schedule"><span>Scheduled for ({{ item.upcoming | length }} upcoming)</span></div>
+<p class="sched-hint">
+    Add items to a tournament from the tournament's page (Equipment card).
+    {% if item.isCase %}On power-on the case opens the tournament scheduled for that day — unless a different
+    one was already chosen on the case that day.{% endif %}
+</p>
+{% if item.upcoming %}
+<ul class="sched-list">{% for t in item.upcoming %}{{ schedule_row(t) }}{% endfor %}</ul>
+{% else %}
+<p class="op-group-empty">Not scheduled for any upcoming tournament.</p>
+{% endif %}
+{% if item.past %}
+<details class="sched-past">
+    <summary>Past tournaments ({{ item.past | length }})</summary>
+    <ul class="sched-list">{% for t in item.past %}{{ schedule_row(t) }}{% endfor %}</ul>
+</details>
+{% endif %}
+
+{# ── Bug reports ──────────────────────────────────────────────────── #}
+{% macro bug_card(b) %}
+<article class="bug-card is-{{ b.status }}" data-bug="{{ b.id }}">
+    <div class="bug-head">
+        <span class="bug-status bug-status-{{ b.status }}">{{ b.status }}</span>
+        <h3 class="bug-title">{{ b.title }}</h3>
+        {% if b.status == "pending" %}
+        <button type="button" class="text-link link-button bug-set" data-status="resolved">Mark resolved</button>
+        {% else %}
+        <button type="button" class="text-link link-button bug-set" data-status="pending">Reopen</button>
+        {% endif %}
+    </div>
+    {% if b.details %}<p class="bug-details">{{ b.details }}</p>{% endif %}
+    <p class="bug-meta">
+        Reported by {{ b.createdBy }}{% if b.createdLabel %} · {{ b.createdLabel }}{% endif %}
+        {% if b.status == "resolved" %}<br>Resolved by {{ b.resolvedBy or "unknown" }}{% if b.resolvedLabel %} · {{
+        b.resolvedLabel }}{% endif %}{% endif %}
+    </p>
+</article>
+{% endmacro %}
+
+<div class="list-divider" id="bugs"><span>Bug reports ({{ item.pendingBugs | length }} open)</span></div>
+
+<form id="bug-form" class="bug-form" novalidate>
+    <label class="op-field">Report a bug
+        <input type="text" id="bug-title" maxlength="150" required
+            placeholder="What's wrong? e.g. Fan rattles at startup">
+    </label>
+    <label class="op-field">Details (optional)
+        <textarea id="bug-details" rows="3" maxlength="4000"
+            placeholder="When it happens, at which tournament, what was tried…"></textarea>
+    </label>
+    <div class="bug-form-foot">
+        <button type="submit" class="btn btn-sm" id="bug-submit">Report bug</button>
+        <span class="inv-hint is-error" id="bug-error" hidden></span>
+    </div>
+</form>
+
+<div class="bug-list" id="bug-list">
+    {% for b in item.pendingBugs %}{{ bug_card(b) }}{% else %}
+    <p class="op-group-empty">No open bugs.</p>
+    {% endfor %}
+</div>
+
+{% if item.resolvedBugs %}
+<div class="list-divider"><span>Resolved ({{ item.resolvedBugs | length }})</span></div>
+<div class="bug-list" id="bug-list-resolved">
+    {% for b in item.resolvedBugs %}{{ bug_card(b) }}{% endfor %}
+</div>
+{% endif %}
+
+<!-- Edit dialog -->
+<div id="edit-overlay" class="op-overlay" hidden>
+    <form id="edit-form" class="op-dialog card" role="dialog" aria-modal="true" aria-labelledby="edit-title" novalidate>
+        <div class="op-dialog-head">
+            <h3 id="edit-title">Edit item</h3>
+            <button type="button" class="text-link link-button" id="edit-close" aria-label="Close">✕</button>
+        </div>
+        <label class="op-field">Type
+            <select disabled>
+                <option>{{ item.typeLabel }}</option>
+            </select>
+        </label>
+        <p class="inv-hint">Type can't be changed after an item is added.</p>
+
+        <label class="op-field">Name
+            <input type="text" id="edit-name" maxlength="120" required value="{{ item.name }}">
+        </label>
+        <label class="op-field">Description
+            <textarea id="edit-description" rows="5" maxlength="2000">{{ item.description }}</textarea>
+        </label>
+        <label class="op-field">Photo link
+            <input type="text" id="edit-photo" inputmode="url" value="{{ item.photoUrl or '' }}"
+                placeholder="https://… or /static/assets/images/…">
+        </label>
+        <div class="inv-preview" id="edit-preview" hidden><img alt="Photo preview"></div>
+
+        <p class="inv-hint is-error" id="edit-error" hidden></p>
+        <div class="op-dialog-foot">
+            <button type="submit" class="btn" id="edit-submit">Save</button>
+            <button type="button" class="text-link link-button" id="edit-cancel">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    (function () {
+        const head = document.querySelector(".item-head");
+        const ITEM_ID = head.dataset.id;
+        const API = `/api/inventory/${encodeURIComponent(ITEM_ID)}`;
+
+        const msg = document.getElementById("item-message");
+        function show(text, isError) {
+            msg.textContent = text;
+            msg.classList.toggle("is-error", !!isError);
+            msg.hidden = false;
+        }
+        const params = new URLSearchParams(location.search);
+        if (params.get("msg")) {
+            show(params.get("msg"), false);
+            history.replaceState({}, "", location.pathname + location.hash);
+        }
+        const reloadWith = (text, hash = "") => {
+            location.href = location.pathname + "?msg=" + encodeURIComponent(text) + hash;
+        };
+
+        async function api(method, url, body) {
+            const res = await fetch(url, {
+                method,
+                headers: body ? { "Content-Type": "application/json" } : {},
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join("; ") : data.detail;
+                throw new Error(detail || `Request failed (${res.status})`);
+            }
+            return data;
+        }
+
+        // ── Copy licence key ──────────────────────────────────────────
+        document.querySelector(".item-head").addEventListener("click", async (e) => {
+            const copy = e.target.closest(".inv-copy");
+            if (!copy) return;
+            try { await navigator.clipboard.writeText(copy.dataset.copy); }
+            catch (err) { prompt("Copy this licence key:", copy.dataset.copy); }
+            copy.textContent = "Copied!";
+            setTimeout(() => { copy.textContent = "Copy"; }, 1500);
+        });
+
+        // ── Delete ────────────────────────────────────────────────────
+        document.getElementById("item-delete").addEventListener("click", async () => {
+            const name = head.dataset.name;
+            const warn = head.dataset.isCase === "true"
+                ? `Delete the case "${name}" and its bug reports? Its licence key stops working — the case boots offline from its next start.`
+                : `Delete "${name}" and its bug reports?`;
+            if (!confirm(warn)) return;
+            try {
+                await api("DELETE", API);
+                location.href = "/dashboard/inventory?msg=" + encodeURIComponent(`"${name}" deleted.`);
+            } catch (err) { show(err.message, true); }
+        });
+
+        // ── Edit ──────────────────────────────────────────────────────
+        const overlay = document.getElementById("edit-overlay");
+        const photoEl = document.getElementById("edit-photo");
+        const preview = document.getElementById("edit-preview");
+        function photoSrc(url) {   // same rule as the server
+            if (/^https?:\/\/\S+$/i.test(url)) return url;
+            if (!url || /^[a-z][a-z0-9+.-]*:|^\/\/|\s/i.test(url)) return "";
+            return url.startsWith("/") ? url : "/" + url;
+        }
+        function updatePreview() {
+            const src = photoSrc(photoEl.value.trim());
+            preview.hidden = !src;
+            if (src) preview.querySelector("img").src = src;
+        }
+        const openEdit = () => { updatePreview(); overlay.hidden = false; document.getElementById("edit-name").focus(); };
+        const closeEdit = () => { overlay.hidden = true; };
+        document.getElementById("item-edit").addEventListener("click", openEdit);
+        document.getElementById("edit-close").addEventListener("click", closeEdit);
+        document.getElementById("edit-cancel").addEventListener("click", closeEdit);
+        overlay.addEventListener("click", e => { if (e.target === overlay) closeEdit(); });
+        document.addEventListener("keydown", e => { if (e.key === "Escape" && !overlay.hidden) closeEdit(); });
+        photoEl.addEventListener("input", updatePreview);
+
+        document.getElementById("edit-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const name = document.getElementById("edit-name").value.trim();
+            const err = document.getElementById("edit-error");
+            if (!name) { document.getElementById("edit-name").focus(); return; }
+            const btn = document.getElementById("edit-submit");
+            btn.disabled = true;
+            err.hidden = true;
+            try {
+                await api("PATCH", API, {
+                    name,
+                    description: document.getElementById("edit-description").value.trim(),
+                    photoUrl: photoEl.value.trim(),
+                });
+                reloadWith("Saved.");
+            } catch (ex) {
+                btn.disabled = false;
+                err.textContent = ex.message;
+                err.hidden = false;
+            }
+        });
+
+        // ── Bug reports ───────────────────────────────────────────────
+        document.getElementById("bug-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const titleEl = document.getElementById("bug-title");
+            const err = document.getElementById("bug-error");
+            const title = titleEl.value.trim();
+            if (!title) { titleEl.focus(); return; }
+            const btn = document.getElementById("bug-submit");
+            btn.disabled = true;
+            err.hidden = true;
+            try {
+                await api("POST", `${API}/bugs`, {
+                    title, details: document.getElementById("bug-details").value.trim() || null,
+                });
+                reloadWith("Bug reported.", "#bugs");
+            } catch (ex) {
+                btn.disabled = false;
+                err.textContent = ex.message;
+                err.hidden = false;
+            }
+        });
+
+        // ── Unschedule ────────────────────────────────────────────────
+        document.addEventListener("click", async (e) => {
+            const btn = e.target.closest(".sched-remove");
+            if (!btn) return;
+            const row = btn.closest(".sched-row");
+            if (!confirm(`Remove this item from "${row.dataset.title}"?`)) return;
+            btn.disabled = true;
+            try {
+                await api("DELETE", `${API}/schedule/${encodeURIComponent(row.dataset.tournament)}`);
+                reloadWith("Removed from the tournament.", "#schedule");
+            } catch (ex) {
+                btn.disabled = false;
+                show(ex.message, true);
+            }
+        });
+
+        document.addEventListener("click", async (e) => {
+            const btn = e.target.closest(".bug-set");
+            if (!btn) return;
+            const card = btn.closest(".bug-card");
+            btn.disabled = true;
+            try {
+                await api("PATCH", `${API}/bugs/${encodeURIComponent(card.dataset.bug)}`, { status: btn.dataset.status });
+                reloadWith(btn.dataset.status === "resolved" ? "Bug marked resolved." : "Bug reopened.", "#bugs");
+            } catch (ex) {
+                btn.disabled = false;
+                show(ex.message, true);
+            }
+        });
+    })();
+</script>
+{% endblock %}

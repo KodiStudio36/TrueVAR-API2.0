@@ -3,6 +3,9 @@
 {% block title %}Settings — TrueVAR{% endblock %}
 
 {% block content %}
+{# Same lookup the navbar uses (cached per request — no extra reads). #}
+{% set nav = nav_roles(request, user) if nav_roles is defined else {} %}
+
 <div style="margin-bottom: 2rem;">
     <h2>Settings</h2>
     <p class="text-muted" style="font-size: 1.05rem; margin-top: 0.5rem;">
@@ -68,6 +71,41 @@
         </div>
         <div style="margin-top: 1.5rem;">
             <a href="/clubs/new" class="btn btn-primary" style="width: 100%;">Create Club</a>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── OPERATOR CARD (active operators only) ─────────────────────── -->
+    {% if nav.operator and operator_profile is defined %}
+    {% set op = operator_profile(nav.operator.uid or user.uid) %}
+    <div class="panel"
+        style="padding: clamp(1.25rem, 5vw, 1.75rem); display: flex; flex-direction: column; justify-content: space-between;">
+        <div>
+            <span class="tag tag-navy">Operator</span>
+            <h3 style="margin-top: 0.9rem; margin-bottom: 0.4rem;">
+                <span class="mono">{{ nav.operator.role }}</span>
+                {% if op and op.roleMeaning %}<span class="text-muted"
+                    style="font-family: 'Inter', sans-serif; font-size: 0.95rem; font-weight: 500;"> · {{ op.roleMeaning
+                    }}</span>{% endif %}
+            </h3>
+            {% if op %}
+            <p class="text-muted" style="font-size: 0.95rem;">
+                {{ op.participated | length }} tournament{{ "s" if op.participated | length != 1 }} worked
+                · {{ op.upcoming | selectattr("selected") | list | length }} upcoming
+                {% if op.upcoming | rejectattr("selected") | list | length %}
+                · marked free for {{ op.upcoming | rejectattr("selected") | list | length }}
+                {% endif %}
+            </p>
+            {% if op.sinceLabel %}
+            <p class="text-muted" style="font-size: 0.85rem; margin-top: 0.35rem;">Operator since {{ op.sinceLabel }}
+            </p>
+            {% endif %}
+            {% endif %}
+        </div>
+        <div style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0.6rem;">
+            <a href="/dashboard" class="btn btn-primary" style="width: 100%;">Dashboard</a>
+            <a href="/dashboard/operators/{{ nav.operator.uid or user.uid }}" class="btn btn-secondary"
+                style="width: 100%;">Operator profile</a>
         </div>
     </div>
     {% endif %}

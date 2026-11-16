@@ -1,0 +1,4 @@
+{# Fragment: a page of archived tournaments (newest first), fetched by
+tournaments_all.html's "Load more". #}
+{% from "dashboard/_tournament_list.html" import tournament_row %}
+{% for t in tournaments %}{{ tournament_row(t, "is-archived-row", colored=False) }}{% endfor %}

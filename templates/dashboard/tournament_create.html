@@ -1,141 +1,254 @@
 {% extends "dashboard/base.html" %}
 
 {% block content %}
-<h2 id="page-heading">Create New Tournament</h2>
+{% set edit = edit if edit is defined else None %}
+{% set n = draft.tournaments | length if draft else 1 %}
+<h2 id="page-heading">{% if edit %}Edit tournament{% elif draft %}Schedule request: {{ draft.title }}{% else %}Create
+    New Tournament{% endif %}</h2>
+{% if edit %}
+<p class="edit-back"><a href="/dashboard/tournaments/{{ edit.id }}">← Back to {{ edit.title }}</a></p>
+{% endif %}
 
-<form id="createTournamentForm" class="form-container">
-    <div class="form-group">
-        <label for="title">Tournament Title:</label>
-        <input type="text" id="title" name="title" required>
-    </div>
+{% if draft %}
+<div class="draft-banner{% if draft.status == 'done' %} is-warning{% endif %}">
+    {% if draft.status == "done" %}
+    <strong>This request is already done.</strong> Creating these again makes duplicate tournaments.
+    {% else %}
+    This request becomes <strong>{{ n }} tournament{{ "s" if n != 1 }}</strong>{% if n > 1 %} — one per
+    discipline{% endif %}. Requests only have a date, so <strong>check each start time</strong>. When every
+    tournament is created, the request is marked done and leaves the drafts list.
+    {% endif %}
+</div>
+{% endif %}
 
-    <div class="form-group">
-        <label for="location">Location:</label>
-        <input type="text" id="location" name="location" required>
-    </div>
+<form id="createTournamentForm" class="form-container create-form{% if draft %} is-multi{% endif %}">
 
-    <div class="form-group">
-        <label for="courtNum">Number of Courts:</label>
-        <input type="number" id="courtNum" name="courtNum" required min="1">
-    </div>
+    {# Per-tournament sections — built from #blockTemplate by the script below. #}
+    <div id="tournamentBlocks"></div>
 
-    <div class="form-group">
-        <label for="dateTime">Date and Time (UTC):</label>
-        <input type="datetime-local" id="dateTime" name="dateTime" required>
-        <small style="color: #64748b; display: block; margin-top: 0.25rem;">
-            Entered and stored in UTC, not your browser's local time zone — see the note below the form.
-        </small>
-    </div>
+    {# Shared by every tournament this form creates. #}
+    <fieldset class="t-shared">
+        {% if draft and n > 1 %}<legend class="t-block-legend">Shared by all {{ n }} tournaments</legend>{% endif %}
 
-    <div class="form-group">
-        <label for="sport">Sport:</label>
-        <select id="sport" name="sport" required></select>
-    </div>
-
-    <div class="form-group">
-        <label for="discipline">Discipline:</label>
-        <select id="discipline" name="discipline" required></select>
-    </div>
-
-    <div class="form-group">
-        <label for="provider">Scoring Provider:</label>
-        <select id="provider" name="provider" required></select>
-    </div>
-
-    <div class="form-group">
-        <label for="mode">Mode:</label>
-        <select id="mode" name="mode" required></select>
-    </div>
-
-    <div class="form-group">
-        <label for="venueName">Name of the Venues:</label>
-        <select id="venueName" name="venueName" required>
-            <option value="Court" selected>Court</option>
-            <option value="Area">Area</option>
-            <option value="Ring">Ring</option>
-        </select>
-    </div>
-
-    <div class="form-group">
-        <label for="numbering">Numbering System:</label>
-        <select id="numbering" name="numbering" required>
-            <option value="Numbers" selected>Numbers</option>
-            <option value="Alphabet">Alphabet</option>
-        </select>
-    </div>
-
-    <div class="form-group checkbox-group">
-        <input type="checkbox" id="isStream" name="isStream" checked>
-        <label for="isStream">This tournament will be streamed on YouTube</label>
-    </div>
-
-    <div class="form-group checkbox-group">
-        <input type="checkbox" id="isExternalPublic" name="isExternalPublic" checked>
-        <label for="isExternalPublic">This is a public event</label>
-    </div>
-
-    <div class="form-group checkbox-group" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
-        <input type="checkbox" id="isRegistrationOpen" name="isRegistrationOpen">
-        <label for="isRegistrationOpen"><strong>Open tournament for public registration</strong></label>
-    </div>
-
-    <!-- Container for registration settings (Deadline + File Upload) — shown when registration is OPEN -->
-    <div id="registrationSettingsGroup"
-        style="display: none; background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
-        <div class="form-group" style="margin-bottom: 1rem;">
-            <label for="registrationDeadline">Registration Deadline (UTC):</label>
-            <input type="datetime-local" id="registrationDeadline" name="registrationDeadline">
+        <div class="form-group">
+            <label for="location">Location:</label>
+            <input type="text" id="location" name="location" required>
         </div>
 
-        <div class="form-group" style="margin-bottom: 0;">
-            <label for="categoriesJsonFile">Upload Categories Definition (JSON):</label>
-            <input type="file" id="categoriesJsonFile" accept=".json">
-            <small style="color: #64748b; display: block; margin-top: 0.25rem;">Upload JSON file containing
-                divisions/categories.</small>
+        <div class="form-group">
+            <label for="venueName">Name of the Venues:</label>
+            <select id="venueName" name="venueName" required>
+                <option value="Court" selected>Court</option>
+                <option value="Area">Area</option>
+                <option value="Ring">Ring</option>
+            </select>
         </div>
-    </div>
 
-    <!-- Container for an external registration link — shown when registration is CLOSED here -->
-    <div id="externalRegistrationGroup"
-        style="background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
-        <div class="form-group" style="margin-bottom: 0;">
-            <label for="externalRegistrationUrl">External Registration Link (optional):</label>
-            <input type="url" id="externalRegistrationUrl" name="externalRegistrationUrl"
-                placeholder="https://example.com/register">
-            <small style="color: #64748b; display: block; margin-top: 0.25rem;">
-                If athletes register somewhere else instead, paste that link here. It'll show as a button
-                on the public tournament page and open in a new tab.
-            </small>
+        <div class="form-group">
+            <label for="numbering">Numbering System:</label>
+            <select id="numbering" name="numbering" required>
+                <option value="Numbers" selected>Numbers</option>
+                <option value="Alphabet">Alphabet</option>
+            </select>
         </div>
-    </div>
+
+        <div class="form-group checkbox-group">
+            <input type="checkbox" id="isStream" name="isStream" checked>
+            <label for="isStream">{{ "These tournaments" if n > 1 else "This tournament" }} will be streamed on
+                YouTube</label>
+        </div>
+
+    </fieldset>
 
     <p style="color: #64748b; font-size: 0.85rem; margin-top: 1rem;">
-        ⓘ Both date/time fields above are UTC, not your local time — e.g. if the event actually starts at
+        ⓘ All date/time fields above are UTC, not your local time — e.g. if the event actually starts at
         9:00am in Bratislava (CEST, UTC+2), enter <strong>07:00</strong> here. This app has no per-tournament
         time zone setting; every stored time is UTC and every form that shows or edits one uses these same raw
         UTC digits, so times stay consistent everywhere it's displayed.
     </p>
 
-    <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">Create Tournament</button>
+    {% if not edit %}
+    <p style="color: #64748b; font-size: 0.85rem;">
+        ⓘ New tournaments start <strong>hidden</strong> from the public site. Use <strong>Make visible</strong> on the
+        tournament page when it's ready.
+    </p>
+    {% endif %}
+
+    <button type="submit" id="submitBtn" class="btn btn-primary" style="margin-top: 1rem;">
+        {% if edit %}Save changes{% elif n > 1 %}Create {{ n }} Tournaments{% else %}Create Tournament{% endif %}
+    </button>
+    <p id="createStatus" class="ops-message" role="status" hidden></p>
 </form>
+
+{# One tournament's own fields. data-f = field name; ids are added per section. #}
+<template id="blockTemplate">
+    <fieldset class="t-block">
+        <legend class="t-block-legend"></legend>
+        <p class="t-block-hint" hidden></p>
+        <p class="t-block-done" hidden></p>
+
+        <div class="form-group">
+            <label data-for="title">Tournament Title:</label>
+            <input type="text" data-f="title" required>
+        </div>
+
+        <div class="form-group">
+            <label data-for="courtNum">Number of Courts:</label>
+            <input type="number" data-f="courtNum" required min="1">
+        </div>
+
+        <div class="form-group">
+            <label data-for="dateTime">Date and Time (UTC):</label>
+            <input type="datetime-local" data-f="dateTime" required>
+            <small class="t-field-note" data-note="dateTime">
+                Entered and stored in UTC, not your browser's local time zone — see the note below the form.
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label data-for="sport">Sport:</label>
+            <select data-f="sport" required></select>
+        </div>
+
+        <div class="form-group">
+            <label data-for="discipline">Discipline:</label>
+            <select data-f="discipline" required></select>
+        </div>
+
+        <div class="form-group">
+            <label data-for="provider">Scoring Provider:</label>
+            <select data-f="provider" required></select>
+        </div>
+
+        <div class="form-group">
+            <label data-for="mode">Mode:</label>
+            <select data-f="mode" required></select>
+        </div>
+
+        <div class="form-group checkbox-group"
+            style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+            <input type="checkbox" data-f="isRegistrationOpen">
+            <label data-for="isRegistrationOpen"><strong>Open tournament for public registration</strong></label>
+        </div>
+
+        <!-- Registration settings (deadline + categories JSON) — shown when registration is OPEN -->
+        <div class="t-reg-open"
+            style="display: none; background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label data-for="registrationDeadline">Registration Deadline (UTC):</label>
+                <input type="datetime-local" data-f="registrationDeadline">
+            </div>
+            {# Edit mode: the file already stored in tournament_categories/{id} #}
+            <div class="t-cat-current" hidden>
+                <div class="t-cat-info">
+                    <strong>Categories file uploaded</strong>
+                    <span class="t-cat-meta"></span>
+                </div>
+                <div class="t-cat-actions">
+                    <button type="button" class="t-cat-download link-button">Download</button>
+                    <button type="button" class="t-cat-remove link-button is-danger">Remove</button>
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+                <label data-for="categoriesJsonFile" class="t-cat-label">Upload Categories Definition (JSON):</label>
+                <input type="file" data-f="categoriesJsonFile" accept=".json">
+                <small style="color: #64748b; display: block; margin-top: 0.25rem;">Upload JSON file containing
+                    divisions/categories.</small>
+            </div>
+        </div>
+
+        <!-- External registration link — shown when registration is CLOSED here -->
+        <div class="t-reg-external"
+            style="background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
+            <div class="form-group" style="margin-bottom: 0;">
+                <label data-for="externalRegistrationUrl">External Registration Link (optional):</label>
+                <input type="url" data-f="externalRegistrationUrl" placeholder="https://example.com/register">
+                <small style="color: #64748b; display: block; margin-top: 0.25rem;">
+                    If athletes register somewhere else instead, paste that link here. It'll show as a button
+                    on the public tournament page and open in a new tab.
+                </small>
+            </div>
+        </div>
+    </fieldset>
+</template>
+
+<style>
+    .edit-back {
+        margin: -0.25rem 0 1rem;
+        font-size: 0.9rem;
+    }
+
+    .edit-back a {
+        color: #64748b;
+        text-decoration: none;
+    }
+
+    .edit-back a:hover {
+        color: #0f172a;
+        text-decoration: underline;
+    }
+
+    .t-cat-current {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        padding: 0.7rem 0.9rem;
+        margin-bottom: 1rem;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+    }
+
+    .t-cat-current[hidden] {
+        display: none;
+    }
+
+    .t-cat-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        font-size: 0.9rem;
+    }
+
+    .t-cat-meta {
+        color: #64748b;
+        font-size: 0.82rem;
+    }
+
+    .t-cat-actions {
+        display: flex;
+        gap: 1rem;
+    }
+
+    .t-cat-actions .link-button {
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: #1c3d6b;
+    }
+
+    .t-cat-actions .link-button:hover {
+        text-decoration: underline;
+    }
+
+    .t-cat-actions .link-button.is-danger {
+        color: #b91c1c;
+    }
+</style>
+
+{# The draft's plan (dashboard_router._draft_schedule_plan), or null. #}
+<script type="application/json" id="draftPlan">{{ draft | tojson }}</script>
+{# Edit mode: the stored tournament (dashboard_router.edit_tournament_page), or null. #}
+<script type="application/json" id="editData">{{ edit | tojson }}</script>
 
 <script src="/static/js/truevar-lib.js"></script>
 <script>
-    const registrationCheckbox = document.getElementById("isRegistrationOpen");
-    const registrationSettingsGroup = document.getElementById("registrationSettingsGroup");
-    const externalRegistrationGroup = document.getElementById("externalRegistrationGroup");
-
-    // Registration is either handled in-app (deadline + categories JSON)
-    // OR pointed at an outside site (external link) — never both, so the
-    // two groups are simple opposites of the same checkbox.
-    function syncRegistrationGroups() {
-        const isOpen = registrationCheckbox.checked;
-        registrationSettingsGroup.style.display = isOpen ? "block" : "none";
-        externalRegistrationGroup.style.display = isOpen ? "none" : "block";
-    }
-
-    registrationCheckbox.addEventListener("change", syncRegistrationGroups);
-
     // ── Sport → Discipline → Provider → Mode cascade config ──────────────
     // ★ marks the default at each level (most-used option, pre-selected).
     const SPORT_DATA = {
@@ -187,6 +300,64 @@
     };
     const DEFAULT_SPORT = "Taekwondo";
 
+    // Draft court type (request_tournament.html COURT_DISCIPLINES) → what the
+    // tournament section starts with. Everything stays editable.
+    // Livestream courts have no sport in the request, so they start as
+    // Taekwondo Kyorugi on TrueVAR's livestream modes — check those.
+    const DRAFT_PRESETS = {
+        kyorugi: { sport: "Taekwondo", discipline: "Kyorugi" },
+        poomsae: { sport: "Taekwondo", discipline: "Poomsae" },
+        livestream: {
+            sport: "Taekwondo", discipline: "Kyorugi", provider: "TrueVAR", mode: "External Universal Livestream",
+            note: "Livestream court — the request doesn't say which sport, so check sport and discipline.",
+        },
+        livestream_ivr: {
+            sport: "Taekwondo", discipline: "Kyorugi", provider: "TrueVAR", mode: "Integrated Universal Livestream",
+            note: "Livestream + IVR court — the request doesn't say which sport, so check sport and discipline.",
+        },
+    };
+    // Scheduling defaults — written into the fields exactly as shown (no
+    // time-zone conversion). Deadline: 3 days before the start DATE at 23:59,
+    // whatever the start time — a Saturday tournament closes registration
+    // Wednesday 23:59.
+    const DRAFT_START_TIME = "10:00";
+    const DRAFT_DEADLINE_DAYS_BEFORE = 3;
+    const DRAFT_DEADLINE_TIME = "23:59";
+
+    // "2027-03-13" → "2027-03-10T23:59"
+    function deadlineFor(startDate) {
+        const d = new Date(startDate + "T00:00:00Z");
+        d.setUTCDate(d.getUTCDate() - DRAFT_DEADLINE_DAYS_BEFORE);
+        return `${d.toISOString().slice(0, 10)}T${DRAFT_DEADLINE_TIME}`;
+    }
+
+    // The deadline follows the start date until someone edits it by hand.
+    function wireDeadlineFollowsStart(block) {
+        const start = f(block, "dateTime"), deadline = f(block, "registrationDeadline");
+        deadline.addEventListener("input", () => { deadline.dataset.touched = "1"; });
+        start.addEventListener("change", () => {
+            const day = start.value.slice(0, 10);
+            if (day && !deadline.dataset.touched) deadline.value = deadlineFor(day);
+        });
+    }
+
+    const DRAFT = JSON.parse(document.getElementById("draftPlan").textContent);
+    const EDIT = JSON.parse(document.getElementById("editData").textContent);
+    const form = document.getElementById("createTournamentForm");
+    const blocksEl = document.getElementById("tournamentBlocks");
+    const statusEl = document.getElementById("createStatus");
+    const submitBtn = document.getElementById("submitBtn");
+    const blocks = [];
+
+    // ── Helpers ────────────────────────────────────────────────────────
+    const f = (block, name) => block.querySelector(`[data-f="${name}"]`);
+
+    // Case-insensitive key lookup: stored values are lowercase ("taekwondo").
+    function findKey(obj, value) {
+        const v = String(value || "").toLowerCase();
+        return Object.keys(obj).find(k => k.toLowerCase() === v) || null;
+    }
+
     function fillSelect(selectEl, options, selectedValue) {
         selectEl.innerHTML = "";
         options.forEach(opt => {
@@ -198,178 +369,444 @@
         });
     }
 
-    function populateSports(selectedSport) {
-        const sportSelect = document.getElementById("sport");
-        fillSelect(sportSelect, Object.keys(SPORT_DATA), selectedSport || DEFAULT_SPORT);
+    function showStatus(text, isError) {
+        statusEl.textContent = text;
+        statusEl.classList.toggle("is-error", !!isError);
+        statusEl.hidden = false;
     }
 
-    function populateDisciplines(sport, selectedDiscipline) {
+    // ── Cascade, per section ───────────────────────────────────────────
+    // Sets sport → discipline → provider → mode, each falling back to that
+    // level's default when the wanted value is missing or unknown.
+    function setCascade(block, want = {}) {
+        const sport = findKey(SPORT_DATA, want.sport) || DEFAULT_SPORT;
+        fillSelect(f(block, "sport"), Object.keys(SPORT_DATA), sport);
+
         const sportData = SPORT_DATA[sport];
-        const disciplineSelect = document.getElementById("discipline");
-        const disciplines = Object.keys(sportData.disciplines);
-        fillSelect(disciplineSelect, disciplines, selectedDiscipline || sportData.defaultDiscipline);
+        const discipline = findKey(sportData.disciplines, want.discipline) || sportData.defaultDiscipline;
+        fillSelect(f(block, "discipline"), Object.keys(sportData.disciplines), discipline);
+
+        const disciplineData = sportData.disciplines[discipline];
+        const provider = findKey(disciplineData.providers, want.provider) || disciplineData.defaultProvider;
+        fillSelect(f(block, "provider"), Object.keys(disciplineData.providers), provider);
+
+        const providerData = disciplineData.providers[provider];
+        const mode = providerData.modes.includes(want.mode) ? want.mode : providerData.defaultMode;
+        fillSelect(f(block, "mode"), providerData.modes, mode);
     }
 
-    function populateProviders(sport, discipline, selectedProvider) {
-        const disciplineData = SPORT_DATA[sport].disciplines[discipline];
-        const providerSelect = document.getElementById("provider");
-        const providers = Object.keys(disciplineData.providers);
-        fillSelect(providerSelect, providers, selectedProvider || disciplineData.defaultProvider);
+    function wireCascade(block) {
+        // Changing a level resets everything below it to that level's defaults.
+        f(block, "sport").addEventListener("change", e => setCascade(block, { sport: e.target.value }));
+        f(block, "discipline").addEventListener("change", e =>
+            setCascade(block, { sport: f(block, "sport").value, discipline: e.target.value }));
+        f(block, "provider").addEventListener("change", e =>
+            setCascade(block, { sport: f(block, "sport").value, discipline: f(block, "discipline").value, provider: e.target.value }));
     }
 
-    function populateModes(sport, discipline, provider, selectedMode) {
-        const providerData = SPORT_DATA[sport].disciplines[discipline].providers[provider];
-        const modeSelect = document.getElementById("mode");
-        fillSelect(modeSelect, providerData.modes, selectedMode || providerData.defaultMode);
+    // Registration is either handled in-app (deadline + categories JSON) OR
+    // pointed at an outside site (external link) — never both.
+    function syncRegistration(block) {
+        const isOpen = f(block, "isRegistrationOpen").checked;
+        block.querySelector(".t-reg-open").style.display = isOpen ? "block" : "none";
+        block.querySelector(".t-reg-external").style.display = isOpen ? "none" : "block";
     }
 
-    // Full cascade rebuild from the top — used on initial load and whenever
-    // the sport changes (discipline/provider/mode reset to that sport's defaults).
-    function cascadeFromSport(sport) {
-        populateDisciplines(sport);
-        const discipline = document.getElementById("discipline").value;
-        populateProviders(sport, discipline);
-        const provider = document.getElementById("provider").value;
-        populateModes(sport, discipline, provider);
+    function createBlock(index) {
+        const block = document.getElementById("blockTemplate").content.firstElementChild.cloneNode(true);
+        block.querySelectorAll("[data-f]").forEach(el => {
+            el.id = `${el.dataset.f}-${index}`;
+            el.name = el.dataset.f;
+        });
+        block.querySelectorAll("label[data-for]").forEach(l => { l.htmlFor = `${l.dataset.for}-${index}`; });
+        blocksEl.appendChild(block);
+
+        wireCascade(block);
+        setCascade(block);
+        f(block, "isRegistrationOpen").addEventListener("change", () => syncRegistration(block));
+        syncRegistration(block);
+        blocks.push(block);
+        return block;
     }
 
-    document.getElementById("sport").addEventListener("change", (e) => cascadeFromSport(e.target.value));
-    document.getElementById("discipline").addEventListener("change", (e) => {
-        const sport = document.getElementById("sport").value;
-        populateProviders(sport, e.target.value);
-        const provider = document.getElementById("provider").value;
-        populateModes(sport, e.target.value, provider);
-    });
-    document.getElementById("provider").addEventListener("change", (e) => {
-        const sport = document.getElementById("sport").value;
-        const discipline = document.getElementById("discipline").value;
-        populateModes(sport, discipline, e.target.value);
-    });
+    function setHint(block, text) {
+        const hint = block.querySelector(".t-block-hint");
+        hint.textContent = text;
+        hint.hidden = !text;
+    }
 
-    // ── Initial population (defaults) ─────────────────────────────────────
-    populateSports();
-    cascadeFromSport(DEFAULT_SPORT);
-    syncRegistrationGroups();
+    // Country name for a draft's state code ("SVK" / "SK" → "Slovakia"),
+    // using the same list the request form picked it from.
+    function countryName(code) {
+        if (!code) return "";
+        try {
+            const sel = document.createElement("select");
+            TrueVAR.populateCountrySelect(sel, { includeBlank: false });
+            const opt = Array.from(sel.options).find(o => (o.value || "").toUpperCase() === code.toUpperCase());
+            if (opt) return opt.textContent.trim();
+        } catch (e) { /* lib unavailable — fall through */ }
+        try {
+            if (code.length === 2) return new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase());
+        } catch (e) { /* unknown code */ }
+        return code;
+    }
 
-    // ── Submit ───────────────────────────────────────────────────────────
-    document.getElementById('createTournamentForm').addEventListener('submit', async function (e) {
-        e.preventDefault();
 
-        // Both datetime-local fields on this form are UTC digits by
-        // convention (see the ⓘ note above the submit button and
-        // TrueVAR.utcInputToIso's own docstring in truevar-lib.js) — NOT
-        // `new Date(raw).toISOString()`, which would silently reinterpret
-        // them as the browser's local time zone instead.
-        const formattedDateTime = TrueVAR.utcInputToIso(document.getElementById('dateTime').value);
-        const isRegistrationOpen = document.getElementById('isRegistrationOpen').checked;
+    // ── Edit mode (/dashboard/tournaments/{id}/edit) ───────────────────
+    // One section, prefilled from EDIT. Saving sends only the tournament's
+    // own fields (PATCH /api/tournaments/{id} — a partial update, so day splits,
+    // streams, status etc. are never touched); a newly picked categories
+    // file is uploaded after that. Removing the stored file is immediate.
+    function selectKeeping(sel, value) {
+        // A stored value this form doesn't list is kept as an extra option,
+        // so saving without touching the field never changes it.
+        if (!value) return;
+        if (!Array.from(sel.options).some(o => o.value === value)) {
+            const o = document.createElement("option");
+            o.value = o.textContent = value;
+            sel.prepend(o);
+        }
+        sel.value = value;
+    }
 
-        // Parse registration deadline if provided
-        const rawDeadline = document.getElementById('registrationDeadline').value;
-        const formattedDeadline = (isRegistrationOpen && rawDeadline) ? TrueVAR.utcInputToIso(rawDeadline) : null;
+    function initEdit(block) {
+        block.querySelector(".t-block-legend").textContent = EDIT.title;
+        f(block, "title").value = EDIT.title;
+        f(block, "courtNum").value = EDIT.courtNum;
+        f(block, "dateTime").value = EDIT.dateTime;
+        setCascade(block, { sport: EDIT.sport, discipline: EDIT.discipline, provider: EDIT.provider, mode: EDIT.mode });
+        selectKeeping(f(block, "provider"), EDIT.provider);
+        selectKeeping(f(block, "mode"), EDIT.mode);
 
-        // External registration link only applies when registration is
-        // NOT handled in-app — mirrors syncRegistrationGroups() above.
-        const externalRegistrationUrl = !isRegistrationOpen
-            ? (document.getElementById('externalRegistrationUrl').value.trim() || null)
-            : null;
+        f(block, "isRegistrationOpen").checked = EDIT.isRegistrationOpen;
+        syncRegistration(block);
+        f(block, "registrationDeadline").value = EDIT.registrationDeadline;
+        if (EDIT.registrationDeadline) f(block, "registrationDeadline").dataset.touched = "1";
+        wireDeadlineFollowsStart(block);
+        f(block, "externalRegistrationUrl").value = EDIT.externalRegistrationUrl;
 
-        let categoriesData = null;
+        document.getElementById("location").value = EDIT.location;
+        selectKeeping(document.getElementById("venueName"), EDIT.venueName);
+        selectKeeping(document.getElementById("numbering"), EDIT.numbering);
+        document.getElementById("isStream").checked = EDIT.isStream;
 
+        showCategoriesInfo(block, EDIT.categories);
+        if (EDIT.status === "archived") setHint(block, "This tournament is archived — changes are saved, but it stays archived.");
+    }
+
+    function showCategoriesInfo(block, info) {
+        const box = block.querySelector(".t-cat-current");
+        const label = block.querySelector(".t-cat-label");
+        box.hidden = !info;
+        label.textContent = info ? "Replace with a new file (JSON):" : "Upload Categories Definition (JSON):";
+        if (!info) return;
+        const bits = [info.fileName, info.disciplines.join(", "), info.updated && `updated ${info.updated}`].filter(Boolean);
+        box.querySelector(".t-cat-meta").textContent = bits.join(" · ");
+        box.querySelector(".t-cat-download").onclick = () => downloadCategories(info.fileName);
+        box.querySelector(".t-cat-remove").onclick = () => removeCategories(block);
+    }
+
+    async function downloadCategories(fileName) {
+        const res = await fetch(`/api/tournaments/${encodeURIComponent(EDIT.id)}/categories`);
+        const data = await res.json();
+        const blob = new Blob([JSON.stringify({ categories: data.categories }, null, 2)], { type: "application/json" });
+        const a = Object.assign(document.createElement("a"), {
+            href: URL.createObjectURL(blob), download: fileName || `categories-${EDIT.id}.json`,
+        });
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    async function removeCategories(block) {
+        if (!confirm("Remove the categories file from this tournament?\n\nClubs can't register new athletes until a new file is uploaded. Registrations already made are kept.")) return;
+        try {
+            const res = await fetch(`/api/tournaments/${encodeURIComponent(EDIT.id)}/categories`, { method: "DELETE" });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.detail || `status ${res.status}`);
+            EDIT.categories = null;
+            showCategoriesInfo(block, null);
+            showStatus("Categories file removed.", false);
+        } catch (err) {
+            showStatus("Couldn't remove the categories file: " + err.message, true);
+        }
+    }
+
+    async function saveEdit() {
+        const block = blocks[0];
+        const isRegistrationOpen = f(block, "isRegistrationOpen").checked;
+        const rawDeadline = f(block, "registrationDeadline").value;
+
+        let categories = null, fileName = null;
+        const file = isRegistrationOpen ? f(block, "categoriesJsonFile").files[0] : null;
+        if (file) {
+            try {
+                categories = JSON.parse(await file.text());
+                fileName = file.name;
+            } catch (err) {
+                return showStatus("That categories file isn't valid JSON.", true);
+            }
+        }
+        if (EDIT.isRegistrationOpen && !isRegistrationOpen &&
+            !confirm("Close registration on TrueVAR for this tournament? Clubs won't be able to register or change entries here.")) return;
+
+        const payload = {
+            title: f(block, "title").value.trim(),
+            location: document.getElementById("location").value.trim(),
+            courtNum: parseInt(f(block, "courtNum").value, 10),
+            dateTime: TrueVAR.utcInputToIso(f(block, "dateTime").value),
+            sport: f(block, "sport").value,
+            discipline: f(block, "discipline").value,
+            provider: f(block, "provider").value,
+            mode: f(block, "mode").value,
+            venueName: document.getElementById("venueName").value,
+            numbering: document.getElementById("numbering").value,
+            isStream: document.getElementById("isStream").checked,
+            isRegistrationOpen,
+            externalRegistrationUrl: isRegistrationOpen ? null : (f(block, "externalRegistrationUrl").value.trim() || null),
+        };
+        if (isRegistrationOpen) payload.registrationDeadline = rawDeadline ? TrueVAR.utcInputToIso(rawDeadline) : null;
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Saving…";
+        const fail = (msg) => { showStatus(msg, true); submitBtn.disabled = false; submitBtn.textContent = "Save changes"; };
+        const errText = (body, res) => (Array.isArray(body.detail) ? body.detail.map(d => d.msg).join("; ") : body.detail) || `status ${res.status}`;
+
+        try {
+            const res = await fetch(`/api/tournaments/${encodeURIComponent(EDIT.id)}`, {
+                method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) return fail("Not saved: " + errText(body, res));
+        } catch (err) {
+            return fail("Network error — nothing was saved.");
+        }
+
+        if (categories) {
+            try {
+                const res = await fetch(`/api/tournaments/${encodeURIComponent(EDIT.id)}/categories`, {
+                    method: "PUT", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ categories, fileName }),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) return fail("Details saved, but the categories file wasn't uploaded: " + errText(body, res));
+            } catch (err) {
+                return fail("Details saved, but the categories file wasn't uploaded (network error).");
+            }
+        }
+
+        window.location.href = `/dashboard/tournaments/${encodeURIComponent(EDIT.id)}?msg=` +
+            encodeURIComponent(categories ? "Tournament saved and categories uploaded." : "Tournament saved.");
+    }
+
+    // ── Build the sections ─────────────────────────────────────────────
+    if (EDIT) {
+        form.classList.add("is-single");
+        initEdit(createBlock(0));
+    } else if (DRAFT && DRAFT.tournaments.length) {
+        const total = DRAFT.tournaments.length;
+        DRAFT.tournaments.forEach((p, i) => {
+            const block = createBlock(i);
+            const preset = DRAFT_PRESETS[p.discipline] || {};
+            block.querySelector(".t-block-legend").textContent =
+                total > 1 ? `Tournament ${i + 1} of ${total} · ${p.label}` : p.label;
+
+            f(block, "title").value = p.title;
+            f(block, "courtNum").value = p.courtNum || "";
+            if (p.date) {
+                f(block, "dateTime").value = `${p.date}T${DRAFT_START_TIME}`;
+                f(block, "registrationDeadline").value = deadlineFor(p.date);
+                block.querySelector('[data-note="dateTime"]').textContent =
+                    `${p.dateLabel} from the request, ${DRAFT_START_TIME} by default. ` +
+                    `Registration deadline defaults to ${DRAFT_DEADLINE_DAYS_BEFORE} days before, ${DRAFT_DEADLINE_TIME}.`;
+            }
+            wireDeadlineFollowsStart(block);
+            setCascade(block, preset);
+
+            const days = (p.days || []).filter(Boolean);
+            setHint(block,
+                `${p.courtNum} court${p.courtNum === 1 ? "" : "s"} of ${p.label}` +
+                (days.length > 1 ? ` on request days ${days.join(", ")} — dated to day ${days[0]}.` : ".") +
+                (preset.note ? " " + preset.note : ""));
+        });
+        document.getElementById("location").value =
+            [DRAFT.city, countryName(DRAFT.state)].filter(Boolean).join(", ");
+    } else {
+        form.classList.add("is-single");
+        createBlock(0);
+    }
+
+    // ── Submit: create every section's tournament, in order ────────────
+    // Sections already created (a later one failed) are locked and skipped
+    // when you submit again, so nothing is created twice.
+    async function buildPayload(block, shared) {
+        const isRegistrationOpen = f(block, "isRegistrationOpen").checked;
+        // datetime-local values are UTC digits by convention — see the ⓘ note
+        // and TrueVAR.utcInputToIso — NOT new Date(raw), which would read
+        // them as the browser's local time.
+        const rawDeadline = f(block, "registrationDeadline").value;
+
+        let categories = null, categoriesFileName = null;
         if (isRegistrationOpen) {
-            const fileInput = document.getElementById('categoriesJsonFile');
-            if (fileInput.files.length > 0) {
+            const file = f(block, "categoriesJsonFile").files[0];
+            if (file) {
                 try {
-                    const fileText = await fileInput.files[0].text();
-                    const parsedJson = JSON.parse(fileText);
-                    categoriesData = parsedJson.categories || parsedJson;
+                    const parsed = JSON.parse(await file.text());
+                    categories = parsed.categories || parsed;
+                    categoriesFileName = file.name;
                 } catch (err) {
-                    alert('Invalid JSON file format.');
-                    return;
+                    throw new Error(`"${f(block, "title").value}": invalid categories JSON file.`);
                 }
             }
         }
 
-        const formData = {
-            title: document.getElementById('title').value,
-            location: document.getElementById('location').value,
-            courtNum: parseInt(document.getElementById('courtNum').value),
-            dateTime: formattedDateTime,
-            sport: document.getElementById('sport').value,
-            discipline: document.getElementById('discipline').value,
-            provider: document.getElementById('provider').value,
-            mode: document.getElementById('mode').value,
-            isStream: document.getElementById('isStream').checked,
-            isExternalPublic: document.getElementById('isExternalPublic').checked,
-            venueName: document.getElementById('venueName').value,
-            numbering: document.getElementById('numbering').value,
-            // Registration data
-            isRegistrationOpen: isRegistrationOpen,
-            registrationDeadline: formattedDeadline,
-            categories: categoriesData,
-            externalRegistrationUrl: externalRegistrationUrl
+        return {
+            ...shared,
+            title: f(block, "title").value.trim(),
+            courtNum: parseInt(f(block, "courtNum").value, 10),
+            dateTime: TrueVAR.utcInputToIso(f(block, "dateTime").value),
+            sport: f(block, "sport").value,
+            discipline: f(block, "discipline").value,
+            provider: f(block, "provider").value,
+            mode: f(block, "mode").value,
+            isRegistrationOpen,
+            registrationDeadline: isRegistrationOpen && rawDeadline ? TrueVAR.utcInputToIso(rawDeadline) : null,
+            categories,
+            categoriesFileName,
+            externalRegistrationUrl: !isRegistrationOpen
+                ? (f(block, "externalRegistrationUrl").value.trim() || null)
+                : null,
+        };
+    }
+
+    function lock(el) {
+        el.querySelectorAll("input, select").forEach(i => { i.disabled = true; });
+    }
+
+    function markCreated(block, id, title) {
+        block.dataset.createdId = id;
+        block.classList.add("is-created");
+        lock(block);
+        const done = block.querySelector(".t-block-done");
+        done.innerHTML = "";
+        done.append("✓ Created — ");
+        const a = document.createElement("a");
+        a.href = `/dashboard/tournaments/${encodeURIComponent(id)}`;
+        a.target = "_blank";
+        a.textContent = title;
+        done.append(a);
+        done.hidden = false;
+    }
+
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        statusEl.hidden = true;
+        if (EDIT) return saveEdit();
+
+        const shared = {
+            location: document.getElementById("location").value.trim(),
+            venueName: document.getElementById("venueName").value,
+            numbering: document.getElementById("numbering").value,
+            isStream: document.getElementById("isStream").checked,
+            // Every new tournament starts hidden; the tournament page's
+            // visibility button makes it public.
+            isExternalPublic: false,
         };
 
+        // Build every payload first, so a bad JSON file stops us before
+        // anything is created.
+        const todo = [];
         try {
-            const response = await fetch('/api/tournaments', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData)
-            });
-
-            if (response.ok) {
-                alert('Tournament created successfully!');
-                window.location.href = '/dashboard';
-            } else {
-                const errorData = await response.json();
-                alert('Error creating tournament: ' + JSON.stringify(errorData));
+            for (const block of blocks) {
+                if (!block.dataset.createdId) todo.push([block, await buildPayload(block, shared)]);
             }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('An unexpected error occurred.');
+        } catch (err) {
+            showStatus(err.message, true);
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating…";
+
+        for (const [block, payload] of todo) {
+            try {
+                const res = await fetch("/api/tournaments", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const detail = Array.isArray(body.detail) ? body.detail.map(d => d.msg).join("; ") : body.detail;
+                    throw new Error(`"${payload.title}" wasn't created: ${detail || res.status}`);
+                }
+                markCreated(block, body.id, payload.title);
+                lock(document.querySelector(".t-shared"));  // shared values are now in use
+            } catch (err) {
+                const created = blocks.filter(b => b.dataset.createdId).length;
+                showStatus(err.message + (created
+                    ? ` ${created} of ${blocks.length} created — fix it and press the button again; created ones are skipped.`
+                    : ""), true);
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Create remaining tournaments";
+                return;
+            }
+        }
+
+        if (!DRAFT) {
+            alert("Tournament created successfully!");
+            window.location.href = "/dashboard";
+            return;
+        }
+
+        // Every section exists → mark the request done.
+        const ids = blocks.map(b => b.dataset.createdId);
+        try {
+            const res = await fetch(`/api/tournament-drafts/${encodeURIComponent(DRAFT.id)}/done`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tournamentIds: ids }),
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `status ${res.status}`);
+            }
+            const msg = `"${DRAFT.title}" scheduled — ${ids.length} tournament${ids.length === 1 ? "" : "s"} created.`;
+            window.location.href = "/dashboard/drafts?msg=" + encodeURIComponent(msg);
+        } catch (err) {
+            showStatus(`All tournaments were created, but the request couldn't be marked done (${err.message}). Press the button to try again.`, true);
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Mark request done";
         }
     });
 
-    // ── Copy prefill ─────────────────────────────────────────────────────
+    // ── Copy prefill (?copy_from=<id>) — single section only ───────────
     async function prefillFromCopy() {
-        const params = new URLSearchParams(window.location.search);
-        const copyFrom = params.get("copy_from");
-        if (!copyFrom) return;
+        const copyFrom = new URLSearchParams(window.location.search).get("copy_from");
+        if (!copyFrom || DRAFT || EDIT) return;
 
         try {
-            const res = await fetch(`/api/tournaments/${copyFrom}`);
+            const res = await fetch(`/api/tournaments/${encodeURIComponent(copyFrom)}`);
             if (!res.ok) return;
             const t = await res.json();
+            const block = blocks[0];
 
-            document.getElementById("title").value = t.title ? `${t.title} (Copy)` : "";
+            f(block, "title").value = t.title ? `${t.title} (Copy)` : "";
+            f(block, "courtNum").value = t.courtNum || "";
+            f(block, "externalRegistrationUrl").value = t.settings?.externalRegistrationUrl || "";
             document.getElementById("location").value = t.location || "";
-            document.getElementById("courtNum").value = t.courtNum || "";
             document.getElementById("venueName").value = t.settings?.venueName || "Court";
             document.getElementById("numbering").value = t.settings?.numbering || "Numbers";
             document.getElementById("isStream").checked = !!t.settings?.isStream;
-            document.getElementById("isExternalPublic").checked = t.settings?.isExternalPublic !== false;
-            document.getElementById("externalRegistrationUrl").value = t.settings?.externalRegistrationUrl || "";
 
-            // Re-run the cascade using the copied source's actual values,
-            // falling back to defaults at each level if a value is missing
-            // or no longer valid (e.g. an old doc predating this feature).
-            const sport = SPORT_DATA[t.sport] ? t.sport : DEFAULT_SPORT;
-            populateSports(sport);
+            // Stored sport/discipline are lowercase — setCascade matches
+            // without regard to case and falls back to defaults if unknown.
+            setCascade(block, {
+                sport: t.sport, discipline: t.discipline,
+                provider: t.settings?.provider, mode: t.settings?.mode,
+            });
 
-            const sportData = SPORT_DATA[sport];
-            const discipline = sportData.disciplines[t.discipline] ? t.discipline : sportData.defaultDiscipline;
-            populateDisciplines(sport, discipline);
-
-            const disciplineData = sportData.disciplines[discipline];
-            const provider = disciplineData.providers[t.settings?.provider] ? t.settings.provider : disciplineData.defaultProvider;
-            populateProviders(sport, discipline, provider);
-
-            const providerData = disciplineData.providers[provider];
-            const mode = providerData.modes.includes(t.settings?.mode) ? t.settings.mode : providerData.defaultMode;
-            populateModes(sport, discipline, provider, mode);
-
-            // Deliberately NOT copying dateTime — see earlier note.
-            document.getElementById("dateTime").focus();
-
+            // Deliberately NOT copying dateTime.
+            f(block, "dateTime").focus();
             document.getElementById("page-heading").textContent = "Create New Tournament (copied from " + t.title + ")";
         } catch (e) {
             console.error("Failed to prefill from copy_from:", e);

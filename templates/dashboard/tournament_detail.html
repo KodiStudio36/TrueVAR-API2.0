@@ -12,6 +12,26 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
 {%- endmacro %}
 {% set tournament_iso = iso_utc(tournament.dateTime) %}
 
+{# What this operator's role may do (operator_auth.ROLE_PERMISSIONS). Hidden
+here = also refused by the API, so this is only about not showing dead
+buttons. TRO/TAO: schedule board only. #}
+{% set can_edit = can(request, "tournament:edit") %}
+{% set can_copy = can(request, "tournament:create") %}
+{% set can_archive = can(request, "tournament:archive") %}
+{% set can_delete = can(request, "tournament:delete") %}
+{% set can_matches = can(request, "matches:manage") %}
+{% set can_categories = can(request, "categories:manage") %}
+{% set can_draw = can(request, "brackets:manage") %}
+{% set can_board = can(request, "schedule_board:manage") %}
+{% set can_broadcasts = can(request, "broadcasts:manage") %}
+{% set can_inventory = can(request, "inventory:manage") %}
+{% set can_operators = can(request, "operator:manage") %}
+
+{# Tournaments without our own registration (run externally) have no
+categories, brackets or matches here — so no Categories, Match Queue or
+Schedule Board cards either. #}
+{% set has_registration = tournament.isRegistrationOpen %}
+
 {# ── Flash banner (driven by ?msg= query param) ─────────────────────────────── #}
 <div id="flash" class="flash-banner hidden"></div>
 
@@ -20,22 +40,51 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
     {# ═══════════════════════════════════════════════════════════════════════════
     TOURNAMENT HEADER CARD
     ═══════════════════════════════════════════════════════════════════════════ #}
-    <div class="card-panel">
+    {% set sm = summary %}
+    <div class="card-panel t-head" style="--disc: {{ sm.color }}">
 
-        {# Header row #}
         <div class="panel-header">
             <div class="panel-title-group">
-                <span class="panel-eyebrow">Tournament</span>
+                <div class="t-chips">
+                    <span class="t-disc"><span class="t-disc-dot"></span>{{ sm.discipline }}</span>
+                    {% if sm.status == 'archived' %}<span class="badge badge-grey">Archived</span>{% endif %}
+                    <span class="badge {{ 'badge-green' if sm.public else 'badge-grey' }}" id="visibility-badge">
+                        {{ "Public" if sm.public else "Hidden" }}</span>
+                    {% if sm.split %}<span class="badge badge-blue">Day {{ sm.split.day }} of {{ sm.split.days
+                        }}</span>{% endif %}
+                </div>
                 <h1 id="view-title" class="panel-title">{{ tournament.title }}</h1>
             </div>
             <div class="panel-header-actions">
-                <button id="edit-btn" class="btn btn-ghost" onclick="toggleEdit(true)">
+                {% if can_edit %}
+                <a href="/dashboard/tournaments/{{ tournament.id }}/edit" class="btn btn-ghost">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                     </svg>
                     Edit
+                </a>
+                <button id="visibility-btn" class="btn btn-ghost" data-public="{{ 'true' if sm.public else 'false' }}"
+                    onclick="toggleVisibility()"
+                    title="{{ 'Shown on the public site — click to hide it' if sm.public else 'Hidden from the public site — click to show it' }}">
+                    {% if sm.public %}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                        <path d="M1 1l22 22" />
+                    </svg>
+                    Hide
+                    {% else %}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                    </svg>
+                    Make visible
+                    {% endif %}
                 </button>
+                {% endif %}
+                {% if can_copy %}
                 <a href="/dashboard/tournaments/create?copy_from={{ tournament.id }}" class="btn btn-ghost">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="9" y="9" width="13" height="13" rx="2" />
@@ -43,6 +92,8 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
                     </svg>
                     Copy
                 </a>
+                {% endif %}
+                {% if can_archive %}
                 {% if tournament.status != 'archived' %}
                 <button id="archive-btn" class="btn btn-ghost" onclick="setStatus('archived')">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -61,162 +112,171 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
                     Restore
                 </button>
                 {% endif %}
+                {% endif %}
+                {% if can_delete %}
                 <button id="delete-btn" class="btn btn-ghost" style="color:#dc2626; border-color:#fca5a5;"
-                    onclick="deleteTournament()">
+                    onclick="deleteTournament()" title="Delete tournament" aria-label="Delete tournament">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 6h18" />
                         <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                         <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
                     </svg>
                 </button>
+                {% endif %}
             </div>
         </div>
 
-        {# ── READ VIEW ──────────────────────────────────────────────────────────── #}
-        <div id="read-view">
-            <dl class="info-grid">
-                <div class="info-cell">
-                    <dt>Location</dt>
-                    <dd>{{ tournament.location }}</dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Date &amp; Time</dt>
-                    <dd><time class="js-local-time" data-iso="{{ tournament_iso }}">{{ "TBD" if not tournament_iso
-                            }}</time></dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Courts</dt>
-                    <dd>{{ tournament.courtNum }}</dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Sport</dt>
-                    <dd>{{ tournament.sport }}</dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Discipline</dt>
-                    <dd>{{ tournament.discipline }}</dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Provider</dt>
-                    <dd>{{ tournament.settings.get('provider') or '—' }}</dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Mode</dt>
-                    <dd>{{ tournament.settings.get('mode') or '—' }}</dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Venue</dt>
-                    <dd>{{ tournament.settings.get('venueName') or '—' }}</dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Court Numbering</dt>
-                    <dd>{{ tournament.settings.get('numbering') or 'Court' }}</dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Streaming</dt>
-                    <dd>
-                        {% if tournament.settings.get('isStream') %}
-                        <span class="badge badge-green">Enabled</span>
-                        {% else %}
-                        <span class="badge badge-grey">Disabled</span>
-                        {% endif %}
-                    </dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Public Event</dt>
-                    <dd>
-                        {% if tournament.settings.get('isExternalPublic', True) %}
-                        <span class="badge badge-green">Public</span>
-                        {% else %}
-                        <span class="badge badge-grey">Private</span>
-                        {% endif %}
-                    </dd>
-                </div>
-                <div class="info-cell">
-                    <dt>Tournament ID</dt>
-                    <dd class="mono text-muted">{{ tournament.id }}</dd>
-                </div>
-            </dl>
-        </div>
+        {# Only what you need at a glance — the rest lives on the edit page. #}
+        <dl class="t-facts">
+            <div class="t-fact">
+                <dt>When</dt>
+                <dd>{{ sm.date }}{% if sm.time %}<span class="t-fact-sub">{{ sm.time }}</span>{% endif %}</dd>
+            </div>
+            <div class="t-fact">
+                <dt>Where</dt>
+                <dd>{{ sm.location }}</dd>
+            </div>
+            <div class="t-fact">
+                <dt>Courts</dt>
+                <dd>{{ sm.courts }}{% if sm.mode %}<span class="t-fact-sub">{{ sm.mode }}</span>{% endif %}</dd>
+            </div>
+            <div class="t-fact">
+                <dt>Registration</dt>
+                <dd>
+                    {% if sm.registration.kind == "open" %}
+                    {% if sm.registration.closed %}Closed{% else %}Open{% endif %}
+                    {% if sm.registration.until %}<span class="t-fact-sub">{{ "since" if sm.registration.closed else
+                        "till" }} {{ sm.registration.until }}</span>{% endif %}
+                    {% elif sm.registration.kind == "external" %}
+                    <a href="{{ sm.registration.url }}" target="_blank" rel="noopener">External site ↗</a>
+                    {% else %}
+                    <span class="t-muted">Not on TrueVAR</span>
+                    {% endif %}
+                </dd>
+            </div>
+            <div class="t-fact">
+                <dt>Stream</dt>
+                <dd>
+                    {% if sm.stream %}
+                    {% if sm.playlistId %}<a
+                        href="https://www.youtube.com/playlist?list={{ sm.playlistId | urlencode }}" target="_blank"
+                        rel="noopener">Playlist ↗</a>{% else %}Yes<span class="t-fact-sub">not scheduled yet</span>{%
+                    endif %}
+                    {% else %}
+                    <span class="t-muted">No</span>
+                    {% endif %}
+                </dd>
+            </div>
+        </dl>
 
-        {# ── EDIT FORM ──────────────────────────────────────────────────────────── #}
-        <form id="edit-form" class="edit-form hidden" onsubmit="submitEdit(event)">
-            <div class="form-grid">
-                <div class="form-field">
-                    <label for="f-title">Title</label>
-                    <input id="f-title" type="text" name="title" value="{{ tournament.title }}" required>
-                </div>
-                <div class="form-field">
-                    <label for="f-location">Location</label>
-                    <input id="f-location" type="text" name="location" value="{{ tournament.location }}" required>
-                </div>
-                <div class="form-field">
-                    <label for="f-datetime">Date &amp; Time</label>
-                    <input id="f-datetime" type="datetime-local" name="dateTime" required>
-                    <small class="text-muted js-tz-name" style="font-size: 0.75rem;"></small>
-                </div>
-                <div class="form-field">
-                    <label for="f-courts">Number of Courts</label>
-                    <input id="f-courts" type="number" name="courtNum" value="{{ tournament.courtNum }}" min="1"
-                        required>
-                </div>
-                <div class="form-field">
-                    <label for="f-sport">Sport</label>
-                    <select id="f-sport" name="sport" required></select>
-                </div>
-                <div class="form-field">
-                    <label for="f-discipline">Discipline</label>
-                    <select id="f-discipline" name="discipline" required></select>
-                </div>
-                <div class="form-field">
-                    <label for="f-provider">Scoring Provider</label>
-                    <select id="f-provider" name="provider" required></select>
-                </div>
-                <div class="form-field">
-                    <label for="f-mode">Mode</label>
-                    <select id="f-mode" name="mode" required></select>
-                </div>
-                <div class="form-field">
-                    <label for="f-venue">Venue Name</label>
-                    <input id="f-venue" type="text" name="venueName"
-                        value="{{ tournament.settings.get('venueName', '') }}">
-                </div>
-                <div class="form-field">
-                    <label for="f-numbering">Court Numbering Prefix</label>
-                    <input id="f-numbering" type="text" name="numbering"
-                        value="{{ tournament.settings.get('numbering', 'Court') }}"
-                        placeholder="e.g. Court, Field, Table">
-                </div>
-                <div class="form-field form-field--checkbox">
-                    <label class="checkbox-label">
-                        <input type="checkbox" name="isStream" {% if tournament.settings.get('isStream') %}checked{%
-                            endif %}>
-                        <span>Enable Streaming</span>
-                    </label>
-                </div>
-                <div class="form-field form-field--checkbox">
-                    <label class="checkbox-label">
-                        <input type="checkbox" name="isExternalPublic" {% if tournament.settings.get('isExternalPublic',
-                            True) %}checked{% endif %}>
-                        <span>Public Event</span>
-                    </label>
-                </div>
-            </div>
-            <div class="form-actions">
-                <button type="submit" class="btn btn-primary" id="save-btn">Save Changes</button>
-                <button type="button" class="btn btn-ghost" onclick="toggleEdit(false)">Cancel</button>
-                <span id="save-status" class="save-status"></span>
-            </div>
-        </form>
+        {% if sm.split and sm.split.list | length > 1 %}
+        <nav class="t-days" aria-label="Days of this tournament">
+            {% for d in sm.split.list %}
+            {% if d.current %}<span class="t-day is-current">Day {{ d.day }}</span>
+            {% else %}<a class="t-day" href="/dashboard/tournaments/{{ d.id }}">Day {{ d.day }}</a>{% endif %}
+            {% endfor %}
+        </nav>
+        {% endif %}
 
     </div>{# /card-panel #}
 
+    {# ═══════════════════════════════════════════════════════════════════════════
+    OPERATORS CARD — who works this tournament. Any operator marks "I'm free";
+    a TOS selects from the free ones. Read from tournaments/{id}/meta/operators
+    (see operator_auth.py). Everyone sees it.
+    ═══════════════════════════════════════════════════════════════════════════ #}
+    {% set card_operators %}
+    {% macro op_face(o) -%}
+    {% if o.photoUrl %}<img class="apin-face" src="{{ o.photoUrl }}" alt="" referrerpolicy="no-referrer">
+    {%- else %}<span class="apin-face">{{ (o.name or "?")[:1] | upper }}</span>{% endif %}
+    {%- endmacro %}
+    {% macro op_pin(o, removable) %}
+    <div class="apin{% if not removable %} is-free{% endif %}" tabindex="0" data-uid="{{ o.uid }}"
+        data-name="{{ o.name }}" aria-label="{{ o.name }} ({{ o.role }})">
+        {{ op_face(o) }}
+        <div class="apin-pop" role="tooltip">
+            <div class="apin-pop-inner">
+                <span class="apin-text">
+                    {% if can_operators or o.uid == me_uid %}
+                    <a class="apin-name" href="/dashboard/operators/{{ o.uid }}">{{ o.name }}</a>
+                    {% else %}<span class="apin-name">{{ o.name }}</span>{% endif %}
+                    <span class="apin-sub">{{ o.role }}</span>
+                </span>
+                {% if removable and can_operators %}
+                <button type="button" class="apin-x op-unselect"
+                    aria-label="Remove {{ o.name }} from this tournament">×</button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endmacro %}
+    <div class="card-panel" id="operators-card" data-tournament="{{ tournament.id }}">
+        <div class="panel-header" style="margin-bottom:1rem">
+            <div class="panel-title-group">
+                <span class="panel-eyebrow">Team</span>
+                <h2 class="panel-title" style="font-size:1.4rem">Operators</h2>
+            </div>
+        </div>
+
+        {% if ops.selected %}
+        <div class="apins">{% for o in ops.selected %}{{ op_pin(o, True) }}{% endfor %}</div>
+        {% else %}
+        <p class="text-muted" style="margin:0;">No operators selected yet.</p>
+        {% endif %}
+
+        {# Only TOS sees who's free — tick the pins, then "Select". #}
+        {% if can_operators and ops.free %}
+        <div class="op-free-label">Free, not selected ({{ ops.free | length }}) — click to select</div>
+        <div class="apins" id="op-free-pins">
+            {% for o in ops.free %}
+            <label class="apin is-free is-pickable" data-uid="{{ o.uid }}" data-name="{{ o.name }}">
+                <input type="checkbox" class="op-check" value="{{ o.uid }}"
+                    aria-label="Select {{ o.name }} ({{ o.role }})">
+                {{ op_face(o) }}
+                <span class="apin-tick" aria-hidden="true">✓</span>
+                <span class="apin-pop" role="tooltip"><span class="apin-pop-inner">
+                        <span class="apin-text">
+                            <span class="apin-name">{{ o.name }}</span>
+                            <span class="apin-sub">{{ o.role }} · click to select</span>
+                        </span>
+                    </span></span>
+            </label>
+            {% endfor %}
+        </div>
+        <div class="op-select-bar" id="op-select-bar" hidden>
+            <button type="button" class="btn btn-sm" id="op-add">Select</button>
+            <button type="button" class="text-link link-button" id="op-clear">Clear</button>
+        </div>
+        {% endif %}
+
+        <p class="eq-message" id="op-message" role="status" hidden></p>
+
+        {# The viewer's own status, at the bottom #}
+        {% if ops.me or not tournament_past %}
+        <div class="op-me">
+            {% if ops.me == "selected" %}
+            <span class="op-me-state is-selected">✓ You're selected for this tournament</span>
+            {% elif ops.me == "free" %}
+            <span class="op-me-state is-free">You marked yourself free</span>
+            {% if not tournament_past %}<button type="button" class="text-link link-button"
+                id="op-unfree">Withdraw</button>{% endif %}
+            {% else %}
+            <button type="button" class="btn btn-sm" id="op-free">I'm free</button>
+            <span class="text-muted op-me-hint">Let a TOS know you can work this tournament.</span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% endset %}
+
+    {% set card_matches %}
     {# ═══════════════════════════════════════════════════════════════════════════
     LIVE MATCH QUEUE CARD — the realtime, court-by-court running-order admin
     console. Always shown (read-only value even before brackets exist, e.g. to
     preview an empty queue), but the "Manage" framing only makes sense once
     brackets have been pushed via bracket_builder.html's commit step.
     ═══════════════════════════════════════════════════════════════════════════ #}
+    {% if has_registration and can_matches %}
     <div class="card-panel">
         <div class="panel-header" style="margin-bottom:1rem">
             <div class="panel-title-group">
@@ -242,13 +302,16 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
             Open Live Queue
         </a>
     </div>
+    {% endif %}
+    {% endset %}
 
+    {% set card_categories %}
     {# ═══════════════════════════════════════════════════════════════════════════
     REGISTRATION / CATEGORIES CARD (only shown when this tournament uses our own
     registration system — many tournaments are run externally and never open
     registration here at all)
     ═══════════════════════════════════════════════════════════════════════════ #}
-    {% if tournament.isRegistrationOpen %}
+    {% if has_registration and can_categories %}
     <div class="card-panel">
         <div class="panel-header" style="margin-bottom:1rem">
             <div class="panel-title-group">
@@ -280,12 +343,14 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
         </a>
     </div>
     {% endif %}
+    {% endset %}
 
+    {% set card_draw %}
     {# ═══════════════════════════════════════════════════════════════════════════
     POOMSAE DRAW CARD (poomsae tournaments only) — which poomsae each category
     performs in round 1, the semi-final and the final.
     ═══════════════════════════════════════════════════════════════════════════ #}
-    {% if 'poomsae' in (tournament.discipline or '')|lower %}
+    {% if can_draw and 'poomsae' in (tournament.discipline or '')|lower %}
     <div class="card-panel">
         <div class="panel-header" style="margin-bottom:1rem">
             <div class="panel-title-group">
@@ -308,11 +373,14 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
         </a>
     </div>
     {% endif %}
+    {% endset %}
 
+    {% set card_board %}
     {# ═══════════════════════════════════════════════════════════════════════════
     SCHEDULE BOARD CARD — venue big-screen running order. Can combine several
     tournaments of one event (e.g. Kyorugi + Poomsae) on one screen.
     ═══════════════════════════════════════════════════════════════════════════ #}
+    {% if has_registration and can_board %}
     <div class="card-panel">
         <div class="panel-header" style="margin-bottom:1rem">
             <div class="panel-title-group">
@@ -339,11 +407,80 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
             </a>
         </div>
     </div>
+    {% endif %}
+    {% endset %}
 
+    {% set card_equipment %}
+    {# ═══════════════════════════════════════════════════════════════════════════
+    EQUIPMENT CARD — inventory items scheduled for this tournament. Everyone
+    sees it; only TOS (inventory:manage) adds/removes. Read from
+    tournaments/{id}/meta/inventory — see inventory_router.py.
+    ═══════════════════════════════════════════════════════════════════════════ #}
+    <div class="card-panel" id="equipment-card" data-tournament="{{ tournament.id }}">
+        <div class="panel-header" style="margin-bottom:1rem">
+            <div class="panel-title-group">
+                <span class="panel-eyebrow">Inventory</span>
+                <h2 class="panel-title" style="font-size:1.4rem">Equipment</h2>
+            </div>
+            {% if can_inventory %}
+            <button type="button" class="text-link link-button" id="eq-open">+ Add item</button>
+            {% endif %}
+        </div>
+
+        {% if can_inventory %}
+        <div class="eq-picker" id="eq-picker" hidden>
+            <input type="search" id="eq-filter" class="eq-filter" placeholder="Filter by name…"
+                aria-label="Filter items">
+            <div class="eq-options" id="eq-options" role="group" aria-label="Inventory items">
+                <p class="text-muted">Loading inventory…</p>
+            </div>
+            <div class="eq-picker-foot">
+                <button type="button" class="btn btn-sm" id="eq-add" disabled>Add selected</button>
+                <button type="button" class="text-link link-button" id="eq-cancel">Cancel</button>
+            </div>
+        </div>
+        {% endif %}
+        <p class="eq-message" id="eq-message" role="status" hidden></p>
+
+        {% if scheduled_items %}
+        <div class="apins">
+            {% for e in scheduled_items %}
+            <div class="apin" tabindex="0" data-item="{{ e.id }}" data-name="{{ e.name }}"
+                aria-label="{{ e.name or 'Unnamed' }} ({{ e.typeLabel }})">
+                {% if e.photoUrl %}
+                <img class="apin-face" src="{{ e.photoUrl }}" alt="" referrerpolicy="no-referrer"
+                    onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'apin-face', textContent: {{ ((e.name or '?')[:1] | upper) | tojson | forceescape }}}))">
+                {% else %}
+                <span class="apin-face">{{ (e.name or "?")[:1] | upper }}</span>
+                {% endif %}
+                <div class="apin-pop" role="tooltip">
+                    <div class="apin-pop-inner">
+                        <span class="apin-text">
+                            {% if can_inventory %}
+                            <a class="apin-name" href="/dashboard/inventory/{{ e.id }}">{{ e.name or "Unnamed" }}</a>
+                            {% else %}<span class="apin-name">{{ e.name or "Unnamed" }}</span>{% endif %}
+                            <span class="apin-sub">{{ e.typeLabel }}</span>
+                        </span>
+                        {% if can_inventory %}
+                        <button type="button" class="apin-x eq-remove"
+                            aria-label="Remove {{ e.name }} from this tournament">×</button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted" style="margin:0;">No equipment scheduled for this tournament.</p>
+        {% endif %}
+    </div>
+    {% endset %}
+
+    {% set card_youtube %}
     {# ═══════════════════════════════════════════════════════════════════════════
     YOUTUBE STREAMING CARD (only shown if isStream is enabled)
     ═══════════════════════════════════════════════════════════════════════════ #}
-    {% if tournament.settings.get('isStream') %}
+    {% if can_broadcasts and tournament.settings.get('isStream') %}
     <div class="card-panel yt-panel">
 
         <div class="panel-header" style="margin-bottom:1.5rem">
@@ -445,6 +582,25 @@ own time zone. Stored values are UTC; a naive datetime is treated as UTC. #}
 
     </div>
     {% endif %}
+    {% endset %}
+
+    {# ── Card order, by the tournament's date (card_phase, from the route) ──
+    normal: Operators, Equipment first
+    prep (1–2 days before): Categories & Entries, then Match Queue first
+    day (the tournament's day): Match Queue, then Categories & Entries
+    Schedule Board and YouTube Schedule always last. #}
+    {% if card_phase == "day" %}
+    {% set card_order = ["matches", "categories", "operators", "equipment", "draw"] %}
+    {% elif card_phase == "prep" %}
+    {% set card_order = ["categories", "matches", "operators", "equipment", "draw"] %}
+    {% else %}
+    {% set card_order = ["operators", "equipment", "matches", "categories", "draw"] %}
+    {% endif %}
+    {% set cards = {"matches": card_matches, "categories": card_categories, "draw": card_draw,
+    "operators": card_operators, "equipment": card_equipment} %}
+    {% for key in card_order %}{{ cards[key] }}{% endfor %}
+    {{ card_board }}
+    {{ card_youtube }}
 
 </div>{# /t-wrapper #}
 
@@ -625,11 +781,286 @@ STYLES
         padding: .35rem .8rem;
     }
 
-    /* ── Edit form ──────────────────────────────────────────────── */
-    .edit-form {
-        margin-top: 1.5rem;
-        padding-top: 1.5rem;
+
+    /* ── Header card ────────────────────────────────────────────── */
+    .panel-header-actions {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .t-chips {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: .4rem;
+        margin-bottom: .55rem;
+    }
+
+    .t-disc {
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        font-size: .75rem;
+        font-weight: 700;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+        color: var(--disc, var(--muted));
+    }
+
+    .t-disc-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--disc, var(--muted));
+    }
+
+    .badge-blue {
+        background: #eaf0f8;
+        color: #1c3d6b;
+    }
+
+    .t-facts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+        gap: 1.1rem 1.25rem;
+        margin: 1.6rem 0 0;
+        padding: 1.25rem 0 0;
         border-top: 1px solid var(--border);
+    }
+
+    .t-fact dt {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .07em;
+        color: var(--muted);
+        margin-bottom: .3rem;
+    }
+
+    .t-fact dd {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text);
+        line-height: 1.35;
+    }
+
+    .t-fact dd a {
+        color: var(--accent);
+        text-decoration: none;
+    }
+
+    .t-fact dd a:hover {
+        text-decoration: underline;
+    }
+
+    .t-muted {
+        color: var(--muted);
+    }
+
+    .t-fact-sub {
+        display: block;
+        font-size: .82rem;
+        font-weight: 500;
+        color: var(--muted);
+        margin-top: .1rem;
+    }
+
+    .t-days {
+        display: flex;
+        gap: .4rem;
+        margin-top: 1.25rem;
+    }
+
+    .t-day {
+        font-size: .8rem;
+        font-weight: 600;
+        padding: .3rem .75rem;
+        border-radius: 99px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        text-decoration: none;
+    }
+
+    .t-day:hover {
+        color: var(--text);
+        background: #f8fafc;
+    }
+
+    .t-day.is-current {
+        background: var(--text);
+        border-color: var(--text);
+        color: #fff;
+    }
+
+    /* ── Avatar pins (Operators + Equipment): image only, details on hover ── */
+    .apins {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .6rem;
+    }
+
+    .apin {
+        position: relative;
+        display: inline-block;
+        outline: none;
+    }
+
+    .apin-face {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: #eaf0f8;
+        color: #1c3d6b;
+        font-weight: 700;
+        font-size: 1rem;
+        box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--border);
+        transition: box-shadow .15s, transform .15s, opacity .15s;
+    }
+
+    .apin:hover .apin-face,
+    .apin:focus-within .apin-face {
+        box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent);
+        transform: translateY(-1px);
+    }
+
+    /* free (not selected) operators: faded, dashed ring */
+    .apin.is-free .apin-face {
+        opacity: .55;
+        box-shadow: 0 0 0 2px #fff, 0 0 0 3px #cbd5e1;
+        outline: 1px dashed #94a3b8;
+        outline-offset: 4px;
+    }
+
+    .apin.is-free:hover .apin-face {
+        opacity: 1;
+    }
+
+    .apin.is-pickable {
+        cursor: pointer;
+    }
+
+    .apin.is-checked .apin-face {
+        opacity: 1;
+        outline: none;
+        box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--green);
+    }
+
+    .apin-tick {
+        position: absolute;
+        right: -3px;
+        bottom: -3px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--green);
+        color: #fff;
+        font-size: .7rem;
+        font-weight: 700;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 0 2px #fff;
+    }
+
+    .apin.is-checked .apin-tick {
+        display: flex;
+    }
+
+    .apin .op-check {
+        position: absolute;
+        opacity: 0;
+        width: 1px;
+        height: 1px;
+        pointer-events: none;
+    }
+
+    /* hover card to the right of the face; padding-left bridges the gap
+       so the pointer can move onto it (for the × button) */
+    .apin-pop {
+        position: absolute;
+        top: 50%;
+        left: 100%;
+        z-index: 20;
+        padding-left: 8px;
+        transform: translate(4px, -50%);
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity .12s, transform .12s, visibility .12s;
+        pointer-events: none;
+    }
+
+    .apin:hover .apin-pop,
+    .apin:focus-within .apin-pop {
+        opacity: 1;
+        visibility: visible;
+        transform: translate(0, -50%);
+        pointer-events: auto;
+    }
+
+    .apin:hover,
+    .apin:focus-within {
+        z-index: 21;
+    }
+
+    .apin-pop-inner {
+        display: flex;
+        align-items: center;
+        gap: .6rem;
+        padding: .5rem .55rem .5rem .8rem;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, .14);
+        white-space: nowrap;
+    }
+
+    .apin-text {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.25;
+    }
+
+    .apin-name {
+        font-size: .88rem;
+        font-weight: 700;
+        color: var(--text);
+        text-decoration: none;
+    }
+
+    a.apin-name:hover {
+        color: var(--accent);
+        text-decoration: underline;
+    }
+
+    .apin-sub {
+        font-size: .72rem;
+        font-weight: 600;
+        color: var(--muted);
+        letter-spacing: .03em;
+    }
+
+    .apin-x {
+        border: none;
+        background: #f1f5f9;
+        color: #64748b;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 1rem;
+        line-height: 1;
+        flex-shrink: 0;
+    }
+
+    .apin-x:hover,
+    .apin-x:focus-visible {
+        background: #fee2e2;
+        color: #b91c1c;
     }
 
     .form-grid {
@@ -994,141 +1425,6 @@ JAVASCRIPT
     const COURT_COUNT = {{ tournament.courtNum }};
     const COURT_PREFIX = "{{ tournament.settings.get('numbering', 'Court') }}";
 
-    // ── Sport → Discipline → Provider → Mode cascade config ──────────────
-    // ★ default at each level is pre-selected for NEW choices only. When
-    // editing, the tournament's stored values always win: sport/discipline
-    // are stored lowercase ("taekwondo", "poomsae") and are matched without
-    // regard to case, and a stored provider/mode that isn't in this list
-    // (e.g. one created on tournament_create.html) is kept as an extra
-    // option instead of being replaced by a default.
-    const SPORT_DATA = {
-        "Taekwondo": {
-            defaultDiscipline: "Kyorugi",
-            disciplines: {
-                "Kyorugi": {
-                    defaultProvider: "DAEDO",
-                    providers: {
-                        "DAEDO": {
-                            defaultMode: "Integrated TkStrike",
-                            modes: ["Integrated TkStrike", "External TkStrike"],
-                        },
-                    },
-                },
-                "Poomsae": {
-                    defaultProvider: "FitoFan",
-                    providers: {
-                        "FitoFan": {
-                            defaultMode: "Integrated FitoFan",
-                            modes: ["Integrated FitoFan"],
-                        },
-                    },
-                },
-            },
-        },
-        "Boxing": {
-            defaultDiscipline: "Olympic Boxing",
-            disciplines: {
-                "Olympic Boxing": {
-                    defaultProvider: "Bout Cntrl",
-                    providers: {
-                        "Bout Cntrl": {
-                            defaultMode: "Integrated Bout Cntrl",
-                            modes: ["Integrated Bout Cntrl", "External Bout Cntrl"],
-                        },
-                    },
-                },
-            },
-        },
-    };
-    const DEFAULT_SPORT = "Taekwondo";
-
-    // Original values from the server, used to pre-select the edit form
-    // correctly instead of always falling back to defaults.
-    const TOURNAMENT_SPORT = "{{ tournament.sport }}";
-    const TOURNAMENT_DISCIPLINE = "{{ tournament.discipline }}";
-    const TOURNAMENT_PROVIDER = "{{ tournament.settings.get('provider', '') }}";
-    const TOURNAMENT_MODE = "{{ tournament.settings.get('mode', '') }}";
-
-    // Case-insensitive key lookup: "poomsae" → "Poomsae".
-    function findKey(obj, value) {
-        const v = String(value || "").toLowerCase();
-        return Object.keys(obj).find(k => k.toLowerCase() === v) || null;
-    }
-
-    function fillSelect(selectEl, options, selectedValue) {
-        selectEl.innerHTML = "";
-        // Keep a stored value this page doesn't know about, so saving
-        // without touching the field never changes it.
-        if (selectedValue && !options.includes(selectedValue)) options = [selectedValue, ...options];
-        options.forEach(opt => {
-            const o = document.createElement("option");
-            o.value = opt;
-            o.textContent = opt;
-            if (opt === selectedValue) o.selected = true;
-            selectEl.appendChild(o);
-        });
-    }
-
-    function populateSports(selectedSport) {
-        fillSelect(document.getElementById("f-sport"), Object.keys(SPORT_DATA), selectedSport || DEFAULT_SPORT);
-    }
-
-    function populateDisciplines(sport, selectedDiscipline) {
-        const sportData = SPORT_DATA[sport];
-        fillSelect(document.getElementById("f-discipline"), Object.keys(sportData.disciplines), selectedDiscipline || sportData.defaultDiscipline);
-    }
-
-    function populateProviders(sport, discipline, selectedProvider) {
-        const disciplineData = SPORT_DATA[sport].disciplines[discipline];
-        fillSelect(document.getElementById("f-provider"), Object.keys(disciplineData.providers), selectedProvider || disciplineData.defaultProvider);
-    }
-
-    function populateModes(sport, discipline, provider, selectedMode) {
-        const providerData = SPORT_DATA[sport].disciplines[discipline].providers[provider];
-        // Unknown (stored) provider: offer only its stored mode.
-        const modes = providerData ? providerData.modes : [];
-        fillSelect(document.getElementById("f-mode"), modes, selectedMode || (providerData && providerData.defaultMode));
-    }
-
-    function cascadeFromSport(sport) {
-        populateDisciplines(sport);
-        const discipline = document.getElementById("f-discipline").value;
-        populateProviders(sport, discipline);
-        const provider = document.getElementById("f-provider").value;
-        populateModes(sport, discipline, provider);
-    }
-
-    document.getElementById("f-sport").addEventListener("change", (e) => cascadeFromSport(e.target.value));
-    document.getElementById("f-discipline").addEventListener("change", (e) => {
-        const sport = document.getElementById("f-sport").value;
-        populateProviders(sport, e.target.value);
-        const provider = document.getElementById("f-provider").value;
-        populateModes(sport, e.target.value, provider);
-    });
-    document.getElementById("f-provider").addEventListener("change", (e) => {
-        const sport = document.getElementById("f-sport").value;
-        const discipline = document.getElementById("f-discipline").value;
-        populateModes(sport, discipline, e.target.value);
-    });
-
-    // ── Initial population — use the tournament's real values, falling back
-    // to sport/discipline/provider/mode defaults if a value is missing or
-    // no longer valid (e.g. a doc created before this feature existed). ──
-    (function initCascade() {
-        const sport = findKey(SPORT_DATA, TOURNAMENT_SPORT) || DEFAULT_SPORT;
-        populateSports(sport);
-
-        const sportData = SPORT_DATA[sport];
-        const discipline = findKey(sportData.disciplines, TOURNAMENT_DISCIPLINE) || sportData.defaultDiscipline;
-        populateDisciplines(sport, discipline);
-
-        const disciplineData = sportData.disciplines[discipline];
-        const provider = findKey(disciplineData.providers, TOURNAMENT_PROVIDER) || TOURNAMENT_PROVIDER || disciplineData.defaultProvider;
-        populateProviders(sport, discipline, provider);
-
-        populateModes(sport, discipline, provider, TOURNAMENT_MODE || null);
-    })();
-
     // ── Dates: stored UTC, shown and edited in the viewer's time zone ─────
     const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const DATE_FMT = new Intl.DateTimeFormat("en-GB", {
@@ -1159,8 +1455,6 @@ JAVASCRIPT
         document.querySelectorAll(".js-tz-name").forEach(el => {
             el.textContent = `Your time zone (${TIME_ZONE}).`;
         });
-        const start = parseIso("{{ tournament_iso }}");
-        if (start) document.getElementById("f-datetime").value = toLocalInput(start);
     })();
 
     // ── Flash message from ?msg= ───────────────────────────────────────────────
@@ -1239,77 +1533,36 @@ JAVASCRIPT
         }
     }
 
-    // ── Edit toggle ────────────────────────────────────────────────────────────
-    function toggleEdit(on) {
-        document.getElementById("read-view").classList.toggle("hidden", on);
-        document.getElementById("edit-form").classList.toggle("hidden", !on);
-        document.getElementById("edit-btn").classList.toggle("hidden", on);
-        document.getElementById("save-status").textContent = "";
-    }
-
-    async function submitEdit(evt) {
-        evt.preventDefault();
-        const btn = document.getElementById("save-btn");
-        const status = document.getElementById("save-status");
-        const form = evt.target;
-        const fd = new FormData(form);
-
-        const start = new Date(fd.get("dateTime") || "");
-        if (isNaN(start)) {
-            status.textContent = "⚠ Please pick a date and time.";
-            status.className = "save-status err";
-            return;
-        }
-
+    // ── Visibility (isExternalPublic) ───────────────────────────────────────
+    async function toggleVisibility() {
+        const btn = document.getElementById("visibility-btn");
+        const makePublic = btn.dataset.public !== "true";
+        const title = document.getElementById("view-title").textContent;
+        if (!confirm(makePublic
+            ? `Show "${title}" on the public site?`
+            : `Hide "${title}" from the public site? Operators still see it here.`)) return;
         btn.disabled = true;
-        btn.textContent = "Saving…";
-        status.textContent = "";
-        status.className = "save-status";
-
-        const payload = {
-            title: fd.get("title"),
-            location: fd.get("location"),
-            // Field holds local time (filled by initDates); a datetime-local
-            // string without offset is parsed as local time by Date, so this
-            // round-trips exactly and is stored as UTC.
-            dateTime: start.toISOString(),
-            courtNum: parseInt(fd.get("courtNum"), 10),
-            sport: fd.get("sport"),
-            discipline: fd.get("discipline"),
-            provider: fd.get("provider"),
-            mode: fd.get("mode"),
-            venueName: fd.get("venueName") || "",
-            numbering: fd.get("numbering") || "Court",
-            isStream: form.querySelector('[name="isStream"]').checked,
-            isExternalPublic: form.querySelector('[name="isExternalPublic"]').checked,
-        };
-
         try {
-            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}`, {
-                method: "PUT",
+            const res = await fetch(`/api/tournaments/${TOURNAMENT_ID}/visibility`, {
+                method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
+                body: JSON.stringify({ isExternalPublic: makePublic }),
             });
-            if (res.ok) {
-                window.location.reload();
-            } else {
-                const err = await res.json();
-                status.textContent = "⚠ " + (err.detail || "Update failed.");
-                status.className = "save-status err";
-                btn.disabled = false;
-                btn.textContent = "Save Changes";
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `status ${res.status}`);
             }
+            window.location.href = window.location.pathname + "?msg=" +
+                encodeURIComponent(makePublic ? "Tournament is now public." : "Tournament is now hidden.");
         } catch (e) {
-            status.textContent = "⚠ Network error.";
-            status.className = "save-status err";
+            alert("Couldn't change visibility: " + e.message);
             btn.disabled = false;
-            btn.textContent = "Save Changes";
         }
     }
 
 
     // ── YouTube ────────────────────────────────────────────────────────────────
-    {% if tournament.settings.get('isStream') %}
+    {% if can_broadcasts and tournament.settings.get('isStream') %}
     async function checkYouTubeStatus() {
         try {
             const res = await fetch("/api/youtube/status");
@@ -1475,4 +1728,196 @@ JAVASCRIPT
     {% endif %}
 </script>
 
+<script>
+    // ── Operators card ───────────────────────────────────────────────────
+    (function () {
+        const card = document.getElementById("operators-card");
+        if (!card) return;
+        const TID = card.dataset.tournament;
+        const msg = document.getElementById("op-message");
+        const show = (text, isError) => { msg.textContent = text; msg.classList.toggle("is-error", !!isError); msg.hidden = !text; };
+        const reload = () => { location.hash = "operators-card"; location.reload(); };
+        async function api(method, url, body) {
+            const res = await fetch(url, {
+                method, headers: body ? { "Content-Type": "application/json" } : {},
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+            return data;
+        }
+        const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
+
+        on("op-free", async (e) => {
+            e.target.disabled = true;
+            try { await api("POST", `/api/operators/me/availability/${encodeURIComponent(TID)}`); reload(); }
+            catch (err) { e.target.disabled = false; show(err.message, true); }
+        });
+        on("op-unfree", async (e) => {
+            e.target.disabled = true;
+            try { await api("DELETE", `/api/operators/me/availability/${encodeURIComponent(TID)}`); reload(); }
+            catch (err) { e.target.disabled = false; show(err.message, true); }
+        });
+
+        // TOS: tick free operators' pins, then "Select"
+        const freePins = document.getElementById("op-free-pins");
+        const bar = document.getElementById("op-select-bar");
+        const addBtn = document.getElementById("op-add");
+        const chosen = () => freePins ? Array.from(freePins.querySelectorAll(".op-check:checked")).map(c => c.value) : [];
+        if (freePins) freePins.addEventListener("change", (e) => {
+            const pin = e.target.closest(".apin");
+            if (pin) pin.classList.toggle("is-checked", e.target.checked);
+            const n = chosen().length;
+            bar.hidden = !n;
+            addBtn.textContent = `Select ${n} operator${n === 1 ? "" : "s"}`;
+        });
+        on("op-clear", () => {
+            freePins.querySelectorAll(".op-check:checked").forEach(c => { c.checked = false; c.closest(".apin").classList.remove("is-checked"); });
+            bar.hidden = true;
+        });
+        on("op-add", async () => {
+            addBtn.disabled = true;
+            try { await api("POST", `/api/operators/selection/${encodeURIComponent(TID)}`, { uids: chosen() }); reload(); }
+            catch (err) { addBtn.disabled = false; show(err.message, true); }
+        });
+
+        card.addEventListener("click", async (e) => {
+            const btn = e.target.closest(".op-unselect");
+            if (!btn) return;
+            const pin = btn.closest(".apin");
+            if (!confirm(`Remove ${pin.dataset.name} from this tournament? They stay marked as free.`)) return;
+            btn.disabled = true;
+            try { await api("DELETE", `/api/operators/selection/${encodeURIComponent(TID)}/${encodeURIComponent(pin.dataset.uid)}`); reload(); }
+            catch (err) { btn.disabled = false; show(err.message, true); }
+        });
+    })();
+</script>
+
+{% if can_inventory %}
+<script>
+    // ── Equipment card (TOS) ─────────────────────────────────────────────
+    (function () {
+        const card = document.getElementById("equipment-card");
+        const TID = card.dataset.tournament;
+        const picker = document.getElementById("eq-picker");
+        const options = document.getElementById("eq-options");
+        const filter = document.getElementById("eq-filter");
+        const addBtn = document.getElementById("eq-add");
+        const msg = document.getElementById("eq-message");
+        const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+        const scheduled = new Set(Array.from(card.querySelectorAll(".apin[data-item]")).map(p => p.dataset.item));
+        let loaded = false;
+
+        function show(text, isError) {
+            msg.textContent = text;
+            msg.classList.toggle("is-error", !!isError);
+            msg.hidden = !text;
+        }
+        // Messages carried over a reload (e.g. same-day warnings).
+        const carried = sessionStorage.getItem("eq-message");
+        if (carried) { sessionStorage.removeItem("eq-message"); show(carried, true); }
+
+        async function api(method, url, body) {
+            const res = await fetch(url, {
+                method,
+                headers: body ? { "Content-Type": "application/json" } : {},
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+            return data;
+        }
+
+        function selected() {
+            return Array.from(options.querySelectorAll("input[type=checkbox]:checked:not(:disabled)")).map(c => c.value);
+        }
+        function updateButton() {
+            const n = selected().length;
+            addBtn.disabled = n === 0;
+            addBtn.textContent = n ? `Add ${n} item${n === 1 ? "" : "s"}` : "Add selected";
+        }
+
+        function optionHtml(i) {
+            const done = scheduled.has(i.id);
+            const img = i.photoUrl
+                ? `<img class="eq-img" src="${esc(i.photoUrl)}" alt="" referrerpolicy="no-referrer">`
+                : `<span class="eq-img eq-img-initial">${esc((i.name || "?")[0].toUpperCase())}</span>`;
+            return `<label class="eq-option${done ? " is-added" : ""}" data-name="${esc((i.name || "").toLowerCase())}">
+                <input type="checkbox" value="${esc(i.id)}" ${done ? "checked disabled" : ""}>
+                ${img}<span class="eq-option-name">${esc(i.name || i.id)}</span>
+                ${done ? '<span class="eq-option-tag">added</span>' : ""}
+            </label>`;
+        }
+
+        document.getElementById("eq-open").addEventListener("click", async () => {
+            picker.hidden = false;
+            show("");
+            filter.focus();
+            if (loaded) return;
+            try {
+                const data = await api("GET", "/api/inventory");
+                const byType = {};
+                data.items.forEach(i => (byType[i.type] = byType[i.type] || []).push(i));
+                const html = Object.entries(data.types).map(([type, label]) => {
+                    const list = byType[type] || [];
+                    return list.length
+                        ? `<div class="eq-group"><div class="eq-group-label">${esc(label)}</div>${list.map(optionHtml).join("")}</div>`
+                        : "";
+                }).join("");
+                options.innerHTML = html || '<p class="text-muted">The inventory is empty.</p>';
+                loaded = true;
+            } catch (err) {
+                options.innerHTML = "";
+                show(err.message, true);
+            }
+        });
+
+        options.addEventListener("change", updateButton);
+        filter.addEventListener("input", () => {
+            const q = filter.value.trim().toLowerCase();
+            options.querySelectorAll(".eq-option").forEach(o => { o.hidden = !!q && !o.dataset.name.includes(q); });
+            options.querySelectorAll(".eq-group").forEach(g => {
+                g.hidden = !g.querySelector(".eq-option:not([hidden])");
+            });
+        });
+        document.getElementById("eq-cancel").addEventListener("click", () => {
+            picker.hidden = true;
+            options.querySelectorAll("input:checked:not(:disabled)").forEach(c => { c.checked = false; });
+            updateButton();
+            show("");
+        });
+
+        addBtn.addEventListener("click", async () => {
+            const ids = selected();
+            if (!ids.length) return;
+            addBtn.disabled = true;
+            try {
+                const r = await api("POST", `/api/inventory/tournaments/${encodeURIComponent(TID)}`, { itemIds: ids });
+                if (r.warnings && r.warnings.length) sessionStorage.setItem("eq-message", r.warnings.join(" "));
+                location.hash = "equipment-card";
+                location.reload();
+            } catch (err) {
+                updateButton();
+                show(err.message, true);
+            }
+        });
+
+        card.addEventListener("click", async (e) => {
+            const btn = e.target.closest(".eq-remove");
+            if (!btn) return;
+            const pin = btn.closest(".apin");
+            if (!confirm(`Remove "${pin.dataset.name}" from this tournament?`)) return;
+            btn.disabled = true;
+            try {
+                await api("DELETE", `/api/inventory/${encodeURIComponent(pin.dataset.item)}/schedule/${encodeURIComponent(TID)}`);
+                location.hash = "equipment-card";
+                location.reload();
+            } catch (err) {
+                btn.disabled = false;
+                show(err.message, true);
+            }
+        });
+    })();
+</script>
+{% endif %}
 {% endblock %}

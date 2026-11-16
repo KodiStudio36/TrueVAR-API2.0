@@ -391,7 +391,9 @@ async function applyBracketSyncFromModal() {
 //                               other side empty   → that match goes too,
 //                                                    and so on up the tree
 //   Refused when the next match is already decided — correct it first.
-//   Registrations (division_rosters) are never touched.
+//   With the box ticked (default), the removed athletes' registrations are
+//   withdrawn too — admin-remove endpoint: registration "withdrawn",
+//   roster entry (and its computed placement) gone, counts lowered.
 // ═══════════════════════════════════════════════════════════════════
 
 const BYE_CORNER = { entryId: null, source: null, bye: true };
@@ -497,6 +499,10 @@ async function planMatchDeletion(matchId) {
     }
 
     const entries = doc.entries || [];
+    // Everyone leaving this category: their registrations can be withdrawn
+    // too (confirmDeleteMatch). Names from the bracket, else the corner.
+    const nameOfId = id => (entries.find(e => e.entryId === id) || athletes.find(c => c.entryId === id) || {}).name || id;
+    plan.withdraw = [...new Set(removeIds)].map(id => ({ categoryCode: m.categoryCode, entryId: id, name: nameOfId(id) }));
     const gone = new Set(removeIds.filter(id => entries.some(e => e.entryId === id)));
     if (gone.size) {
         plan.bracketUpdate = {
@@ -605,12 +611,44 @@ async function openDeleteMatchModal(matchId) {
     }
     if (!body()) return; // closed while checking
     pendingMatchDeletion = plan;
+    const withdraw = plan.withdraw || [];
     body().innerHTML = `
         <ul style="margin:0 0 .75rem 1.1rem; padding:0; font-size:.88rem; line-height:1.6;">
             ${plan.summary.map(s => `<li>${escapeHtml(s)}</li>`).join("")}
         </ul>
-        <p class="lq-field-hint">This can't be undone. Registrations aren't touched — only the match and the bracket.</p>`;
+        ${withdraw.length ? `
+        <label class="lq-checkbox-label" style="display:flex; margin-bottom:.6rem;">
+            <input type="checkbox" id="delete-match-withdraw" checked>
+            Also withdraw the registration of ${escapeHtml(withdraw.map(w => w.name).join(", "))} —
+            removes them, and any computed medal, from the tournament page.
+        </label>` : ""}
+        <p class="lq-field-hint">This can't be undone.</p>`;
     document.getElementById("delete-match-btn").disabled = false;
+}
+
+// Withdraws registrations through the staff endpoint the category manager
+// uses (status "withdrawn", roster entry + its placement removed, category
+// and club counts lowered). An athlete who was never registered in the
+// category (added in the live queue) is skipped. -> problem lines ([] = ok)
+async function withdrawRegistrations(list) {
+    const problems = [];
+    for (const w of list) {
+        const ageCode = ageCodeForCategoryCode(w.categoryCode);
+        if (!ageCode) { problems.push(`${w.name}: couldn't tell the age division of ${w.categoryCode} — remove them in Manage Categories.`); continue; }
+        try {
+            const res = await fetch(
+                `/api/tournaments/${TOURNAMENT_ID}/registrations/admin-remove/${encodeURIComponent(w.categoryCode)}/${encodeURIComponent(w.entryId)}?age_code=${encodeURIComponent(ageCode)}`,
+                { method: "DELETE" });
+            if (res.status === 404) continue; // not registered here — nothing to withdraw
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                problems.push(`${w.name}: ${typeof body.detail === "string" ? body.detail : `failed (${res.status})`}`);
+            }
+        } catch (err) {
+            problems.push(`${w.name}: ${err.message}`);
+        }
+    }
+    return problems;
 }
 
 async function confirmDeleteMatch() {
@@ -621,9 +659,13 @@ async function confirmDeleteMatch() {
     btn.disabled = true;
     btn.textContent = "Deleting…";
     try {
-        await applyMatchDeletion(pendingMatchDeletion);
+        const plan = pendingMatchDeletion;
+        const box = document.getElementById("delete-match-withdraw");
+        await applyMatchDeletion(plan);
         pendingMatchDeletion = null;
+        const problems = box && box.checked ? await withdrawRegistrations(plan.withdraw || []) : [];
         closeModal(); // the listener removes the row
+        if (problems.length) alert("Match deleted, but some registrations weren't withdrawn:\n\n" + problems.join("\n"));
     } catch (err) {
         console.error("Delete match failed", err);
         errEl.textContent = `Delete failed: ${err.message}`;

@@ -1,0 +1,232 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Operators — TrueCNTRL{% endblock %}
+{% block content %}
+
+<div class="list-toolbar ops-toolbar">
+    <button type="button" class="text-link link-button" id="sync-profiles"
+        title="Copy the current name, email and photo from each user's account">Refresh profiles</button>
+    <button type="button" class="text-link link-button" id="open-add">+ Add operator</button>
+</div>
+<p id="ops-message" class="ops-message" role="status" hidden></p>
+
+{% macro op_card(o) %}
+<div class="op-card{% if not o.active %} is-inactive{% endif %}" data-uid="{{ o.uid }}" data-role="{{ o.role }}">
+    {% if o.photoUrl %}
+    <img class="op-avatar" src="{{ o.photoUrl }}" alt="" referrerpolicy="no-referrer">
+    {% else %}
+    <span class="op-avatar op-avatar-initial" aria-hidden="true">{{ (o.name or o.email or "?")[:1] | upper }}</span>
+    {% endif %}
+
+    <a class="op-name" href="/dashboard/operators/{{ o.uid }}">{{ o.name or "Unnamed user" }}</a>{% if o.uid == me %}
+    <span class="op-you">you</span>{% endif %}
+    <div class="op-email">{{ o.email or o.uid }}</div>
+
+    <div class="op-meta">
+        <span class="op-role op-role-{{ o.role | lower }}">{{ o.role }}</span>
+        {% if not o.active %}<span class="op-state">Revoked</span>{% endif %}
+    </div>
+
+    {% if o.uid != me %}
+    <div class="op-actions">
+        {% if o.active %}
+        <label class="sr-only" for="role-{{ o.uid }}">Role</label>
+        <select class="op-role-select" id="role-{{ o.uid }}">
+            {% for r in roles %}<option value="{{ r }}" {% if r==o.role %}selected{% endif %}>{{ r }}</option>{% endfor
+            %}
+        </select>
+        <button type="button" class="text-link link-button op-danger op-revoke">Revoke</button>
+        {% else %}
+        <button type="button" class="text-link link-button op-reactivate">Reactivate as {{ o.role }}</button>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{# One section per role (TOS → TRO); revoked operators last, whatever their role. #}
+<div id="op-sections">
+    {% for role, meaning in groups %}
+    {% set members = operators | selectattr("active") | selectattr("role", "equalto", role) | list %}
+    <div class="list-divider"><span>{{ role }} · {{ meaning }} ({{ members | length }})</span></div>
+    {% if members %}
+    <div class="op-grid">
+        {% for o in members %}{{ op_card(o) }}{% endfor %}
+    </div>
+    {% else %}
+    <p class="op-group-empty">No {{ role }} operators.</p>
+    {% endif %}
+    {% endfor %}
+
+    {% set revoked = operators | rejectattr("active") | list %}
+    {% if revoked %}
+    <div class="list-divider"><span>Revoked ({{ revoked | length }})</span></div>
+    <div class="op-grid">
+        {% for o in revoked %}{{ op_card(o) }}{% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Add operator dialog -->
+<div id="add-overlay" class="op-overlay" hidden>
+    <div class="op-dialog card" role="dialog" aria-modal="true" aria-labelledby="add-title">
+        <div class="op-dialog-head">
+            <h3 id="add-title">Add operator</h3>
+            <button type="button" class="text-link link-button" id="add-close" aria-label="Close">✕</button>
+        </div>
+
+        <label class="op-field">Search users by email
+            <input type="search" id="user-search" placeholder="name@example.com" autocomplete="off">
+        </label>
+        <ul id="user-results" class="op-results" aria-label="Matching users"></ul>
+
+        <label class="op-field">Role
+            <select id="add-role">
+                <option value="TRO">TRO — schedule board only</option>
+                <option value="TAO">TAO — schedule board only</option>
+                <option value="TCO" selected>TCO — runs the competition</option>
+                <option value="TOS">TOS — full access</option>
+            </select>
+        </label>
+
+        <div class="op-dialog-foot">
+            <button type="button" class="btn" id="add-submit" disabled>Make operator</button>
+            <button type="button" class="text-link link-button" id="add-cancel">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const msg = document.getElementById("ops-message");
+        const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+        function show(text, isError) {
+            msg.textContent = text;
+            msg.classList.toggle("is-error", !!isError);
+            msg.hidden = false;
+        }
+
+        async function api(method, url, body) {
+            const res = await fetch(url, {
+                method,
+                headers: body ? { "Content-Type": "application/json" } : {},
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+            return data;
+        }
+
+        // ── Card actions ──────────────────────────────────────────────
+        document.getElementById("op-sections").addEventListener("change", async (e) => {
+            const select = e.target.closest(".op-role-select");
+            if (!select) return;
+            const card = select.closest(".op-card");
+            const role = select.value;
+            if (!confirm(`Change this operator's role to ${role}?`)) { select.value = card.dataset.role; return; }
+            try {
+                await api("PATCH", `/api/operators/${encodeURIComponent(card.dataset.uid)}`, { role });
+                location.reload();
+            } catch (err) { select.value = card.dataset.role; show(err.message, true); }
+        });
+
+        document.getElementById("op-sections").addEventListener("click", async (e) => {
+            const card = e.target.closest(".op-card");
+            if (!card) return;
+            const uid = card.dataset.uid;
+            try {
+                if (e.target.closest(".op-revoke")) {
+                    if (!confirm("Revoke this operator? They lose access to the admin panel immediately.")) return;
+                    await api("DELETE", `/api/operators/${encodeURIComponent(uid)}`);
+                    location.reload();
+                } else if (e.target.closest(".op-reactivate")) {
+                    await api("POST", "/api/operators", { uid, role: card.dataset.role });
+                    location.reload();
+                }
+            } catch (err) { show(err.message, true); }
+        });
+
+        document.getElementById("sync-profiles").addEventListener("click", async () => {
+            try {
+                const r = await api("POST", "/api/operators/sync-profiles");
+                if (r.missingUsers.length) {
+                    show(`Updated ${r.updated}. No user account found for: ${r.missingUsers.join(", ")}`, true);
+                } else {
+                    location.reload();
+                }
+            } catch (err) { show(err.message, true); }
+        });
+
+        // ── Add operator dialog ───────────────────────────────────────
+        const overlay = document.getElementById("add-overlay");
+        const search = document.getElementById("user-search");
+        const results = document.getElementById("user-results");
+        const submit = document.getElementById("add-submit");
+        let selectedUid = null, timer = null, seq = 0;
+
+        function openDialog() { overlay.hidden = false; search.focus(); }
+        function closeDialog() {
+            overlay.hidden = true; search.value = ""; results.innerHTML = "";
+            selectedUid = null; submit.disabled = true;
+        }
+        document.getElementById("open-add").addEventListener("click", openDialog);
+        document.getElementById("add-close").addEventListener("click", closeDialog);
+        document.getElementById("add-cancel").addEventListener("click", closeDialog);
+        overlay.addEventListener("click", e => { if (e.target === overlay) closeDialog(); });
+        document.addEventListener("keydown", e => { if (e.key === "Escape" && !overlay.hidden) closeDialog(); });
+
+        function userRow(u) {
+            const taken = u.operatorActive;
+            const avatar = u.photoUrl
+                ? `<img class="op-result-avatar" src="${esc(u.photoUrl)}" alt="" referrerpolicy="no-referrer">`
+                : `<span class="op-result-avatar op-avatar-initial">${esc((u.name || u.email || "?")[0].toUpperCase())}</span>`;
+            return `<li>
+                <button type="button" class="op-result" data-uid="${esc(u.uid)}" ${taken ? "disabled" : ""}>
+                    ${avatar}
+                    <span><strong>${esc(u.name || "Unnamed user")}</strong><br><small>${esc(u.email)}</small></span>
+                    ${taken ? `<em>already ${esc(u.operatorRole)}</em>` : (u.operatorRole ? `<em>revoked ${esc(u.operatorRole)}</em>` : "")}
+                </button>
+            </li>`;
+        }
+
+        search.addEventListener("input", () => {
+            clearTimeout(timer);
+            selectedUid = null; submit.disabled = true;
+            const q = search.value.trim();
+            if (q.length < 2) { results.innerHTML = ""; return; }
+            timer = setTimeout(async () => {
+                const mine = ++seq;
+                try {
+                    const data = await api("GET", `/api/operators/user-search?email=${encodeURIComponent(q)}`);
+                    if (mine !== seq) return; // a newer search already ran
+                    results.innerHTML = data.users.length
+                        ? data.users.map(userRow).join("")
+                        : '<li class="op-results-empty">No user with that email. They must sign in once first.</li>';
+                } catch (err) {
+                    results.innerHTML = `<li class="op-results-empty">${esc(err.message)}</li>`;
+                }
+            }, 250);
+        });
+
+        results.addEventListener("click", e => {
+            const btn = e.target.closest(".op-result");
+            if (!btn || btn.disabled) return;
+            results.querySelectorAll(".op-result").forEach(b => b.classList.toggle("is-selected", b === btn));
+            selectedUid = btn.dataset.uid;
+            submit.disabled = false;
+        });
+
+        submit.addEventListener("click", async () => {
+            if (!selectedUid) return;
+            submit.disabled = true;
+            try {
+                await api("POST", "/api/operators", { uid: selectedUid, role: document.getElementById("add-role").value });
+                location.reload();
+            } catch (err) {
+                submit.disabled = false;
+                results.insertAdjacentHTML("afterbegin", `<li class="op-results-empty">${esc(err.message)}</li>`);
+            }
+        });
+    })();
+</script>
+{% endblock %}

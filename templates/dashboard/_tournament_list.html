@@ -1,0 +1,12 @@
+{# Shared tournament list row — used by dashboard.html and tournaments_all.html.
+`t` is an entry from dashboard_router._dashboard_entries. #}
+{% macro tournament_row(t, extra_class="", colored=True) %}
+<li class="case-item tournament-row {{ extra_class }}" {% if colored %} style="border-left-color: {{ t.color }};" {%
+    endif %}>
+    <div>
+        <strong>{{ t.title }}</strong>
+        <span class="text-muted">({{ t.location }} — {{ t.dateLabel }})</span>
+    </div>
+    <a href="/dashboard/tournaments/{{ t.id }}" class="btn btn-sm">View Details</a>
+</li>
+{% endmacro %}

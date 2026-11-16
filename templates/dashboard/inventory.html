@@ -1,0 +1,214 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Inventory — TrueCNTRL{% endblock %}
+{% block content %}
+
+<div class="list-toolbar ops-toolbar">
+    <span class="inv-total">{{ total }} item{{ "s" if total != 1 }}</span>
+    <button type="button" class="text-link link-button" id="inv-open-add">+ Add item</button>
+</div>
+<p id="inv-message" class="ops-message" role="status" hidden></p>
+
+{% macro item_card(i) %}
+<div class="inv-card">
+    <a class="inv-photo" href="/dashboard/inventory/{{ i.id }}" tabindex="-1" aria-hidden="true">
+        {% if i.photoUrl %}
+        <img src="{{ i.photoUrl }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+            onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'inv-photo-missing', textContent: 'Photo unavailable'}))">
+        {% else %}
+        <span class="inv-photo-missing">No photo</span>
+        {% endif %}
+    </a>
+
+    <div class="inv-body">
+        <a class="inv-name" href="/dashboard/inventory/{{ i.id }}">{{ i.name or "Unnamed" }}</a>
+        <span class="inv-type inv-type-{{ i.type }}">{{ i.typeLabel }}</span>
+
+        {% if i.isCase %}
+        <div class="inv-key">
+            <span class="inv-key-label">Licence key</span>
+            <code>{{ i.id }}</code>
+            <button type="button" class="text-link link-button inv-copy" data-copy="{{ i.id }}">Copy</button>
+        </div>
+        <div class="inv-binding">
+            {% if i.tournamentId and not i.tournamentMissing %}
+            <span class="inv-dot is-on"></span>
+            <a href="/dashboard/tournaments/{{ i.tournamentId }}">{{ i.tournamentTitle }}</a>{% if i.courtId %} · Court
+            {{ i.courtId }}{% endif %}
+            {% elif i.tournamentId %}
+            <span class="inv-dot is-warn"></span> Bound to a deleted tournament — clears at next boot
+            {% else %}
+            <span class="inv-dot"></span> Not assigned
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="inv-footer">
+        {% if i.openBugs %}
+        <a class="inv-bugs is-open" href="/dashboard/inventory/{{ i.id }}#bugs">{{ i.openBugs }} open bug{{ "s" if
+            i.openBugs != 1 }}</a>
+        {% else %}
+        <span class="inv-bugs">No open bugs</span>
+        {% endif %}
+        <a class="text-link" href="/dashboard/inventory/{{ i.id }}">Details →</a>
+    </div>
+</div>
+{% endmacro %}
+
+<div id="inv-sections">
+    {% for g in groups %}
+    {% if g.members or g.type not in ("other", "unknown") %}
+    <div class="list-divider"><span>{{ g.label }} ({{ g.members | length }})</span></div>
+    {% if g.members %}
+    <div class="inv-grid">
+        {% for i in g.members %}{{ item_card(i) }}{% endfor %}
+    </div>
+    {% else %}
+    <p class="op-group-empty">No {{ g.label }} items yet.</p>
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+</div>
+
+<!-- Add dialog (editing and deleting happen on the item's own page) -->
+<div id="inv-overlay" class="op-overlay" hidden>
+    <form id="inv-form" class="op-dialog card" role="dialog" aria-modal="true" aria-labelledby="inv-title" novalidate>
+        <div class="op-dialog-head">
+            <h3 id="inv-title">Add item</h3>
+            <button type="button" class="text-link link-button" id="inv-close" aria-label="Close">✕</button>
+        </div>
+
+        <label class="op-field">Type
+            <select id="inv-type" required>
+                {% for key, label in types.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <p class="inv-hint" id="inv-type-hint" hidden></p>
+
+        <label class="op-field">Name
+            <input type="text" id="inv-name" maxlength="120" required placeholder="e.g. Teltonika RUT240 #2">
+        </label>
+
+        <label class="op-field">Description (optional)
+            <textarea id="inv-description" rows="3" maxlength="2000"
+                placeholder="Serial number, where it's stored, accessories…"></textarea>
+        </label>
+
+        <label class="op-field">Photo link (optional)
+            <input type="text" id="inv-photo" inputmode="url" placeholder="https://… or /static/assets/images/…">
+        </label>
+        <div class="inv-preview" id="inv-preview" hidden><img alt="Photo preview"></div>
+
+        <p class="inv-hint is-error" id="inv-error" hidden></p>
+        <div class="op-dialog-foot">
+            <button type="submit" class="btn" id="inv-submit">Add item</button>
+            <button type="button" class="text-link link-button" id="inv-cancel">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    (function () {
+        const CASE_TYPE = {{ case_type | tojson
+    }};
+
+    // ?msg=… (e.g. after deleting an item on its page)
+    const params = new URLSearchParams(location.search);
+    if (params.get("msg")) {
+        const msg = document.getElementById("inv-message");
+        msg.textContent = params.get("msg");
+        msg.hidden = false;
+        history.replaceState({}, "", location.pathname);
+    }
+
+    // ── Copy licence key ──────────────────────────────────────────
+    document.getElementById("inv-sections").addEventListener("click", async (e) => {
+        const copy = e.target.closest(".inv-copy");
+        if (!copy) return;
+        try { await navigator.clipboard.writeText(copy.dataset.copy); }
+        catch (err) { prompt("Copy this licence key:", copy.dataset.copy); }
+        copy.textContent = "Copied!";
+        setTimeout(() => { copy.textContent = "Copy"; }, 1500);
+    });
+
+    // ── Add dialog ────────────────────────────────────────────────
+    const overlay = document.getElementById("inv-overlay");
+    const form = document.getElementById("inv-form");
+    const typeEl = document.getElementById("inv-type");
+    const nameEl = document.getElementById("inv-name");
+    const descEl = document.getElementById("inv-description");
+    const photoEl = document.getElementById("inv-photo");
+    const preview = document.getElementById("inv-preview");
+    const submit = document.getElementById("inv-submit");
+    const hint = document.getElementById("inv-type-hint");
+    const errorEl = document.getElementById("inv-error");
+
+    // Same rule as the server: http(s) link, or a site path ("static/…" gets a leading "/").
+    function photoSrc(url) {
+        if (/^https?:\/\/\S+$/i.test(url)) return url;
+        if (!url || /^[a-z][a-z0-9+.-]*:|^\/\/|\s/i.test(url)) return "";
+        return url.startsWith("/") ? url : "/" + url;
+    }
+    function updatePreview() {
+        const src = photoSrc(photoEl.value.trim());
+        preview.hidden = !src;
+        if (src) preview.querySelector("img").src = src;
+    }
+    function updateHint() {
+        hint.textContent = typeEl.value === CASE_TYPE
+            ? "A licence key is generated for the case — you'll see it on its page."
+            : "";
+        hint.hidden = !hint.textContent;
+    }
+
+    function openDialog() {
+        form.reset();
+        errorEl.hidden = true;
+        submit.disabled = false;
+        updateHint();
+        updatePreview();
+        overlay.hidden = false;
+        nameEl.focus();
+    }
+    function closeDialog() { overlay.hidden = true; }
+
+    document.getElementById("inv-open-add").addEventListener("click", openDialog);
+    document.getElementById("inv-close").addEventListener("click", closeDialog);
+    document.getElementById("inv-cancel").addEventListener("click", closeDialog);
+    overlay.addEventListener("click", e => { if (e.target === overlay) closeDialog(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && !overlay.hidden) closeDialog(); });
+    typeEl.addEventListener("change", updateHint);
+    photoEl.addEventListener("input", updatePreview);
+
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const name = nameEl.value.trim();
+        if (!name) { nameEl.focus(); return; }
+        submit.disabled = true;
+        errorEl.hidden = true;
+        try {
+            const res = await fetch("/api/inventory", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    type: typeEl.value, name,
+                    description: descEl.value.trim() || null,
+                    photoUrl: photoEl.value.trim() || null,
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join("; ") : data.detail;
+                throw new Error(detail || `Couldn't add the item (${res.status})`);
+            }
+            location.href = `/dashboard/inventory/${encodeURIComponent(data.item.id)}?msg=` +
+                encodeURIComponent(`"${name}" added.`);
+        } catch (err) {
+            submit.disabled = false;
+            errorEl.textContent = err.message;
+            errorEl.hidden = false;
+        }
+    });
+    }) ();
+</script>
+{% endblock %}

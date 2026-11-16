@@ -1,0 +1,120 @@
+{% extends "dashboard/base.html" %}
+{% from "dashboard/_draft_card.html" import draft_card %}
+{% block title %}Tournament Drafts — TrueCNTRL{% endblock %}
+{% block content %}
+
+<p id="drafts-message" class="ops-message" role="status" hidden></p>
+
+{% if legend %}
+<ul class="tcal-legend draft-legend" aria-label="Court disciplines">
+    {% for d in legend %}
+    <li><span class="tcal-legend-dot" style="background: {{ d.color }};"></span>{{ d.label }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+<div class="list-divider draft-divider-first"><span>Pending requests (<span id="pending-count">{{ pending | length
+            }}</span>)</span></div>
+<div class="draft-list" id="pending-list">
+    {% for d in pending %}{{ draft_card(d) }}{% endfor %}
+    <p class="op-group-empty" id="pending-empty" {% if pending %}hidden{% endif %}>No pending tournament requests.</p>
+</div>
+
+{% if done_count %}
+<div class="list-divider"><span>Done ({{ done_count }})</span></div>
+<div class="draft-list" id="done-list"></div>
+<div style="text-align:center; margin-top:1.25rem;">
+    <button type="button" class="text-link link-button" id="load-done" data-offset="0">Load done drafts</button>
+</div>
+{% endif %}
+
+<script>
+    (function () {
+        const msg = document.getElementById("drafts-message");
+        function show(text, isError) {
+            msg.textContent = text;
+            msg.classList.toggle("is-error", !!isError);
+            msg.hidden = false;
+        }
+
+        // ?msg=… after scheduling (set by the create page)
+        const params = new URLSearchParams(location.search);
+        if (params.get("msg")) {
+            show(params.get("msg"), false);
+            params.delete("msg");
+            history.replaceState({}, "", location.pathname + (params.toString() ? "?" + params : ""));
+        }
+
+        // ── Mark done by hand (no tournaments created here) ──────────
+        document.addEventListener("click", async (e) => {
+            const btn = e.target.closest(".draft-mark-done");
+            if (!btn) return;
+            const card = btn.closest(".draft-card");
+            if (!confirm(`Mark "${card.dataset.title}" as done? It moves to the Done section.`)) return;
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/tournament-drafts/${encodeURIComponent(card.dataset.id)}/done`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ tournamentIds: [] }),
+                });
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    throw new Error(body.detail || `Couldn't mark done (${res.status})`);
+                }
+                location.href = location.pathname + "?msg=" + encodeURIComponent(`"${card.dataset.title}" marked done.`);
+            } catch (err) {
+                btn.disabled = false;
+                show(err.message, true);
+            }
+        });
+
+        // ── Delete (event delegation: works for loaded done cards too) ──
+        document.addEventListener("click", async (e) => {
+            const btn = e.target.closest(".draft-delete");
+            if (!btn) return;
+            const card = btn.closest(".draft-card");
+            if (!confirm(`Delete the request "${card.dataset.title}"? This can't be undone.`)) return;
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/tournament-drafts/${encodeURIComponent(card.dataset.id)}`, { method: "DELETE" });
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    throw new Error(body.detail || `Delete failed (${res.status})`);
+                }
+                const inPending = card.parentElement.id === "pending-list";
+                card.remove();
+                if (inPending) {
+                    const left = document.querySelectorAll("#pending-list .draft-card").length;
+                    document.getElementById("pending-count").textContent = left;
+                    document.getElementById("pending-empty").hidden = left > 0;
+                }
+            } catch (err) {
+                btn.disabled = false;
+                show(err.message, true);
+            }
+        });
+
+        // ── Load done drafts, 10 at a time ───────────────────────────
+        const loadBtn = document.getElementById("load-done");
+        if (!loadBtn) return;
+        loadBtn.addEventListener("click", async () => {
+            loadBtn.disabled = true;
+            loadBtn.textContent = "Loading…";
+            try {
+                const res = await fetch(`/dashboard/drafts/done?offset=${loadBtn.dataset.offset}`);
+                if (!res.ok) throw new Error(`Couldn't load done drafts (${res.status})`);
+                document.getElementById("done-list").insertAdjacentHTML("beforeend", await res.text());
+                loadBtn.dataset.offset = res.headers.get("X-Next-Offset") || loadBtn.dataset.offset;
+                loadBtn.hidden = res.headers.get("X-Has-More") !== "1";
+                loadBtn.textContent = "Load 10 more";
+            } catch (err) {
+                show(err.message, true);
+                loadBtn.textContent = "Load done drafts";
+            } finally {
+                loadBtn.disabled = false;
+            }
+        });
+    })();
+</script>
+{% endblock %}

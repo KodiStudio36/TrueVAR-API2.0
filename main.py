@@ -10,6 +10,7 @@ from infrastructure.routers.dashboard_router import router as dashboard_router
 from infrastructure.routers.auth_router import router as auth_router
 from infrastructure.routers.club_router import router as club_router
 from infrastructure.routers.drafts_router import router as drafts_router
+from infrastructure.routers.inventory_router import inventory_router
 from infrastructure.routers.operator_auth import (
     operator_router, OperatorAuthRequiredError, OperatorForbiddenError,
 )
@@ -41,6 +42,7 @@ app.include_router(dashboard_router, prefix="/dashboard")
 app.include_router(auth_router)
 app.include_router(club_router)
 app.include_router(operator_router)
+app.include_router(inventory_router)  # /api/inventory — prefix set in the router itself, like operator_router
 app.include_router(drafts_router, prefix="/api")
 
 

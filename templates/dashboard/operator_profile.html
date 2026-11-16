@@ -1,0 +1,76 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ p.name or "Operator" }} — TrueCNTRL{% endblock %}
+{% block content %}
+
+{% if can(request, "operator:manage") %}
+<a href="/dashboard/operators" class="text-link inv-back">← Operators</a>
+{% else %}
+<a href="/dashboard" class="text-link inv-back">← Dashboard</a>
+{% endif %}
+
+<section class="prof-head">
+    {% if p.photoUrl %}
+    <img class="prof-avatar" src="{{ p.photoUrl }}" alt="" referrerpolicy="no-referrer">
+    {% else %}
+    <span class="prof-avatar op-avatar-initial">{{ (p.name or p.email or "?")[:1] | upper }}</span>
+    {% endif %}
+    <div class="prof-info">
+        <h2 class="prof-name">{{ p.name or "Unnamed operator" }}{% if is_me %} <span class="op-you">you</span>{% endif
+            %}</h2>
+        {% if p.email %}<div class="prof-email">{{ p.email }}</div>{% endif %}
+        <div class="prof-rank">
+            <span class="op-role op-role-{{ (p.role or '') | lower }}">{{ p.role }}</span>
+            <span class="prof-rank-meaning">{{ p.roleMeaning }}</span>
+            {% if not p.active %}<span class="op-state">Revoked</span>{% endif %}
+        </div>
+        {% if p.sinceLabel %}<div class="prof-since">Operator since {{ p.sinceLabel }}</div>{% endif %}
+    </div>
+</section>
+
+<div class="prof-stats">
+    <div class="prof-stat">
+        <span class="prof-stat-num">{{ p.participated | length }}</span>
+        <span class="prof-stat-label">Tournaments worked</span>
+    </div>
+    <div class="prof-stat">
+        <span class="prof-stat-num">{{ p.upcoming | selectattr("selected") | list | length }}</span>
+        <span class="prof-stat-label">Upcoming, selected</span>
+    </div>
+    <div class="prof-stat">
+        <span class="prof-stat-num">{{ p.upcoming | rejectattr("selected") | list | length }}</span>
+        <span class="prof-stat-label">Upcoming, marked free</span>
+    </div>
+</div>
+
+{% if p.disciplines %}
+<div class="prof-disciplines">
+    {% for name, n in p.disciplines %}<span class="prof-chip">{{ name }} · {{ n }}</span>{% endfor %}
+</div>
+{% endif %}
+
+{% macro row(t) %}
+<li class="sched-row">
+    <span class="sched-date">{{ t.dateLabel }}</span>
+    <a class="sched-title" href="/dashboard/tournaments/{{ t.id }}">{{ t.title }}</a>
+    {% if t.location %}<span class="prof-loc">{{ t.location }}</span>{% endif %}
+    {% if t.selected %}<span class="sched-today">selected</span>{% else %}<span class="sched-archived">free</span>{%
+    endif %}
+</li>
+{% endmacro %}
+
+<div class="list-divider"><span>Upcoming ({{ p.upcoming | length }})</span></div>
+{% if p.upcoming %}
+<ul class="sched-list">{% for t in p.upcoming %}{{ row(t) }}{% endfor %}</ul>
+{% else %}
+<p class="op-group-empty">Nothing upcoming. {% if is_me %}Mark yourself free on a tournament's page (Operators card).{%
+    endif %}</p>
+{% endif %}
+
+<div class="list-divider"><span>Tournaments worked ({{ p.participated | length }})</span></div>
+{% if p.participated %}
+<ul class="sched-list">{% for t in p.participated %}{{ row(t) }}{% endfor %}</ul>
+{% else %}
+<p class="op-group-empty">No tournaments worked yet.</p>
+{% endif %}
+
+{% endblock %}

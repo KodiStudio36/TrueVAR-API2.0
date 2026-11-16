@@ -9,10 +9,11 @@
  * it here and there together, or registrations show up as empty
  * categories.
  *
- * CODE: {entryType}_{age}[_{beltClass}][_{paraClass}]_{gender}[_{weight}]
+ * CODE: {entryType}_{age}[_{beltClass}][_{paraClass}]_{gender}[_{weight} | _plus_{topWeight}]
  *   e.g. individual_poomsae_cadets_class_a_male
  *        para_individual_poomsae_seniors_p72_men
- *        seniors_male_68 (kyorugi, with entry type prefix)
+ *        kyorugi_cadets_women_59        (up to 59 kg)
+ *        kyorugi_cadets_women_plus_59   (open top: over 59 kg)
  *
  * PARA RULES (mirror _para_rules in api_router.py):
  *   requires_para: false          → never para
@@ -48,6 +49,15 @@
     // A dimension that doesn't split this entry type: contributes nothing
     // to the code or label.
     const IMPLICIT = { code: "", label: "", min: null, max: null };
+
+    // Weight leaf codes. Open top is "plus_{top}" (kyorugi_cadets_women_plus_59),
+    // never "{top}plus". Must match the API and tournament.html.
+    function weightLeafCode(codeBase, weight) {
+        return `${codeBase}_${weight}`;
+    }
+    function openTopLeafCode(codeBase, topWeight) {
+        return `${codeBase}_plus_${topWeight}`;
+    }
 
     // -> { requiresPara, classes } for one entry_type option.
     function paraRules(entryOpt) {
@@ -112,10 +122,10 @@
                             if (weightDim) {
                                 const thresholds = (weightDim.thresholds_by && weightDim.thresholds_by[`${ageOpt.code}|${genderOpt.code}`]) || [];
                                 if (thresholds.length === 0) return;
-                                leaves = thresholds.map(w => ({ code: `${codeBase}_${w}`, label: `-${w}${unit}` }));
+                                leaves = thresholds.map(w => ({ code: weightLeafCode(codeBase, w), label: `-${w}${unit}` }));
                                 if (weightDim.open_top) {
                                     const top = thresholds[thresholds.length - 1];
-                                    leaves.push({ code: `${codeBase}_${top}plus`, label: `+${top}${unit}` });
+                                    leaves.push({ code: openTopLeafCode(codeBase, top), label: `+${top}${unit}` });
                                 }
                             } else {
                                 leaves = [{ code: codeBase, label: "" }];
@@ -165,5 +175,9 @@
         return disciplineKey ? (disciplines[disciplineKey].dimensions || []) : [];
     }
 
-    global.TrueVARCategories = { flatten, dimensionsFor, paraRules, sameParaClassMode, classAllowsAge, PARA_CATEGORIES, DEFAULT_PARA_CLASS_OPTIONS };
+    global.TrueVARCategories = {
+        flatten, dimensionsFor, paraRules, sameParaClassMode, classAllowsAge,
+        weightLeafCode, openTopLeafCode,
+        PARA_CATEGORIES, DEFAULT_PARA_CLASS_OPTIONS,
+    };
 })(typeof window !== "undefined" ? window : globalThis);

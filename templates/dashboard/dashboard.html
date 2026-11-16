@@ -1,351 +1,108 @@
 {% extends "dashboard/base.html" %}
 {% block content %}
-<h2>All Tournaments</h2>
-<div id="tournament-grid" class="tournament-grid">
-    {% if tournaments %}
-    {% for tournament in tournaments %}
-    <div class="card" data-tournament-id="{{ tournament.id }}">
-        <h3>{{ tournament.title }}</h3>
-        <p><strong>Location:</strong> {{ tournament.location }}</p>
-        <p><strong>Courts:</strong> {{ tournament.courtNum }}</p>
-        <a href="/dashboard/tournaments/{{ tournament.id }}" class="btn">View Details</a>
+
+{# ?msg=… from redirects (e.g. "Tournament deleted." from the detail page) #}
+<p id="dash-message" class="ops-message" role="status" hidden></p>
+
+<div class="tcal" role="table" aria-label="Tournament calendar">
+    <div class="tcal-row tcal-head" role="row">
+        <div class="tcal-month" role="columnheader"></div>
+        {% for n in range(1, 5) %}
+        <div class="tcal-colhead" role="columnheader">Week {{ n }}</div>
+        {% endfor %}
+    </div>
+
+    {% for month in calendar %}
+    <div class="tcal-row" role="row">
+        <div class="tcal-month" role="rowheader">{{ month.label }}</div>
+        {% for week in month.weeks %}
+        <div class="tcal-week{% if not week.pins %} is-empty{% endif %}{% if week.isCurrent %} is-current{% endif %}{% if week.isPast %} is-past{% endif %}{% if loop.index > 2 %} tips-left{% endif %}"
+            role="cell">
+            <span class="tcal-range">{{ week.range }}</span>
+            {% if week.pins %}
+            <div class="tcal-pins">
+                {% for t in week.pins %}
+                <div class="tcal-pin-wrap{% if t.me %} is-me-{{ t.me }}{% endif %}">
+                    <a class="tcal-pin" href="/dashboard/tournaments/{{ t.id }}" style="--pin: {{ t.color }};"
+                        aria-describedby="tip-{{ t.id }}">
+                        <span>{{ t.date.day }}</span>
+                    </a>
+                    {% if t.me %}<span class="tcal-me" aria-hidden="true">{{ "★" if t.me == "selected" else "✓"
+                        }}</span>{% endif %}
+                    <div class="tcal-tip" id="tip-{{ t.id }}" role="tooltip" style="--pin: {{ t.color }};">
+                        <div class="tcal-tip-discipline">{{ t.sport }} · {{ t.discipline }}</div>
+                        <div class="tcal-tip-title">{{ t.title }}</div>
+                        <dl>
+                            <dt>When</dt>
+                            <dd>{{ t.dateLabel }}{% if t.timeLabel %}, {{ t.timeLabel }}{% endif %}</dd>
+                            <dt>Where</dt>
+                            <dd>{{ t.location }}</dd>
+                            {% if t.courts %}
+                            <dt>Courts</dt>
+                            <dd>{{ t.courts }}</dd>
+                            {% endif %}
+                            <dt>Regist.</dt>
+                            <dd>{{ t.registration }}</dd>
+                            {% if t.me %}
+                            <dt>You</dt>
+                            <dd class="tcal-tip-me">{{ "Selected to work it" if t.me == "selected" else "Marked free" }}
+                            </dd>
+                            {% endif %}
+                        </dl>
+                        {% if t.isStream %}<span class="tcal-tip-tag">Live stream</span>{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
     </div>
     {% endfor %}
-    {% else %}
-    <p id="no-tournaments-msg">No tournaments found. <a href="/dashboard/tournaments/create">Create one now!</a></p>
+</div>
+
+{% if legend %}
+<ul class="tcal-legend" aria-label="Discipline colours">
+    {% for d in legend %}
+    <li><span class="tcal-legend-dot" style="background: {{ d.color }};"></span>{{ d.label }}</li>
+    {% endfor %}
+    {% if tournaments_me %}
+    <li class="tcal-legend-me"><span class="tcal-legend-badge">✓</span>You're free</li>
+    <li class="tcal-legend-me"><span class="tcal-legend-badge is-selected">★</span>You're selected</li>
     {% endif %}
-</div>
-<div style="text-align:center; margin-top:1.5rem;">
-    <button id="load-more-tournaments" class="btn btn-secondary" data-offset="{{ tournaments|length }}" {% if
-        tournaments|length < 10 %}style="display:none;" {% endif %}>
-        Load 10 More
-    </button>
-</div>
+</ul>
+{% endif %}
 
-<hr style="margin: 3rem 0; border: none; border-top: 1px solid #cbd5e1;">
-
-<div class="cases-header" style="display: flex; justify-content: space-between; align-items: center;">
-    <h2>All Cases</h2>
-    <button id="addCaseBtn" class="btn btn-secondary">+ Add Case</button>
+{% from "dashboard/_tournament_list.html" import tournament_row %}
+<div class="list-toolbar">
+    {% if can(request, "drafts:manage") %}
+    <a href="/dashboard/drafts" class="text-link">Drafts{% if pending_drafts %} ({{ pending_drafts }}){% endif %}</a>
+    {% endif %}
+    <a href="/dashboard/tournaments" class="text-link">View all →</a>
 </div>
-<ul class="case-list">
-    {% if cases %}
-    {% for case in cases %}
-    <li class="case-item">
-        <strong>{{ case.name }}</strong>
-        {% if case.id %}
-        <span style="color: #64748b; font-size: 0.85em; margin-left: 10px;">(ID: {{ case.id }})</span>
-        {% endif %}
+<ul class="case-list dashboard-list" aria-label="Active tournaments">
+    {% for t in tournaments %}
+    {{ tournament_row(t) }}
+    {% else %}
+    <li class="case-item" style="border-left-color: transparent;">
+        No upcoming tournaments.{% if can(request, "tournament:create") %}&nbsp;<a
+            href="/dashboard/tournaments/create">Create one now!</a>{% endif %}
     </li>
     {% endfor %}
-    {% else %}
-    <li class="case-item" style="border-left-color: transparent;">No cases found.</li>
-    {% endif %}
 </ul>
-
-<hr style="margin: 3rem 0; border: none; border-top: 1px solid #cbd5e1;">
-
-<div class="cases-header" style="display: flex; justify-content: space-between; align-items: center;">
-    <h2>Invite Tokens</h2>
-    <button id="addTokenBtn" class="btn btn-secondary">+ Add Token</button>
-</div>
-
-<ul id="token-list" class="case-list">
-    <li class="case-item" style="border-left-color: transparent;" id="token-empty">Loading…</li>
-</ul>
-<div style="text-align:center; margin-top:1rem;">
-    <button id="load-more-tokens" class="btn btn-secondary" data-offset="0">Load 5 More</button>
-</div>
-
-<div id="token-modal-overlay"
-    style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.5); z-index:1000; align-items:center; justify-content:center;">
-    <div id="token-form" class="card" style="width:90%; max-width:420px; max-height:90vh; overflow-y:auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-            <h3 style="margin:0;">New Invite Token</h3>
-            <button id="token-form-close" class="btn btn-secondary" type="button"
-                style="padding:0.25rem 0.65rem; line-height:1;">✕</button>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:0.75rem;">
-            <label>Token name (optional — autogenerated if left blank)
-                <input type="text" id="token-name-input" placeholder="e.g. summer-invite">
-            </label>
-            <label>Role
-                <select id="token-role-input">
-                    <option value="ADMIN">ADMIN</option>
-                    <option value="COACH" selected>COACH</option>
-                    <option value="USER">USER</option>
-                </select>
-            </label>
-            <label>Club ID
-                <input type="text" id="token-clubid-input" placeholder="clubId">
-            </label>
-            <label>Club Name
-                <input type="text" id="token-clubname-input" placeholder="Club display name">
-            </label>
-            <label>Expires At (optional)
-                <input type="datetime-local" id="token-expires-input">
-            </label>
-            <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
-                <button id="token-form-submit" class="btn">Create Token</button>
-                <button id="token-form-cancel" class="btn btn-secondary" type="button">Cancel</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<hr style="margin: 3rem 0; border: none; border-top: 1px solid #cbd5e1;">
-
-<div class="cases-header" style="display: flex; justify-content: space-between; align-items: center;">
-    <h2>Archived Tournaments</h2>
-</div>
-<ul id="archived-list" class="case-list">
-    <li class="case-item" style="border-left-color: transparent;" id="archived-empty">Loading…</li>
-</ul>
-<div style="text-align:center; margin-top:1rem;">
-    <button id="load-more-archived" class="btn btn-secondary" data-offset="0">Load 10 More</button>
-</div>
 
 <script>
-    // ── Add Case (unchanged) ─────────────────────────────────────────────
-    document.getElementById('addCaseBtn').addEventListener('click', async function () {
-        const caseName = prompt("Enter the name for the new case:");
-        if (!caseName || caseName.trim() === "") return;
-        try {
-            const response = await fetch('/api/cases', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: caseName.trim() })
-            });
-            if (response.ok) {
-                window.location.reload();
-            } else {
-                const errorData = await response.json();
-                alert('Error creating case: ' + JSON.stringify(errorData));
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('An unexpected error occurred.');
-        }
-    });
-
-    // ── Load more ACTIVE tournaments (card grid) ─────────────────────────
-    function tournamentCardHtml(t) {
-        return `
-        <div class="card" data-tournament-id="${t.id}">
-            <h3>${t.title}</h3>
-            <p><strong>Location:</strong> ${t.location}</p>
-            <p><strong>Courts:</strong> ${t.courtNum}</p>
-            <a href="/dashboard/tournaments/${t.id}" class="btn">View Details</a>
-        </div>`;
-    }
-
-    document.getElementById("load-more-tournaments").addEventListener("click", async function () {
-        const btn = this;
-        const offset = parseInt(btn.dataset.offset, 10);
-        btn.disabled = true;
-        btn.textContent = "Loading…";
-
-        try {
-            const res = await fetch(`/api/tournaments/paginated?status=active&limit=10&offset=${offset}`);
-            const data = await res.json();
-
-            document.getElementById("no-tournaments-msg")?.remove();
-            const grid = document.getElementById("tournament-grid");
-            data.tournaments.forEach(t => grid.insertAdjacentHTML("beforeend", tournamentCardHtml(t)));
-
-            btn.dataset.offset = data.next_offset;
-            btn.style.display = data.has_more ? "" : "none";
-        } catch (e) {
-            alert("Failed to load more tournaments.");
-        } finally {
-            btn.disabled = false;
-            btn.textContent = "Load 10 More";
-        }
-    });
-
-    // ── Load more ARCHIVED tournaments (case-list style) ──────────────────
-    function archivedItemHtml(t) {
-        const dt = t.dateTime ? new Date(t.dateTime).toLocaleDateString() : "";
-        return `
-        <li class="case-item" style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-                <strong>${t.title}</strong>
-                <span style="color:#64748b; font-size:0.85em; margin-left:10px;">
-                    (${t.location}${dt ? " — " + dt : ""})
-                </span>
-            </div>
-            <a href="/dashboard/tournaments/${t.id}" class="btn btn-primary btn-sm">View Details</a>
-        </li>`;
-    }
-
-    async function loadArchivedPage() {
-        const btn = document.getElementById("load-more-archived");
-        const list = document.getElementById("archived-list");
-        const offset = parseInt(btn.dataset.offset, 10);
-        btn.disabled = true;
-        btn.textContent = "Loading…";
-
-        try {
-            const res = await fetch(`/api/tournaments/paginated?status=archived&limit=10&offset=${offset}`);
-            const data = await res.json();
-
-            document.getElementById("archived-empty")?.remove();
-
-            if (offset === 0 && data.tournaments.length === 0) {
-                list.innerHTML = '<li class="case-item" style="border-left-color: transparent;">No archived tournaments.</li>';
-            } else {
-                data.tournaments.forEach(t => list.insertAdjacentHTML("beforeend", archivedItemHtml(t)));
-            }
-
-            btn.dataset.offset = data.next_offset;
-            btn.style.display = data.has_more ? "" : "none";
-            btn.textContent = "Load 10 More";
-            btn.disabled = false;
-        } catch (e) {
-            btn.textContent = "Load 10 More";
-            btn.disabled = false;
-        }
-    }
-
-    document.getElementById("load-more-archived").addEventListener("click", loadArchivedPage);
-    loadArchivedPage(); // initial load on page ready, since archived isn't server-rendered
-
-    // ── Invite Tokens ──────────────────────────────────────────────────
-    const tokenModalOverlay = document.getElementById('token-modal-overlay');
-
-    function openTokenModal() {
-        tokenModalOverlay.style.display = 'flex';
-    }
-    function closeTokenModal() {
-        tokenModalOverlay.style.display = 'none';
-    }
-
-    document.getElementById('addTokenBtn').addEventListener('click', openTokenModal);
-    document.getElementById('token-form-cancel').addEventListener('click', closeTokenModal);
-    document.getElementById('token-form-close').addEventListener('click', closeTokenModal);
-
-    // click on the dark backdrop (not the card itself) closes it
-    tokenModalOverlay.addEventListener('click', (e) => {
-        if (e.target === tokenModalOverlay) closeTokenModal();
-    });
-    // Esc closes it
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && tokenModalOverlay.style.display === 'flex') closeTokenModal();
-    });
-
-    document.getElementById('token-form-submit').addEventListener('click', async () => {
-        const name = document.getElementById('token-name-input').value.trim();
-        const role = document.getElementById('token-role-input').value;
-        const clubId = document.getElementById('token-clubid-input').value.trim();
-        const clubName = document.getElementById('token-clubname-input').value.trim();
-        const expiresRaw = document.getElementById('token-expires-input').value;
-
-        if (!clubId) {
-            alert('Club ID is required.');
-            return;
-        }
-
-        const body = { role, clubId, clubName };
-        if (name) body.token = name;
-        if (expiresRaw) body.expiresAt = new Date(expiresRaw).toISOString();
-
-        const btn = document.getElementById('token-form-submit');
-        btn.disabled = true;
-        btn.textContent = 'Creating…';
-
-        try {
-            const res = await fetch('/api/tokens', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            if (res.ok) {
-                closeTokenModal();
-                document.getElementById('token-name-input').value = '';
-                document.getElementById('token-clubid-input').value = '';
-                document.getElementById('token-clubname-input').value = '';
-                document.getElementById('token-expires-input').value = '';
-                document.getElementById('token-list').innerHTML = '';
-                document.getElementById('load-more-tokens').dataset.offset = '0';
-                loadTokensPage();
-            } else {
-                const err = await res.json();
-                alert('Error creating token: ' + JSON.stringify(err));
-            }
-        } catch (e) {
-            alert('An unexpected error occurred.');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Create Token';
-        }
-    });
-
-    // ── Copy invite URL (event delegation, works across paginated loads) ──
-    document.getElementById('token-list').addEventListener('click', async (e) => {
-        const btn = e.target.closest('.copy-token-url-btn');
-        if (!btn) return;
-
-        const url = btn.dataset.url;
-        const originalText = btn.textContent;
-
-        try {
-            await navigator.clipboard.writeText(url);
-            btn.textContent = 'Copied!';
-        } catch (err) {
-            // clipboard API unavailable/blocked — fall back to a manual prompt
-            prompt('Copy this URL:', url);
-            btn.textContent = 'Copied!';
-        }
-
-        setTimeout(() => { btn.textContent = originalText; }, 1500);
-    });
-
-    function tokenItemHtml(t) {
-        const expires = t.expiresAt ? new Date(t.expiresAt).toLocaleString() : 'Never';
-        const loginUrl = `https://truevar.eu/login?token=${encodeURIComponent(t.token)}`;
-        return `
-        <li class="case-item" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem;">
-            <div>
-                <strong>${t.token}</strong>
-                <span style="color:#64748b; font-size:0.85em; margin-left:10px;">
-                    ${t.role} — ${t.clubName || t.clubId || ''} — expires ${expires}
-                </span>
-            </div>
-            <button class="btn btn-secondary btn-sm copy-token-url-btn" type="button" style="padding: 6px 8px;" data-url="${loginUrl}">
-                Copy URL
-            </button>
-        </li>`;
-    }
-
-    async function loadTokensPage() {
-        const btn = document.getElementById('load-more-tokens');
-        const list = document.getElementById('token-list');
-        const offset = parseInt(btn.dataset.offset, 10);
-        btn.disabled = true;
-        btn.textContent = 'Loading…';
-
-        try {
-            const res = await fetch(`/api/tokens/paginated?limit=5&offset=${offset}`);
-            const data = await res.json();
-
-            document.getElementById('token-empty')?.remove();
-
-            if (offset === 0 && data.tokens.length === 0) {
-                list.innerHTML = '<li class="case-item" style="border-left-color: transparent;">No invite tokens.</li>';
-            } else {
-                data.tokens.forEach(t => list.insertAdjacentHTML('beforeend', tokenItemHtml(t)));
-            }
-
-            btn.dataset.offset = data.next_offset;
-            btn.style.display = data.has_more ? '' : 'none';
-        } catch (e) {
-            // leave list as-is on failure
-        } finally {
-            btn.textContent = 'Load 5 More';
-            btn.disabled = false;
-        }
-    }
-
-    loadTokensPage(); // initial load on page ready, mirrors the archived-tournaments pattern
+    (function () {
+        const params = new URLSearchParams(location.search);
+        const msg = params.get("msg");
+        if (!msg) return;
+        const el = document.getElementById("dash-message");
+        el.textContent = msg;
+        el.classList.toggle("is-error", /error|fail/i.test(msg));
+        el.hidden = false;
+        setTimeout(() => { el.hidden = true; }, 6000);
+        params.delete("msg");
+        history.replaceState({}, "", location.pathname + (params.toString() ? "?" + params : ""));
+    })();
 </script>
 {% endblock %}

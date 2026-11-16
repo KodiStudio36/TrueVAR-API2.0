@@ -1,0 +1,85 @@
+{# One tournament request card — used by drafts.html and _draft_cards.html.
+`d` is an entry from dashboard_router._draft_card. #}
+{% macro draft_card(d) %}
+<article class="draft-card{% if d.status == 'done' %} is-done{% endif %}" id="draft-{{ d.id }}" data-id="{{ d.id }}"
+    data-title="{{ d.title }}">
+    <header class="draft-head">
+        <div>
+            <span class="draft-status draft-status-{{ d.status }}">{{ d.status }}</span>
+            <h2 class="draft-title">{{ d.title }}</h2>
+        </div>
+        <div class="draft-head-side">
+            {% if d.createdLabel %}<span class="draft-received">Received {{ d.createdLabel }}</span>{% endif %}
+            <div class="draft-actions">
+                {% if d.status != "done" %}
+                <a class="text-link" href="/dashboard/tournaments/create?draft={{ d.id }}">Schedule →</a>
+                <button type="button" class="text-link link-button draft-mark-done"
+                    title="Mark handled without creating tournaments here">Mark done</button>
+                {% endif %}
+                <button type="button" class="text-link link-button op-danger draft-delete">Delete</button>
+            </div>
+        </div>
+    </header>
+
+    {% if d.status == "done" %}
+    <p class="draft-done-note">
+        {% if d.tournaments %}
+        Scheduled{% if d.doneLabel %} {{ d.doneLabel }}{% endif %} as
+        {% for t in d.tournaments %}<a href="/dashboard/tournaments/{{ t.id }}">{{ t.title or t.id }}</a>{{ ", " if not
+        loop.last }}{% endfor %}
+        {% else %}
+        Marked done by hand{% if d.doneLabel %} {{ d.doneLabel }}{% endif %}
+        {% endif %}
+    </p>
+    {% endif %}
+
+    <dl class="draft-facts">
+        <div>
+            <dt>When</dt>
+            <dd>{{ d.dateRange }}</dd>
+        </div>
+        <div>
+            <dt>Where</dt>
+            <dd>{{ d.location or "—" }}</dd>
+        </div>
+        <div>
+            <dt>Days</dt>
+            <dd>{{ d.dayCount }}</dd>
+        </div>
+        <div>
+            <dt>Courts</dt>
+            <dd>{{ d.courtNum }} max / day <span class="draft-sub">({{ d.totalCourts }} court-day{{ "s" if d.totalCourts
+                    != 1 }})</span></dd>
+        </div>
+        <div class="draft-requester">
+            <dt>Requested by</dt>
+            <dd>
+                {{ d.requesterName }}
+                {% if d.requesterEmail %}· <a href="mailto:{{ d.requesterEmail }}">{{ d.requesterEmail }}</a>{% endif %}
+                <span class="draft-sub">
+                    {% if d.requesterAccount %}— TrueVAR account{% if d.requesterClubId %}, club {{ d.requesterClubId
+                    }}{% endif %}{% else %}— guest{% endif %}
+                </span>
+            </dd>
+        </div>
+    </dl>
+
+    <div class="draft-days">
+        {% for day in d.days %}
+        <div class="draft-day">
+            <div class="draft-day-label">
+                <strong>Day {{ day.number }}</strong>
+                <span>{{ day.dateLabel }}</span>
+            </div>
+            <div class="draft-courts">
+                {% for c in day.courts %}
+                <span class="draft-court" style="--court: {{ c.color }};"
+                    title="Court {{ c.number }} · {{ c.label }}">{{ c.number }}</span>
+                {% endfor %}
+            </div>
+            <div class="draft-day-summary">{{ day.summary }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</article>
+{% endmacro %}

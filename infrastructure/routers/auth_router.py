@@ -11,10 +11,12 @@ from firebase_admin import auth, firestore
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
 from infrastructure.firebase_client import init_firestore
 from infrastructure.auth_common import EXPIRES_IN, SESSION_COOKIE_NAME, create_session_jwt, get_admin_club_id, get_current_user, get_user_roles
+from infrastructure.routers.operator_auth import register_template_globals
 from usecases.tournament_usecase import GetAllTournamentsUseCase, GetTournamentUseCase
 
 router = APIRouter(tags=["Auth & Showcase"])
 templates = Jinja2Templates(directory="templates")
+register_template_globals(templates)  
 db = init_firestore()
 
 

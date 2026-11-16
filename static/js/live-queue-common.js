@@ -309,9 +309,10 @@ async function applyBulkEdit() {
 
 // ═══════════════════════════════════════════════════════════════════
 // COMPUTE RESULTS — the "🏅 Compute Results" button. Delegates to the
-// backend's compute_tournament_results_endpoint, which writes placements
-// onto tournaments/{id}/division_rosters (single elimination AND cut-off).
-// Safe to run repeatedly.
+// backend's compute_tournament_results_endpoint, which recomputes every
+// category from scratch on each run and writes tournaments/{id}/results/
+// {categoryCode} plus the placements on division_rosters (removing stale
+// ones). Safe to run repeatedly.
 // ═══════════════════════════════════════════════════════════════════
 
 function openComputeResultsModal() {
@@ -322,10 +323,12 @@ function openComputeResultsModal() {
         </div>
         <div class="lq-modal-body">
             <p class="lq-field-hint" style="margin-bottom:1rem;">
-                Scans every category and derives the placements — from the bracket for elimination
-                categories, from the round ranks for cut-off categories — then writes them onto each
-                athlete's roster entry so they show up on the public tournament page and in the club
-                standings. Categories whose final isn't finished yet are skipped — safe to run again later.
+                Recomputes EVERY category from its live matches — also ones computed before, so a
+                replaced or removed athlete, a corrected winner or a reopened final is picked up. Elimination
+                from the bracket, cut-off from the round ranks, round robin from the standings. Placements
+                go onto the roster (public tournament page) and into the category's result (sheets and club
+                standings); old placements that no longer apply are removed. Categories whose final isn't
+                finished get no result — run it again any time.
             </p>
             <div id="results-compute-output"></div>
             <div class="lq-modal-actions">
@@ -420,6 +423,22 @@ async function loadBracketDocsForPdf() {
     }
 }
 
+// categoryCode -> results doc written by 🏅 Compute Results
+// (tournaments/{id}/results/{categoryCode}: {placements: {entryId:
+// {placement, name, clubId, clubName, country, onRoster}}, status, system}).
+// The whole result — also athletes the live queue put in, who have no
+// registration and so no roster entry. {} when none computed yet.
+async function loadCategoryResults() {
+    const out = {};
+    try {
+        const snap = await fsDb.collection("tournaments").doc(TOURNAMENT_ID).collection("results").get();
+        snap.forEach(doc => { out[doc.id] = doc.data() || {}; });
+    } catch (err) {
+        console.warn("Results docs not readable — using roster placements", err);
+    }
+    return out;
+}
+
 // ageCode -> { categoryCode -> { entryId -> { placement, members } } }
 async function loadDivisionRostersForPdf() {
     const rostersByAgeCode = {};
@@ -435,6 +454,38 @@ async function loadDivisionRostersForPdf() {
 // ── cut-off: rounds straight from the live match docs ────────────────
 const CUT_OFF_ROUND_ORDER = ["PR", "SF", "F"];
 
+// The Place column comes from each performance's `rank`, written by the
+// processCutOffPerformance cloud function once a round is complete. When
+// a round is fully scored but has no ranks (the function didn't run for
+// it), the sheet ranks it itself, the same way: score, then presentation,
+// then the total of all judges; equal = same place. Only on the sheet —
+// nothing is written. A round that still has performances to go is left
+// alone, and saved ranks are never overridden.
+function cutOffSortKey(m) {
+    const b = m.blue || {};
+    const points = Array.isArray(b.points) ? b.points : [];
+    const avg = key => {
+        const v = points.map(p => p && p[key]).filter(x => typeof x === "number");
+        return v.length ? v.reduce((a, x) => a + x, 0) / v.length : 0;
+    };
+    const allJudges = points.reduce((a, p) => a + (p && typeof p.totalAllJudges === "number" ? p.totalAllJudges : 0), 0);
+    return [b.finalScore, avg("presentation"), allJudges];
+}
+
+function fillMissingCutOffRanks(round) {
+    const scored = round.filter(m => m.status === "completed" && typeof (m.blue || {}).finalScore === "number");
+    if (scored.length === 0 || scored.some(m => m.rank != null)) return;
+    const over = round.every(m => m.status === "completed" || NOT_PERFORMED.has(m.status) || (m.blue && m.blue.empty) || !(m.blue && m.blue.entryId));
+    if (!over) return;
+    const keyed = scored.map(m => ({ m, k: cutOffSortKey(m) }))
+        .sort((x, y) => y.k[0] - x.k[0] || y.k[1] - x.k[1] || y.k[2] - x.k[2]);
+    keyed.forEach((e, i) => {
+        const prev = keyed[i - 1];
+        const same = prev && prev.k.every((v, j) => Math.abs(v - e.k[j]) < 1e-9);
+        e.m.rank = same ? prev.m.rank : i + 1;
+    });
+}
+
 function reconstructCutOffFromFirestore(bracketDoc) {
     const matches = [];
     matchesById.forEach(m => { if (m.categoryCode === bracketDoc.categoryCode) matches.push(m); });
@@ -449,6 +500,7 @@ function reconstructCutOffFromFirestore(bracketDoc) {
     const rounds = phases.map(p => byPhase[p].slice()
         .sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0) || (a.displayNumber ?? 0) - (b.displayNumber ?? 0))
         .map(m => ({ ...m, matchId: m.id })));
+    rounds.forEach(fillMissingCutOffRanks);
 
     // Saved entries, plus anyone on a live corner the saved list doesn't
     // have (a replaced athlete).
@@ -472,7 +524,7 @@ function reconstructCutOffFromFirestore(bracketDoc) {
     };
 }
 
-function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
+function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode, resultsByCategory) {
     if (bracketDoc.system === "cut_off") return reconstructCutOffFromFirestore(bracketDoc);
     const entries = (bracketDoc.entries || []).slice().sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
     if (entries.length < 2) return null;
@@ -536,12 +588,21 @@ function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
         };
     });
 
-    const ageCode = ageCodeForCategoryCode(bracketDoc.categoryCode);
-    const rosterEntries = (ageCode && rostersByAgeCode[ageCode] && rostersByAgeCode[ageCode][bracketDoc.categoryCode]) || {};
+    // Classification: the results doc (current athletes, recomputed on
+    // every 🏅 Compute Results), else the roster placements (older runs).
     const placements = {};
-    Object.entries(rosterEntries).forEach(([entryId, entry]) => {
-        if (entry && entry.placement != null) placements[entryId] = entry.placement;
-    });
+    const result = resultsByCategory && resultsByCategory[bracketDoc.categoryCode];
+    if (result && result.placements) {
+        Object.entries(result.placements).forEach(([entryId, p]) => {
+            if (p && p.placement != null) placements[entryId] = p.placement;
+        });
+    } else {
+        const ageCode = ageCodeForCategoryCode(bracketDoc.categoryCode);
+        const rosterEntries = (ageCode && rostersByAgeCode[ageCode] && rostersByAgeCode[ageCode][bracketDoc.categoryCode]) || {};
+        Object.entries(rosterEntries).forEach(([entryId, entry]) => {
+            if (entry && entry.placement != null) placements[entryId] = entry.placement;
+        });
+    }
     // A synced entry inherits the placement computed for the entry it replaced.
     entries.forEach(e => (e.replacedEntryIds || []).forEach(oldId => {
         if (placements[oldId] != null && placements[e.entryId] == null) placements[e.entryId] = placements[oldId];
@@ -570,13 +631,14 @@ function reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode) {
 }
 
 async function prepareBracketPdfData() {
-    const [, , rostersByAgeCode] = await Promise.all([
+    const [, , rostersByAgeCode, resultsByCategory] = await Promise.all([
         loadBracketDocsForPdf(),
         BracketSheets.prepareAssets(),
         loadDivisionRostersForPdf(),
+        loadCategoryResults(),
     ]);
     reconstructedBrackets = Object.values(bracketDocsByCategoryCode)
-        .map(bracketDoc => reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode))
+        .map(bracketDoc => reconstructBracketFromFirestore(bracketDoc, rostersByAgeCode, resultsByCategory))
         .filter(Boolean)
         .sort((a, b) => compareCategories(a.categoryCode, a.categoryLabel, b.categoryCode, b.categoryLabel));
 }
@@ -1125,9 +1187,11 @@ function showNewResultsSummary({ printed, changedCodes, finished, printedBefore,
 
 // ═══════════════════════════════════════════════════════════════════
 // CLUB STANDINGS — the "🏆 Club Standings" button. Tallies every club's
-// 1st/2nd/3rd places (division_rosters "placement"), won matches (every
-// decided duel in matchesById) and athletes who were alone in their
-// category, weighted by the points chosen. Ties share a place (1, 1, 3).
+// 1st/2nd/3rd places (from 🏅 Compute Results, which leaves unranked
+// matches out), won matches (every decided RANKED duel in matchesById —
+// unranked friendlies / exhibitions never count) and athletes who were
+// alone in their category, weighted by the points chosen. Ties share a
+// place (1, 1, 3).
 //
 // Alone in a category: they get the "alone" points INSTEAD of 1st-place
 // points (no one to beat) — even if Compute Results gave them 1st.
@@ -1201,9 +1265,11 @@ async function printClubStandingsPdf() {
     btn.textContent = "Printing…";
 
     try {
-        const [rostersByAgeCode, clubNameById] = await Promise.all([
+        const [rostersByAgeCode, clubNameById, resultsByCategory] = await Promise.all([
             loadDivisionRostersForPdf(),
             loadRegisteredClubsForStandings(),
+            loadCategoryResults(),
+            loadBracketDocsForPdf(), // bracketDocsByCategoryCode — who is in a category NOW
         ]);
 
         const tally = {};
@@ -1214,24 +1280,46 @@ async function printClubStandingsPdf() {
         };
         const clubOf = entry => (entry && entry.members && entry.members[0] ? entry.members[0].clubId : null);
 
+        // Per category, from the most current source:
+        //   who is in it   the bracket doc's entries (follow replacements and
+        //                  deleted matches), else the registration roster
+        //   placements     the results doc (recomputed by every 🏅 Compute
+        //                  Results), else the roster placements
+        const bumpPlace = (clubId, place) => {
+            if (place === 1) bump(clubId, "first", 1);
+            else if (place === 2) bump(clubId, "second", 1);
+            else if (place === 3) bump(clubId, "third", 1);
+        };
+        const rosterByCategory = {};
         Object.values(rostersByAgeCode).forEach(categoriesForAge => {
-            Object.values(categoriesForAge).forEach(entriesForCategory => {
-                const entries = Object.values(entriesForCategory || {});
-                if (entries.length === 1) {
-                    bump(clubOf(entries[0]), "alone", 1); // alone — not counted as a 1st
-                    return;
-                }
-                entries.forEach(entry => {
-                    if (entry.placement === 1) bump(clubOf(entry), "first", 1);
-                    else if (entry.placement === 2) bump(clubOf(entry), "second", 1);
-                    else if (entry.placement === 3) bump(clubOf(entry), "third", 1);
-                });
+            Object.entries(categoriesForAge || {}).forEach(([code, entries]) => {
+                rosterByCategory[code] = Object.values(entries || {});
             });
+        });
+        const codes = new Set([...Object.keys(rosterByCategory), ...Object.keys(bracketDocsByCategoryCode), ...Object.keys(resultsByCategory)]);
+        codes.forEach(code => {
+            const bracket = bracketDocsByCategoryCode[code];
+            const roster = rosterByCategory[code] || [];
+            const people = bracket && Array.isArray(bracket.entries)
+                ? bracket.entries.map(e => ({ clubId: e.clubId || null }))
+                : roster.map(e => ({ clubId: clubOf(e) }));
+            if (people.length === 0) return;
+            if (people.length === 1) {
+                bump(people[0].clubId, "alone", 1); // alone — not counted as a 1st
+                return;
+            }
+            const result = resultsByCategory[code];
+            if (result && result.placements) {
+                Object.values(result.placements).forEach(p => bumpPlace(p && p.clubId, p && p.placement));
+            } else {
+                roster.forEach(entry => bumpPlace(clubOf(entry), entry.placement));
+            }
         });
 
         if (showWon) {
             matchesById.forEach(m => {
                 if (!m.winnerEntryId || m.status === "walkover") return; // a walkover isn't a won fight
+                if (m.isRanked === false) return; // friendly / exhibition — never counts
                 const winnerCorner = m.blue && m.blue.entryId === m.winnerEntryId ? m.blue
                     : m.red && m.red.entryId === m.winnerEntryId ? m.red
                         : null;

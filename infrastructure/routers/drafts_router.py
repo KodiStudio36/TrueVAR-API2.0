@@ -2,11 +2,12 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from firebase_admin import firestore
 
 from infrastructure.auth_common import db, get_current_user, get_admin_club_id
+from infrastructure.routers.operator_auth import require_operator
 
 router = APIRouter()
 
@@ -155,3 +156,66 @@ def create_tournament_draft_endpoint(
 
     _, doc_ref = db.collection("tournament_draft").add(draft)
     return {"id": doc_ref.id, "message": "Tournament request submitted"}
+
+# ── STAFF: delete / mark done (TOS only — "drafts:manage") ───────────────────
+# Anyone can submit a request, so spam is deleted outright. A handled
+# request is marked "done" — either by the create-tournament page
+# (/dashboard/tournaments/create?draft=<id>) after it created one tournament
+# per discipline, or by hand from the drafts page ("Mark done"). Done
+# drafts are hidden from the drafts list.
+DRAFT_MANAGE = [Depends(require_operator("drafts:manage"))]
+DONE_STATUSES = {"done", "successful"}  # "successful" = older name for done
+
+
+def _draft_ref(draft_id: str):
+    ref = db.collection("tournament_draft").document(draft_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    return ref, snap.to_dict() or {}
+
+
+@router.delete("/tournament-drafts/{draft_id}", dependencies=DRAFT_MANAGE)
+def delete_tournament_draft_endpoint(draft_id: str):
+    ref, _ = _draft_ref(draft_id)
+    ref.delete()
+    return {"message": "Draft deleted", "id": draft_id}
+
+
+class MarkDraftDoneRequest(BaseModel):
+    # Empty / missing = marked done by hand, without tournaments made here.
+    tournamentIds: List[str] = []
+
+
+@router.post("/tournament-drafts/{draft_id}/done", dependencies=DRAFT_MANAGE)
+def mark_tournament_draft_done_endpoint(
+    draft_id: str, request: Request, payload: Optional[MarkDraftDoneRequest] = None,
+):
+    """Sets the draft to "done". With tournamentIds (sent by the create page
+    after scheduling) it also checks they exist and links them both ways:
+    draft.tournaments ↔ tournament.draftId."""
+    ref, draft = _draft_ref(draft_id)
+    if draft.get("status") in DONE_STATUSES:
+        raise HTTPException(status_code=409, detail="This draft is already done.")
+
+    ids = list(dict.fromkeys(i.strip() for i in (payload.tournamentIds if payload else []) if i and i.strip()))
+    found: dict = {}
+    if ids:
+        snaps = list(db.get_all([db.collection("tournaments").document(i) for i in ids]))
+        found = {s.id: (s.to_dict() or {}) for s in snaps if s.exists}
+        missing = [i for i in ids if i not in found]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Tournament(s) not found: {', '.join(missing)}")
+
+    batch = db.batch()
+    for tid in ids:
+        batch.update(db.collection("tournaments").document(tid), {"draftId": draft_id})
+    batch.update(ref, {
+        "status": "done",
+        "doneAt": firestore.SERVER_TIMESTAMP,
+        "doneBy": request.state.operator.get("uid"),
+        "doneManually": not ids,
+        "tournaments": [{"id": tid, "title": found[tid].get("title")} for tid in ids],
+    })
+    batch.commit()
+    return {"message": "Draft marked done", "id": draft_id, "tournamentIds": ids}

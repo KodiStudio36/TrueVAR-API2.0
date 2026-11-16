@@ -4,22 +4,134 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tournament Dashboard</title>
+    <title>{% block title %}TrueCNTRL — Tournament Dashboard{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 
 <body>
-    <nav class="navbar">
-        <div class="nav-brand">🏆 TrueCNTRL</div>
-        <ul class="nav-links">
-            <li><a href="/dashboard">Dashboard</a></li>
-            <li><a href="/dashboard/tournaments/create">Create Tournament</a></li>
-        </ul>
+    {# The dashboard routes don't pass `user` themselves — dashboard_router
+    puts the session user on request.state for every /dashboard page. #}
+    {% set nav_user = user or request.state.user %}
+
+    <nav class="navbar" id="navbar">
+        <a href="/dashboard" class="brand-logo" aria-label="Dashboard">
+            <img src="/static/assets/logos/truevar_logo.png" alt="TrueVAR">
+        </a>
+
+        <div class="nav-right">
+            {# Tournaments menu: opens on hover, on keyboard focus, and on click/tap. #}
+            <div class="nav-menu" id="nav-tournaments">
+                <button type="button" class="nav-action nav-menu-btn" aria-haspopup="true" aria-expanded="false"
+                    aria-controls="nav-tournaments-list">
+                    Tournaments
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M3.5 6l4.5 4.5L12.5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                            stroke-linejoin="round" />
+                    </svg>
+                </button>
+                <div class="nav-menu-list" id="nav-tournaments-list" role="menu">
+                    <a href="/dashboard/tournaments" role="menuitem">All tournaments</a>
+                    {% if can(request, "drafts:manage") %}
+                    <a href="/dashboard/drafts" role="menuitem">Drafts</a>
+                    {% endif %}
+                    {% if can(request, "tournament:create") %}
+                    <a href="/dashboard/tournaments/create" role="menuitem">Create tournament</a>
+                    {% endif %}
+                </div>
+            </div>
+            {% if can(request, "inventory:manage") %}
+            <a href="/dashboard/inventory" class="nav-action">Inventory</a>
+            {% endif %}
+            {% if can(request, "operator:manage") %}
+            <a href="/dashboard/operators" class="nav-action">Operators</a>
+            {% endif %}
+
+            {% if nav_user %}
+            <a href="/settings" class="profile-link" aria-label="Open account settings">
+                {% if nav_user.photoUrl %}
+                <img src="{{ nav_user.photoUrl }}" alt="" class="user-avatar" referrerpolicy="no-referrer">
+                {% else %}
+                <span class="user-avatar user-avatar-initial" aria-hidden="true">
+                    {{ (nav_user.firstname or "?")[:1] | upper }}
+                </span>
+                {% endif %}
+                <span class="user-chip-text">
+                    <span class="user-chip-name">{{ nav_user.firstname }}</span>
+                    <span class="user-chip-sub">Settings</span>
+                </span>
+                <svg class="profile-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none"
+                    xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                </svg>
+            </a>
+            {% endif %}
+        </div>
     </nav>
 
     <main class="container">
         {% block content %}{% endblock %}
     </main>
+
+    <script>
+        // Tournaments menu: hover/focus open it via CSS; this adds click/tap
+        // (touch screens have no hover), Escape and click-outside to close.
+        (function () {
+            var menu = document.getElementById("nav-tournaments");
+            if (!menu) return;
+            var btn = menu.querySelector(".nav-menu-btn");
+            function setOpen(open) {
+                menu.classList.toggle("is-open", open);
+                btn.setAttribute("aria-expanded", open ? "true" : "false");
+            }
+            btn.addEventListener("click", function () { setOpen(!menu.classList.contains("is-open")); });
+            document.addEventListener("click", function (e) { if (!menu.contains(e.target)) setOpen(false); });
+            document.addEventListener("keydown", function (e) {
+                if (e.key === "Escape" && menu.classList.contains("is-open")) { setOpen(false); btn.focus(); }
+            });
+        })();
+
+        // Hide the navbar on scroll-down, reveal it on scroll-up
+        // (same behaviour as the registration system's base template).
+        (function () {
+            var navbar = document.getElementById("navbar");
+            if (!navbar) return;
+
+            var lastScrollY = window.scrollY;
+            var isHidden = false;
+            var ticking = false;
+            var revealThreshold = navbar.offsetHeight;
+            var minScrollDelta = 4;
+
+            function onScroll() {
+                var currentScrollY = Math.max(window.scrollY, 0);
+                var delta = currentScrollY - lastScrollY;
+
+                if (Math.abs(delta) < minScrollDelta) {
+                    ticking = false;
+                    return;
+                }
+
+                if (currentScrollY <= revealThreshold) {
+                    if (isHidden) { navbar.classList.remove("navbar-hidden"); isHidden = false; }
+                } else if (delta > 0) {
+                    if (!isHidden) { navbar.classList.add("navbar-hidden"); isHidden = true; }
+                } else {
+                    if (isHidden) { navbar.classList.remove("navbar-hidden"); isHidden = false; }
+                }
+
+                lastScrollY = currentScrollY;
+                ticking = false;
+            }
+
+            window.addEventListener("scroll", function () {
+                if (!ticking) {
+                    window.requestAnimationFrame(onScroll);
+                    ticking = true;
+                }
+            }, { passive: true });
+        })();
+    </script>
 </body>
 
 </html>

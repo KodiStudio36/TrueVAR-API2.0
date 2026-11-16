@@ -1,0 +1,3 @@
+{# Fragment: a page of scheduled drafts, fetched by drafts.html ("Load scheduled drafts"). #}
+{% from "dashboard/_draft_card.html" import draft_card %}
+{% for d in drafts %}{{ draft_card(d) }}{% endfor %}

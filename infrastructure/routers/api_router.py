@@ -11,8 +11,9 @@ import os
 import secrets
 
 from adapters.database.firebase_case_repository import FirebaseCaseRepository
+from infrastructure.routers.inventory_router import remove_tournament_from_inventory, refresh_tournament_in_inventory
 from usecases.case_usecase import CreateCaseUseCase
-from usecases.tournament_usecase import CreateTournamentUseCase, GetAllTournamentsUseCase, GetTournamentUseCase, UpdateTournamentUseCase
+from usecases.tournament_usecase import CreateTournamentUseCase, GetAllTournamentsUseCase, GetTournamentUseCase
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
 from infrastructure.firebase_client import init_firestore
 
@@ -21,7 +22,7 @@ from infrastructure.auth_common import (
     create_session_jwt, decode_session_jwt, get_current_user,
     get_admin_club_id, get_user_roles,
 )
-from infrastructure.routers.operator_auth import require_operator
+from infrastructure.routers.operator_auth import require_operator, remove_tournament_from_operators
 
 from adapters.database.firebase_scheduled_broadcast_repository import FirebaseScheduledBroadcastRepository
 from adapters.database.firebase_stream_key_repository import FirebaseStreamKeyRepository
@@ -66,32 +67,50 @@ class CreateTournamentRequest(BaseModel):
     provider: str
     mode: str
     isStream: bool
-    isExternalPublic: bool
+    # New tournaments start hidden from the public site; the tournament
+    # page's visibility button (PATCH …/visibility) makes them public.
+    isExternalPublic: bool = False
     venueName: str
     numbering: str
     # Registration fields
     isRegistrationOpen: bool = False
     registrationDeadline: Optional[datetime] = None
     categories: Optional[Dict] = None
+    categoriesFileName: Optional[str] = None  # shown on the edit page
     # Only meaningful when isRegistrationOpen is False — a pointer to an
     # outside registration site (Google Form, federation portal, etc.)
     # shown on the public tournament page instead of the in-app flow.
     externalRegistrationUrl: Optional[str] = None
 
 class UpdateTournamentRequest(BaseModel):
-    title: str
-    location: str
-    courtNum: int
-    dateTime: datetime
-    sport: str
-    discipline: str
-    provider: str
-    mode: str
-    isStream: bool
-    isExternalPublic: bool
-    venueName: str
-    numbering: str
+    """Edit page (tournament_create.html in edit mode). Every field is
+    optional — only the fields that were sent are written, as a partial
+    Firestore update, so splitGroup, status, playlistId, streams etc. are
+    never touched. isExternalPublic is NOT here: it has its own endpoint
+    (PATCH /tournaments/{id}/visibility)."""
+    title: Optional[str] = None
+    location: Optional[str] = None
+    courtNum: Optional[int] = None
+    dateTime: Optional[datetime] = None
+    sport: Optional[str] = None
+    discipline: Optional[str] = None
+    provider: Optional[str] = None
+    mode: Optional[str] = None
+    isStream: Optional[bool] = None
+    venueName: Optional[str] = None
+    numbering: Optional[str] = None
+    isRegistrationOpen: Optional[bool] = None
+    registrationDeadline: Optional[datetime] = None
     externalRegistrationUrl: Optional[str] = None
+
+
+class VisibilityUpdate(BaseModel):
+    isExternalPublic: bool
+
+
+class CategoriesUpload(BaseModel):
+    categories: Dict
+    fileName: Optional[str] = None
 
 class TournamentResponse(BaseModel):
     id: str | None
@@ -210,7 +229,8 @@ def create_tournament_endpoint(
     if payload.isRegistrationOpen and payload.categories:
         db.collection("tournament_categories").document(tournament_id).set({
             "tournamentId": tournament_id,
-            "categories": payload.categories,
+            "categories": _unwrap_categories(payload.categories),
+            "fileName": (payload.categoriesFileName or "").strip() or None,
             "createdAt": firestore.SERVER_TIMESTAMP
         })
 
@@ -2622,10 +2642,34 @@ class CategoryResultSummary(BaseModel):
     detail: Optional[str] = None
 
 
+# ── Results computation ────────────────────────────────────────────────
+# Every run recomputes EVERY category from its live match docs — nothing
+# is skipped because it was computed before, so a replaced / removed
+# athlete, a corrected winner or a reopened final always shows up.
+#
+# Each run writes, per category:
+#   tournaments/{id}/results/{categoryCode}   (overwritten every run)
+#       {categoryCode, categoryLabel, system, status, computedAt,
+#        placements: {entryId: {placement, name, clubId, clubName,
+#                               country, onRoster}}}
+#       The whole result, including athletes put in by the live queue who
+#       have no registration (they're not on the roster). Deleted when the
+#       category has no result (yet / any more).
+#   division_rosters/{ageCode}.athletes.{cat}.{entryId}.placement
+#       The new placement for every roster entry that has one; REMOVED from
+#       every roster entry of the category that has none now (a replaced
+#       or deleted athlete, a reopened final). The public tournament page
+#       reads these.
+#
+# The match docs' `resultsProcessed` flag is NOT touched any more — it
+# belongs to processMatchResult (its claim against double processing),
+# and setting it here marked whole categories "processed" even when
+# nothing was computed.
 CUT_OFF_PHASE_ORDER = ("F", "SF", "PR")
 NOT_PERFORMED_STATUSES = {"withdrawn", "dns", "dsq", "disqualified", "cancelled", "walkover"}
- 
- 
+DECIDED_STATUSES = ("done", "walkover", "completed")
+
+
 def _is_cut_off_category(system: Optional[str], matches: List[Dict], is_poomsae: bool) -> bool:
     if system:
         return system == "cut_off"
@@ -2634,30 +2678,78 @@ def _is_cut_off_category(system: Optional[str], matches: List[Dict], is_poomsae:
         m.get("format") == "solo" or (m.get("format") != "duel" and not m.get("red"))
         for m in matches
     )
- 
- 
+
+
+def _is_round_robin_category(system: Optional[str], matches: List[Dict]) -> bool:
+    if system:
+        return system == "round_robin"
+    return bool(matches) and all(str(m.get("roundPhase") or "").startswith("RR") for m in matches)
+
+
 def _cut_off_score(m: Dict) -> Optional[float]:
     s = (m.get("blue") or {}).get("finalScore")
     if isinstance(s, bool) or not isinstance(s, (int, float)):
         return None
     return s if m.get("status") == "completed" else None
- 
- 
-def _cut_off_placements(matches: List[Dict]) -> Optional[Dict[str, int]]:
-    """entryId -> placement, or None while the Final is still running."""
+
+
+def _num(v) -> float:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0
+
+
+# Each helper -> (placements, detail, incomplete)
+#   placements  {entryId: (place, corner)} — or None when there's no result yet
+#   detail      why there's no result (None otherwise)
+#   incomplete  decided-looking matches that couldn't be read
+
+def _elimination_placements(matches: List[Dict]):
+    tree = [m for m in matches if m.get("bracketRound") is not None]
+    if not tree:
+        return None, "No bracketRound data on any match — not a generated bracket.", 0
+    total = max(int(m["bracketRound"]) for m in tree)
+    final = next((m for m in tree if int(m["bracketRound"]) == total), None)
+    if not (final and final.get("status") in DECIDED_STATUSES and final.get("winnerEntryId")):
+        return None, "Final has not been decided yet.", 0
+
+    placements: Dict[str, tuple] = {}
+    incomplete = 0
+    for m in tree:
+        r = int(m["bracketRound"])
+        winner_id = m.get("winnerEntryId")
+        if not (m.get("status") in DECIDED_STATUSES and winner_id):
+            incomplete += 1
+            continue
+        corners = [c for c in (m.get("blue") or {}, m.get("red") or {}) if c.get("entryId")]
+        winner = next((c for c in corners if c["entryId"] == winner_id), None)
+        if not winner:
+            incomplete += 1  # winner isn't one of the corners any more
+            continue
+        loser = next((c for c in corners if c["entryId"] != winner_id), None)
+        if loser:  # none on a walkover against a BYE
+            placements[loser["entryId"]] = (2 ** (total - r) + 1, loser)
+        if r == total:
+            placements[winner_id] = (1, winner)
+    return placements, None, incomplete
+
+
+def _cut_off_placements(matches: List[Dict]):
+    """Final athletes by the round's `rank` (processCutOffPerformance), then
+    the Semi-Final and Preliminary athletes who didn't go through, the
+    numbering continuing. Equal rank (or equal score without rank) = equal
+    place. Didn't perform → no place."""
     by_phase: Dict[str, List[Dict]] = {}
     for m in matches:
         by_phase.setdefault(m.get("roundPhase"), []).append(m)
     final = by_phase.get("F") or []
     if not final:
-        return None
+        return None, "No Final round.", 0
     if not all(
         m.get("status") == "completed" or m.get("status") in NOT_PERFORMED_STATUSES or (m.get("blue") or {}).get("empty")
         for m in final
     ):
-        return None
- 
-    placements: Dict[str, int] = {}
+        return None, "Cut-off Final not finished yet.", 0
+
+    placements: Dict[str, tuple] = {}
     placed = set()
     offset = 0
     for phase in CUT_OFF_PHASE_ORDER:
@@ -2665,7 +2757,7 @@ def _cut_off_placements(matches: List[Dict]) -> Optional[Dict[str, int]]:
             m for m in by_phase.get(phase, [])
             if (m.get("blue") or {}).get("entryId") and m["blue"]["entryId"] not in placed
         ]
- 
+
         def _key(m):
             score = _cut_off_score(m)
             rank = m.get("rank")
@@ -2674,12 +2766,12 @@ def _cut_off_placements(matches: List[Dict]) -> Optional[Dict[str, int]]:
                 -(score if score is not None else -1),
                 m.get("matchNumber") or m.get("bracketMatchNumber") or 0,
             )
- 
+
         group.sort(key=_key)
         prev = None  # (rank, score, place) of the previous placed athlete
         for i, m in enumerate(group):
-            entry_id = m["blue"]["entryId"]
-            placed.add(entry_id)
+            corner = m["blue"]
+            placed.add(corner["entryId"])
             score = _cut_off_score(m)
             if score is None:
                 prev = None
@@ -2687,12 +2779,49 @@ def _cut_off_placements(matches: List[Dict]) -> Optional[Dict[str, int]]:
             rank = m.get("rank")
             same = prev is not None and (rank == prev[0] if rank is not None else score == prev[1])
             place = prev[2] if same else offset + i + 1
-            placements[entry_id] = place
+            placements[corner["entryId"]] = (place, corner)
             prev = (rank, score, place)
         offset += len(group)
-    return placements
- 
- 
+    return placements, None, 0
+
+
+def _round_robin_placements(matches: List[Dict]):
+    """Once every bout is decided: bouts won, then total score, then fewer
+    losses (same as roundRobinStandings in live-queue-poomsae-duel.js).
+    Equal wins + total = equal place."""
+    def over(m):
+        return (m.get("status") in DECIDED_STATUSES and m.get("winnerEntryId")) or m.get("status") in NOT_PERFORMED_STATUSES
+    if not matches:
+        return None, "No bouts.", 0
+    if not all(over(m) for m in matches):
+        return None, "Not every bout is decided yet.", 0
+
+    table: Dict[str, Dict] = {}
+    for m in matches:
+        winner_id = m.get("winnerEntryId")
+        for side in ("blue", "red"):
+            c = m.get(side) or {}
+            if not c.get("entryId"):
+                continue
+            row = table.setdefault(c["entryId"], {"wins": 0, "losses": 0, "total": 0.0, "corner": c})
+            row["corner"] = c
+            if winner_id == c["entryId"]:
+                row["wins"] += 1
+            elif winner_id:
+                row["losses"] += 1
+            row["total"] += _num(c.get("finalScore"))
+
+    rows = sorted(table.items(), key=lambda kv: (-kv[1]["wins"], -kv[1]["total"], kv[1]["losses"]))
+    placements: Dict[str, tuple] = {}
+    prev = None
+    for i, (entry_id, row) in enumerate(rows):
+        same = prev is not None and prev[0] == row["wins"] and abs(prev[1] - row["total"]) < 1e-9
+        place = prev[2] if same else i + 1
+        placements[entry_id] = (place, row["corner"])
+        prev = (row["wins"], row["total"], place)
+    return placements, None, 0
+
+
 @router.post("/tournaments/{tournament_id}/results/compute",
              dependencies=[Depends(require_operator("matches:manage"))])
 def compute_tournament_results_endpoint(
@@ -2700,154 +2829,168 @@ def compute_tournament_results_endpoint(
     repo: TournamentPort = Depends(get_tournament_repo),
 ):
     """
-    Derives every category's final placements and writes each entry's
-    placement onto its division_rosters entry:
- 
-      single elimination  from bracketRound + winnerEntryId — loser at
-                          bracketRound r is placed 2 ** (totalRounds - r) + 1,
-                          the final's winner is 1. Processed once the final
-                          is decided ("done" / "walkover" / "completed").
-      cut-off (poomsae)   from the Final ranking, then the athletes who
-                          didn't go through (see _cut_off_placements).
-                          Processed once every Final performance is in.
- 
-    Idempotent per category.
+    Recomputes every category's placements from its live match docs (see
+    the block comment above for what's written where):
+
+      single elimination  loser at bracketRound r → 2 ** (totalRounds - r) + 1,
+                          the final's winner → 1. Once the final is decided.
+      cut-off (poomsae)   the Final ranking, then the athletes who didn't go
+                          through. Once every Final performance is in.
+      round robin         bouts won, then total score. Once every bout is
+                          decided.
+
+    Unranked matches (isRanked false — friendlies, exhibitions) are left
+    out entirely. Safe to run any number of times — every run starts from
+    scratch.
     """
     tournament = repo.getTournament(tournament_id)
     if not tournament:
         raise HTTPException(status_code=404, detail="Tournament not found")
- 
+
+    tournament_ref = db.collection("tournaments").document(tournament_id)
+    is_poomsae = "poomsae" in (tournament.discipline or "").lower()
+
+    # ── read everything once ─────────────────────────────────────────
+    by_category: Dict[str, List[Dict]] = {}
     matches_ref = (
         db.collection("sports").document(tournament.sport)
         .collection("disciplines").document(tournament.discipline)
         .collection("matches")
         .where("tournamentId", "==", tournament_id)
     )
- 
-    by_category: Dict[str, List[Dict]] = {}
-    match_docs_by_category: Dict[str, List] = {}
     for doc in matches_ref.stream():
-        m = doc.to_dict()
-        code = m.get("categoryCode")
-        if not code:
-            continue
-        by_category.setdefault(code, []).append(m)
-        match_docs_by_category.setdefault(code, []).append(doc.reference)
- 
-    tournament_ref = db.collection("tournaments").document(tournament_id)
-    results: List[CategoryResultSummary] = []
- 
-    bracket_systems: Dict[str, Optional[str]] = {}
+        m = doc.to_dict() or {}
+        # Unranked (friendly / exhibition, isRanked false) never counts: it
+        # gets no placement and doesn't hold up or shift a category's result.
+        if m.get("categoryCode") and m.get("isRanked", True) is not False:
+            by_category.setdefault(m["categoryCode"], []).append(m)
+
+    bracket_docs: Dict[str, Dict] = {}
     for bdoc in tournament_ref.collection("brackets").stream():
         bd = bdoc.to_dict() or {}
         if bd.get("categoryCode"):
-            bracket_systems[bd["categoryCode"]] = bd.get("system")
-    is_poomsae = "poomsae" in (tournament.discipline or "").lower()
- 
-    DECIDED_STATUSES = ("done", "walkover", "completed")
- 
-    # ageCode -> {"athletes": {categoryCode: {entryId: {"placement": n}}}}
-    roster_updates: Dict[str, Dict] = {}
- 
-    def _queue_placement(category_code: str, entry_id: str, placement: int) -> bool:
-        reg_doc = tournament_ref.collection("registrations").document(f"{category_code}_{entry_id}").get()
-        if not reg_doc.exists:
-            return False
-        age_code = reg_doc.to_dict().get("ageCode")
-        if not age_code:
-            return False
-        bucket = roster_updates.setdefault(age_code, {"athletes": {}})
-        bucket["athletes"].setdefault(category_code, {})[entry_id] = {"placement": placement}
-        return True
- 
-    for category_code, matches in by_category.items():
-        # ── cut-off ──────────────────────────────────────────────────
-        if _is_cut_off_category(bracket_systems.get(category_code), matches, is_poomsae):
-            phase_count = len({m.get("roundPhase") for m in matches if m.get("roundPhase")})
-            placements = _cut_off_placements(matches)
-            if placements is None:
-                results.append(CategoryResultSummary(
-                    categoryCode=category_code, totalRounds=phase_count, placementsAssigned=0,
-                    incompleteMatches=len([m for m in matches if m.get("status") not in DECIDED_STATUSES
-                                           and m.get("status") not in NOT_PERFORMED_STATUSES]),
-                    status="skipped", detail="Cut-off Final not finished yet.",
-                ))
-                continue
-            assigned = sum(1 for entry_id, place in placements.items() if _queue_placement(category_code, entry_id, place))
+            bracket_docs[bd["categoryCode"]] = bd
+
+    # categoryCode -> [(ageCode, {entryId: entry})] — a category normally
+    # lives in one division roster, but don't assume it.
+    rosters_by_category: Dict[str, List[tuple]] = {}
+    roster_refs: Dict[str, object] = {}
+    for rdoc in tournament_ref.collection("division_rosters").stream():
+        roster_refs[rdoc.id] = rdoc.reference
+        for cat, entries in ((rdoc.to_dict() or {}).get("athletes") or {}).items():
+            if isinstance(entries, dict):
+                rosters_by_category.setdefault(cat, []).append((rdoc.id, entries))
+
+    existing_results = {d.id for d in tournament_ref.collection("results").stream()}
+
+    # ── compute ──────────────────────────────────────────────────────
+    roster_updates: Dict[str, Dict[str, object]] = {}   # ageCode -> {fieldPath: value}
+    result_writes: List[tuple] = []                      # ("set", code, data) | ("delete", code, None)
+    results: List[CategoryResultSummary] = []
+
+    # + categories with a stored result but no ranked matches any more (all
+    # unranked / deleted): their result and placements get cleared.
+    categories = sorted(set(by_category) | set(bracket_docs) | existing_results)
+    for cat in categories:
+        matches = by_category.get(cat, [])
+        bdoc = bracket_docs.get(cat) or {}
+        system_field = bdoc.get("system")
+
+        if _is_cut_off_category(system_field, matches, is_poomsae):
+            system = "cut_off"
+            placements, detail, incomplete = _cut_off_placements(matches)
+            rounds = len({m.get("roundPhase") for m in matches if m.get("roundPhase")})
+        elif _is_round_robin_category(system_field, matches):
+            system = "round_robin"
+            placements, detail, incomplete = _round_robin_placements(matches)
+            rounds = len({m.get("roundPhase") for m in matches if m.get("roundPhase")})
+        else:
+            system = "single_elimination"
+            placements, detail, incomplete = _elimination_placements(matches)
+            rounds = max([int(m["bracketRound"]) for m in matches if m.get("bracketRound") is not None] or [0])
+
+        new = placements or {}
+        on_roster = set()
+        removed = 0
+        for age_code, entries in rosters_by_category.get(cat, []):
+            for entry_id, entry in entries.items():
+                if not isinstance(entry, dict):
+                    continue
+                path = f"athletes.{cat}.{entry_id}.placement"
+                had = entry.get("placement")
+                if entry_id in new:
+                    on_roster.add(entry_id)
+                    if had != new[entry_id][0]:
+                        roster_updates.setdefault(age_code, {})[path] = new[entry_id][0]
+                elif had is not None:
+                    roster_updates.setdefault(age_code, {})[path] = firestore.DELETE_FIELD
+                    removed += 1
+
+        if placements is None:
+            if cat in existing_results:
+                result_writes.append(("delete", cat, None))
+            note = detail + (f" {removed} old placement(s) removed." if removed else "")
             results.append(CategoryResultSummary(
-                categoryCode=category_code, totalRounds=phase_count, placementsAssigned=assigned,
-                incompleteMatches=0, status="complete", detail="Cut-off",
+                categoryCode=cat, totalRounds=rounds, placementsAssigned=0,
+                incompleteMatches=incomplete, status="skipped", detail=note,
             ))
             continue
- 
-        # ── single elimination ───────────────────────────────────────
-        rounds = [m.get("bracketRound") for m in matches if m.get("bracketRound") is not None]
-        if not rounds:
-            results.append(CategoryResultSummary(
-                categoryCode=category_code, totalRounds=0, placementsAssigned=0,
-                incompleteMatches=len(matches), status="skipped",
-                detail="No bracketRound data on any match — not a generated bracket.",
-            ))
-            continue
-        total_rounds = max(rounds)
- 
-        final_matches = [m for m in matches if m.get("bracketRound") == total_rounds]
-        final_match = final_matches[0] if final_matches else None
-        final_decided = bool(
-            final_match and final_match.get("status") in DECIDED_STATUSES and final_match.get("winnerEntryId")
-        )
-        if not final_decided:
-            results.append(CategoryResultSummary(
-                categoryCode=category_code, totalRounds=total_rounds, placementsAssigned=0,
-                incompleteMatches=len(matches), status="skipped",
-                detail="Final has not been decided yet.",
-            ))
-            continue
- 
-        assigned = 0
-        incomplete = 0
-        for m in matches:
-            r = m.get("bracketRound")
-            if r is None:
-                continue
-            decided = m.get("status") in DECIDED_STATUSES and m.get("winnerEntryId")
-            if not decided:
-                incomplete += 1
-                continue
- 
-            blue_id = (m.get("blue") or {}).get("entryId")
-            red_id = (m.get("red") or {}).get("entryId")
-            winner_id = m.get("winnerEntryId")
-            if not blue_id or not red_id or winner_id not in (blue_id, red_id):
-                incomplete += 1
-                continue
-            loser_id = red_id if winner_id == blue_id else blue_id
- 
-            if _queue_placement(category_code, loser_id, 2 ** (total_rounds - r) + 1):
-                assigned += 1
-            if r == total_rounds and _queue_placement(category_code, winner_id, 1):
-                assigned += 1
- 
+
+        result_writes.append(("set", cat, {
+            "categoryCode": cat,
+            "categoryLabel": bdoc.get("categoryLabel") or cat,
+            "system": system,
+            "status": "partial" if incomplete else "complete",
+            "computedAt": firestore.SERVER_TIMESTAMP,
+            "placements": {
+                entry_id: {
+                    "placement": place,
+                    "name": corner.get("name"),
+                    "clubId": corner.get("clubId"),
+                    "clubName": corner.get("clubName"),
+                    "country": corner.get("country"),
+                    "onRoster": entry_id in on_roster,
+                }
+                for entry_id, (place, corner) in new.items()
+            },
+        }))
+
+        notes = []
+        if not new:
+            notes.append("No placements could be derived from the matches.")
+        off_roster = [corner.get("name") or eid for eid, (_, corner) in new.items() if eid not in on_roster]
+        if off_roster:
+            notes.append(f"Not on the registration roster (results only): {', '.join(off_roster)}.")
+        if removed:
+            notes.append(f"{removed} old placement(s) removed.")
+        if incomplete:
+            notes.append(f"{incomplete} match(es) couldn't be read.")
         results.append(CategoryResultSummary(
-            categoryCode=category_code, totalRounds=total_rounds, placementsAssigned=assigned,
-            incompleteMatches=incomplete, status="complete" if incomplete == 0 else "partial",
+            categoryCode=cat, totalRounds=rounds, placementsAssigned=len(new),
+            incompleteMatches=incomplete,
+            status="complete" if new and not incomplete else "partial",
+            detail=" ".join(notes) or None,
         ))
- 
-    roster_items = list(roster_updates.items())
-    for i in range(0, len(roster_items), 400):
+
+    # ── write ────────────────────────────────────────────────────────
+    ops = []
+    for age_code, fields in roster_updates.items():
+        if fields:
+            ops.append(("update", roster_refs[age_code], fields))
+    results_col = tournament_ref.collection("results")
+    for kind, cat, data in result_writes:
+        ops.append((kind, results_col.document(cat), data))
+    for i in range(0, len(ops), 400):
         batch = db.batch()
-        for age_code, data in roster_items[i:i + 400]:
-            batch.set(tournament_ref.collection("division_rosters").document(age_code), data, merge=True)
+        for kind, ref, data in ops[i:i + 400]:
+            if kind == "update":
+                batch.update(ref, data)
+            elif kind == "set":
+                batch.set(ref, data)
+            else:
+                batch.delete(ref)
         batch.commit()
- 
-    decided_categories = {r.categoryCode for r in results if r.status in ("complete", "partial")}
-    flag_refs = [ref for cat, refs in match_docs_by_category.items() if cat in decided_categories for ref in refs]
-    for i in range(0, len(flag_refs), 400):
-        batch = db.batch()
-        for ref in flag_refs[i:i + 400]:
-            batch.set(ref, {"resultsProcessed": True}, merge=True)
-        batch.commit()
- 
+
     return {
         "tournamentId": tournament_id,
         "categoriesProcessed": len([r for r in results if r.status != "skipped"]),
@@ -2879,46 +3022,175 @@ def create_case_endpoint(payload: CreateCaseRequest, repo=Depends(get_case_repo)
     use_case.execute(name=payload.name)
     return {"message": "Case created successfully"}
 
+# ═══════════════════════════════════════════════════════════════════════════
+# EDITING A TOURNAMENT
+# ═══════════════════════════════════════════════════════════════════════════
+# Edit page: /dashboard/tournaments/{id}/edit (tournament_create.html in edit
+# mode). Every write is a partial Firestore update() of only the fields that
+# were sent — the old version rebuilt the whole document through
+# UpdateTournamentUseCase and lost fields the model doesn't carry
+# (isRegistrationOpen, splitGroup, playlistId, streams, …).
+#
+#   PATCH  /tournaments/{id}             title, date, courts, sport, settings,
+#   PUT    /tournaments/{id}             registration (same handler — PUT kept
+#                                        for anything still calling it)
+#   PATCH  /tournaments/{id}/visibility  {"isExternalPublic": bool}
+#   PUT    /tournaments/{id}/categories  {"categories": {...}, "fileName"}
+#   DELETE /tournaments/{id}/categories  removes tournament_categories/{id}
+
+MAX_TITLE_LEN = 200
+MAX_TEXT_LEN = 200
+
+
+def _existing_tournament(tournament_id: str):
+    """(ref, data) of a tournament, 404 if it doesn't exist."""
+    ref = db.collection("tournaments").document(tournament_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+    return ref, snap.to_dict() or {}
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Naive = UTC (the forms send raw UTC digits)."""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def _clean_text(value: Optional[str], label: str, required: bool = False, max_len: int = MAX_TEXT_LEN) -> Optional[str]:
+    value = (value or "").strip()
+    if required and not value:
+        raise HTTPException(status_code=400, detail=f"{label} can't be empty.")
+    if len(value) > max_len:
+        raise HTTPException(status_code=400, detail=f"{label} is too long (max {max_len} characters).")
+    return value or None
+
+
+def _unwrap_categories(categories: Dict) -> Dict:
+    """Accepts the file as {"sportSchemas": …} or {"categories": {"sportSchemas": …}}."""
+    if isinstance(categories.get("categories"), dict):
+        return categories["categories"]
+    return categories
+
+
+@router.patch("/tournaments/{tournament_id}", status_code=200,
+              dependencies=[Depends(require_operator("tournament:edit"))])
 @router.put("/tournaments/{tournament_id}", status_code=200,
             dependencies=[Depends(require_operator("tournament:edit"))])
-def update_tournament_endpoint(
-    tournament_id: str,
-    payload: UpdateTournamentRequest,
-    repo=Depends(get_tournament_repo),
-):
-    # Start from the stored settings so fields the edit form doesn't send
-    # (registrationDeadline, externalRegistrationUrl, …) survive the save.
-    t_doc = db.collection("tournaments").document(tournament_id).get()
-    if not t_doc.exists:
-        raise HTTPException(status_code=404, detail="Tournament not found")
-    settings = dict((t_doc.to_dict() or {}).get("settings") or {})
-    settings.update({
-        "isStream": payload.isStream,
-        "venueName": payload.venueName,
-        "numbering": payload.numbering,
-        "provider": payload.provider,
-        "mode": payload.mode,
-    })
+def update_tournament_endpoint(tournament_id: str, payload: UpdateTournamentRequest):
+    ref, current = _existing_tournament(tournament_id)
     sent = getattr(payload, "model_fields_set", None) or getattr(payload, "__fields_set__", set())
-    if "externalRegistrationUrl" in sent:
-        settings["externalRegistrationUrl"] = (payload.externalRegistrationUrl or "").strip() or None
+    upd: Dict = {}
 
-    use_case = UpdateTournamentUseCase(repo)
-    try:
-        use_case.execute(
-            tournament_id=tournament_id,
-            title=payload.title,
-            location=payload.location,
-            courtNum=payload.courtNum,
-            dateTime=payload.dateTime,
-            sport=payload.sport.lower(),
-            discipline=payload.discipline.lower(),
-            isExternalPublic=payload.isExternalPublic,
-            settings=settings,
+    if "title" in sent:
+        upd["title"] = _clean_text(payload.title, "Title", required=True, max_len=MAX_TITLE_LEN)
+    if "location" in sent:
+        upd["location"] = _clean_text(payload.location, "Location", required=True)
+    if "courtNum" in sent:
+        if payload.courtNum is None or not 1 <= payload.courtNum <= 50:
+            raise HTTPException(status_code=400, detail="Number of courts must be between 1 and 50.")
+        upd["courtNum"] = payload.courtNum
+    if "dateTime" in sent:
+        if payload.dateTime is None:
+            raise HTTPException(status_code=400, detail="Date and time are required.")
+        upd["dateTime"] = _as_utc(payload.dateTime)
+    if "sport" in sent:
+        upd["sport"] = _clean_text(payload.sport, "Sport", required=True).lower()
+    if "discipline" in sent:
+        upd["discipline"] = _clean_text(payload.discipline, "Discipline", required=True).lower()
+
+    # settings.* as dotted paths — the other settings keys stay as they are.
+    for key in ("provider", "mode", "venueName", "numbering"):
+        if key in sent:
+            upd[f"settings.{key}"] = _clean_text(getattr(payload, key), key)
+    if "isStream" in sent:
+        upd["settings.isStream"] = bool(payload.isStream)
+
+    # Registration: in-app (deadline) OR an external link — never both, same
+    # rule as create_tournament_endpoint.
+    reg_open = bool(payload.isRegistrationOpen) if "isRegistrationOpen" in sent \
+        else bool(current.get("isRegistrationOpen"))
+    if "isRegistrationOpen" in sent:
+        upd["isRegistrationOpen"] = reg_open
+    if not reg_open and ("isRegistrationOpen" in sent or "registrationDeadline" in sent):
+        upd["settings.registrationDeadline"] = None
+    elif reg_open and "registrationDeadline" in sent:
+        upd["settings.registrationDeadline"] = (
+            _as_utc(payload.registrationDeadline).isoformat() if payload.registrationDeadline else None
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    return {"message": "Tournament updated."}
+    if "externalRegistrationUrl" in sent or "isRegistrationOpen" in sent:
+        url = (_clean_text(payload.externalRegistrationUrl, "External registration link", max_len=500)
+               if "externalRegistrationUrl" in sent
+               else (current.get("settings") or {}).get("externalRegistrationUrl"))
+        if url and not url.lower().startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="External registration link must start with http:// or https://")
+        upd["settings.externalRegistrationUrl"] = None if reg_open else (url or None)
+
+    if not upd:
+        return {"message": "Nothing to update.", "updated": []}
+
+    upd["updatedAt"] = firestore.SERVER_TIMESTAMP
+    ref.update(upd)
+
+    # Equipment scheduled for this tournament keeps a copy of its title/date.
+    if "title" in upd or "dateTime" in upd:
+        try:
+            refresh_tournament_in_inventory(tournament_id, {**current, **upd})
+        except Exception:
+            pass  # a stale copy is cosmetic; never fail the save over it
+
+    return {"message": "Tournament updated.", "updated": sorted(k for k in upd if k != "updatedAt")}
+
+
+@router.patch("/tournaments/{tournament_id}/visibility",
+              dependencies=[Depends(require_operator("tournament:edit"))])
+def set_tournament_visibility(tournament_id: str, payload: VisibilityUpdate):
+    """isExternalPublic lives at the top level of the tournament doc (the
+    public list filters on it). An old copy inside settings is removed so
+    the two can't disagree."""
+    ref, current = _existing_tournament(tournament_id)
+    upd: Dict = {"isExternalPublic": payload.isExternalPublic, "updatedAt": firestore.SERVER_TIMESTAMP}
+    if "isExternalPublic" in (current.get("settings") or {}):
+        upd["settings.isExternalPublic"] = firestore.DELETE_FIELD
+    ref.update(upd)
+    return {"id": tournament_id, "isExternalPublic": payload.isExternalPublic}
+
+
+@router.put("/tournaments/{tournament_id}/categories",
+            dependencies=[Depends(require_operator("tournament:edit"))])
+def upload_tournament_categories(tournament_id: str, payload: CategoriesUpload):
+    """Replaces tournament_categories/{id}.categories with the uploaded file.
+    update() on the "categories" key replaces the whole map — set(merge=True)
+    would merge the new schema into the old one key by key."""
+    _existing_tournament(tournament_id)
+    categories = _unwrap_categories(payload.categories)
+    if not isinstance(categories.get("sportSchemas"), dict) or not categories["sportSchemas"]:
+        raise HTTPException(status_code=400, detail='This isn\'t a categories file — it has no "sportSchemas".')
+
+    cat_ref = db.collection("tournament_categories").document(tournament_id)
+    fields = {
+        "categories": categories,
+        "fileName": _clean_text(payload.fileName, "File name"),
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    }
+    if cat_ref.get().exists:
+        cat_ref.update(fields)
+    else:
+        cat_ref.set({"tournamentId": tournament_id, "createdAt": firestore.SERVER_TIMESTAMP, **fields})
+    return {"message": "Categories uploaded.", "sports": sorted(categories["sportSchemas"].keys())}
+
+
+@router.delete("/tournaments/{tournament_id}/categories",
+               dependencies=[Depends(require_operator("tournament:edit"))])
+def delete_tournament_categories(tournament_id: str):
+    """Deletes tournament_categories/{id} with any subcollections.
+    Registrations already made are kept."""
+    _existing_tournament(tournament_id)
+    cat_ref = db.collection("tournament_categories").document(tournament_id)
+    if not cat_ref.get().exists:
+        return {"message": "This tournament has no categories file."}
+    _delete_doc_tree(cat_ref)
+    return {"message": "Categories file removed."}
+
 
 @router.patch("/tournaments/{tournament_id}/status",
               dependencies=[Depends(require_operator("tournament:archive"))])
@@ -3030,6 +3302,10 @@ def _delete_tournament_data(tournament_id: str, data: dict) -> Dict[str, int]:
             .where("tournamentId", "==", tournament_id)
         )
         removed["matches"] = sum(_delete_doc_tree(d.reference) for d in matches.stream())
+    # Copies kept outside this tournament: equipment schedules and operators'
+    # free/selected lists.
+    removed.update(remove_tournament_from_inventory(tournament_id))
+    removed.update(remove_tournament_from_operators(tournament_id))
     return removed
 
 def normalize_name(value: str) -> str:

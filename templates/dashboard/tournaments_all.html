@@ -1,0 +1,78 @@
+{% extends "dashboard/base.html" %}
+{% from "dashboard/_tournament_list.html" import tournament_row %}
+{% block title %}All Tournaments — TrueCNTRL{% endblock %}
+{% block content %}
+
+{% if can(request, "drafts:manage") %}
+<div class="list-toolbar all-toolbar">
+    <a href="/dashboard/drafts" class="text-link">Drafts{% if pending_drafts %} ({{ pending_drafts }}){% endif %} →</a>
+</div>
+{% endif %}
+
+{# One timeline: furthest future at the top → oldest past at the bottom.
+1. Upcoming: active, today or later (undated on top) #}
+<ul class="case-list all-list" aria-label="Upcoming tournaments">
+    {% for t in upcoming %}
+    {{ tournament_row(t) }}
+    {% else %}
+    <li class="case-item" style="border-left-color: transparent;">
+        No upcoming tournaments.{% if can(request, "tournament:create") %}&nbsp;<a
+            href="/dashboard/tournaments/create">Create one now!</a>{% endif %}
+    </li>
+    {% endfor %}
+</ul>
+
+{# 2. Past: still active (not archived) but the date is behind us #}
+<div class="list-divider"><span>Past tournaments</span></div>
+<ul class="case-list" aria-label="Past tournaments">
+    {% for t in past %}
+    {{ tournament_row(t, "is-past-row") }}
+    {% else %}
+    <li class="case-item" style="border-left-color: transparent;">No past tournaments waiting to be archived.</li>
+    {% endfor %}
+</ul>
+
+{# 3. Archived: newest first, loaded 5 at a time from /dashboard/tournaments/archived #}
+<div class="list-divider"><span>Archived tournaments</span></div>
+<ul id="archived-list" class="case-list" aria-label="Archived tournaments">
+    <li class="case-item" style="border-left-color: transparent;" id="archived-empty">Loading…</li>
+</ul>
+<div style="text-align:center; margin-top:1rem;">
+    <button id="load-more-archived" class="btn btn-secondary" data-offset="0">Load more</button>
+</div>
+
+<script>
+    (function () {
+        const btn = document.getElementById("load-more-archived");
+        const list = document.getElementById("archived-list");
+
+        async function loadPage() {
+            btn.disabled = true;
+            btn.textContent = "Loading…";
+            try {
+                const res = await fetch(`/dashboard/tournaments/archived?offset=${btn.dataset.offset}`);
+                if (!res.ok) throw new Error(res.status);
+                const html = (await res.text()).trim();
+
+                document.getElementById("archived-empty")?.remove();
+                if (btn.dataset.offset === "0" && !html) {
+                    list.innerHTML = '<li class="case-item" style="border-left-color: transparent;">No archived tournaments.</li>';
+                } else {
+                    list.insertAdjacentHTML("beforeend", html);
+                }
+                btn.dataset.offset = res.headers.get("X-Next-Offset") || btn.dataset.offset;
+                btn.style.display = res.headers.get("X-Has-More") === "1" ? "" : "none";
+            } catch (e) {
+                const empty = document.getElementById("archived-empty");
+                if (empty) empty.textContent = "Couldn't load archived tournaments.";
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Load more";
+            }
+        }
+
+        btn.addEventListener("click", loadPage);
+        loadPage();
+    })();
+</script>
+{% endblock %}

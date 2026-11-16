@@ -156,10 +156,259 @@
             display: block;
         }
 
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: clamp(0.6rem, 1.6vw, 1rem);
+            min-width: 0;
+        }
+
+        /* ── LIVE PILL (next to the logo) ───────────────────── */
+        .live-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            min-width: 0;
+            padding: 0.32rem 0.75rem 0.32rem 0.6rem;
+            border-radius: 999px;
+            background: #fdecec;
+            border: 1px solid rgba(220, 38, 38, 0.35);
+            color: #b91c1c;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            line-height: 1.2;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+        }
+
+        .live-pill:hover {
+            background: #fbdcdc;
+            border-color: #dc2626;
+        }
+
+        .live-label {
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-weight: 700;
+        }
+
+        .live-title {
+            color: var(--ink);
+            font-weight: 500;
+            max-width: 240px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding-left: 0.45rem;
+            border-left: 1px solid rgba(220, 38, 38, 0.3);
+        }
+
+        .live-dot {
+            position: relative;
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #dc2626;
+            flex-shrink: 0;
+        }
+
+        .live-dot::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background: #dc2626;
+            animation: live-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+
+        @keyframes live-ping {
+            0% {
+                transform: scale(1);
+                opacity: 0.7;
+            }
+
+            80%,
+            100% {
+                transform: scale(2.6);
+                opacity: 0;
+            }
+        }
+
+        /* ── FOOTER ─────────────────────────────────────────── */
+        .site-footer {
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            margin-top: clamp(2rem, 6vw, 4rem);
+            font-size: 0.95rem;
+        }
+
+        .footer-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: clamp(2.25rem, 6vw, 3.5rem) clamp(0.85rem, 3vw, 1.5rem) 0;
+        }
+
+        .footer-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 0.9fr);
+            gap: clamp(1.5rem, 4vw, 2.5rem);
+        }
+
+        .footer-brand .brand-logo img {
+            height: 32px;
+        }
+
+        .footer-tagline {
+            color: var(--text-muted);
+            font-size: 0.92rem;
+            line-height: 1.6;
+            margin-top: 0.9rem;
+            max-width: 34ch;
+        }
+
+        .footer-cta {
+            margin-top: 1.2rem;
+            min-height: 42px;
+            padding: 0.6rem 1.2rem;
+            font-size: 0.92rem;
+        }
+
+        .footer-social {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1.2rem;
+        }
+
+        .footer-social a {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+        }
+
+        .footer-social a:hover {
+            color: var(--navy);
+            border-color: var(--border-strong);
+            background: var(--page-bg);
+        }
+
+        .footer-col h4 {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--ink);
+            margin-bottom: 0.9rem;
+        }
+
+        .footer-col ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+        }
+
+        .footer-col a {
+            color: var(--text-muted);
+            text-decoration: none;
+            overflow-wrap: break-word;
+        }
+
+        .footer-col a:hover {
+            color: var(--navy);
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+
+        .footer-col a.footer-live-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #b91c1c;
+            font-weight: 600;
+        }
+
+        .footer-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: clamp(2rem, 5vw, 3rem);
+            padding: 1.25rem 0 1.5rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .footer-bottom-right {
+            display: flex;
+            gap: 1.25rem;
+            flex-wrap: wrap;
+        }
+
+        .footer-top-link {
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        .footer-top-link:hover {
+            color: var(--navy);
+        }
+
+        @media (max-width: 900px) {
+            .footer-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .footer-brand {
+                grid-column: 1 / -1;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .live-title {
+                display: none;
+            }
+
+            .live-pill {
+                padding: 0.3rem 0.65rem 0.3rem 0.55rem;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .footer-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .nav-right {
             display: flex;
             align-items: center;
             gap: clamp(0.75rem, 2vw, 1.5rem);
+        }
+
+        /* Text links next to the profile chip (My Club / Dashboard) */
+        .nav-link {
+            color: var(--navy);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            white-space: nowrap;
+            text-underline-offset: 3px;
+        }
+
+        .nav-link:hover,
+        .nav-link:focus-visible {
+            color: var(--navy-dark);
+            text-decoration: underline;
         }
 
         /* Whole chip is now a link into Settings */
@@ -387,6 +636,10 @@
                 display: none;
             }
 
+            .nav-link {
+                font-size: 0.88rem;
+            }
+
             body {
                 font-size: 16px;
                 line-height: 1.55;
@@ -440,19 +693,59 @@
                 transition: none;
                 transform: none !important;
             }
+
+            .live-dot::after {
+                animation: none;
+            }
         }
     </style>
 </head>
 
 <body>
 
+    {# ── LIVE NOW (client-side) ──────────────────────────────────────
+    The server only embeds the tournament objects this page already has:
+    `tournaments` (homepage list) and/or `tournament` (detail page). Only
+    the fields the badge needs, and only those with a YouTube playlistId.
+    Everything else — is it today, which one wins, showing/hiding — is
+    decided by the script at the bottom of this file, in the browser. #}
+    {% set live_pool = [] %}
+    {% for t in ((tournaments if tournaments is defined and tournaments else [])
+    + ([tournament] if tournament is defined and tournament else [])) %}
+    {% if t.playlistId and t.dateTime %}
+    {% set _ = live_pool.append({
+    "id": t.id,
+    "title": t.title,
+    "playlistId": t.playlistId,
+    "dateTime": t.dateTime.isoformat(),
+    }) %}
+    {% endif %}
+    {% endfor %}
+    <script type="application/json" id="liveTournamentsData">{{ live_pool | tojson }}</script>
+
     <nav class="navbar" id="navbar">
-        <a href="/" class="brand-logo">
-            <img src="/static/assets/logos/truevar_logo.png" style="padding: 4px 0px;" alt="TrueVAR">
-        </a>
+        <div class="nav-left">
+            <a href="/" class="brand-logo">
+                <img src="/static/assets/logos/truevar_logo.png" style="padding: 4px 0px;" alt="TrueVAR">
+            </a>
+            <a class="live-pill hidden" id="livePill" href="#" target="_blank" rel="noopener">
+                <span class="live-dot" aria-hidden="true"></span>
+                <span class="live-label">Live</span>
+                <span class="live-title" id="livePillTitle"></span>
+            </a>
+        </div>
 
         <div class="nav-right">
             {% if user %}
+            {# Role links — nav_roles() is a template global (operator_auth.py);
+            one lookup per request, shared with the page if it uses it too. #}
+            {% set nav = nav_roles(request, user) if nav_roles is defined else {} %}
+            {% if nav.clubId %}
+            <a href="/clubs/mine" class="nav-link">My Club</a>
+            {% endif %}
+            {% if nav.operator %}
+            <a href="/dashboard" class="nav-link">Dashboard</a>
+            {% endif %}
             <a href="/settings" class="profile-link" aria-label="Open account settings">
                 <img src="{{ user.photoUrl }}" alt="" class="user-avatar" referrerpolicy="no-referrer">
                 <span class="user-chip-text">
@@ -474,6 +767,145 @@
     <main class="container">
         {% block content %}{% endblock %}
     </main>
+
+    {# ── FOOTER ──────────────────────────────────────────────────────
+    Contact details come from templates/_contact.html (same source as the
+    homepage Contact section). Optional social links are shown only when
+    _contact.html defines them: youtube_channel, facebook, instagram. #}
+    {% import "_contact.html" as contact %}
+    {% set footer_phone_href = (contact.phone or "") | replace(" ", "") | replace("-", "") | replace("(", "") |
+    replace(")", "") %}
+    {% set footer_chat_digits = (contact.whatsapp_chat or "") | replace("+", "") | replace(" ", "") | replace("-", "") |
+    replace("(", "") | replace(")", "") %}
+
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <div class="footer-grid">
+
+                <!-- Brand -->
+                <div class="footer-brand">
+                    <a href="/" class="brand-logo" aria-label="TrueVAR home">
+                        <img src="/static/assets/logos/truevar_logo.png" alt="TrueVAR">
+                    </a>
+                    <p class="footer-tagline">
+                        Tournament software and instant video replay for taekwondo and boxing.
+                        Registration, brackets, the live match queue and results in one system.
+                    </p>
+                    <a href="/request-tournament" class="btn btn-primary footer-cta">Request a Tournament</a>
+
+                    <div class="footer-social">
+                        {% if contact.whatsapp_community %}
+                        <a href="{{ contact.whatsapp_community }}" target="_blank" rel="noopener"
+                            aria-label="WhatsApp community">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path
+                                    d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2c-1.5 0-3-.4-4.2-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 2.9 2.9 0 0 0-.9 2.2 5 5 0 0 0 1.1 2.7 11.4 11.4 0 0 0 4.4 3.9c1.6.7 2.3.7 3.1.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z" />
+                            </svg>
+                        </a>
+                        {% endif %}
+                        {% if contact.youtube_channel %}
+                        <a href="{{ contact.youtube_channel }}" target="_blank" rel="noopener" aria-label="YouTube">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path
+                                    d="M23 7.2a3 3 0 0 0-2.1-2.1C19 4.6 12 4.6 12 4.6s-7 0-8.9.5A3 3 0 0 0 1 7.2 31 31 0 0 0 .5 12a31 31 0 0 0 .5 4.8 3 3 0 0 0 2.1 2.1c1.9.5 8.9.5 8.9.5s7 0 8.9-.5a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-4.8 31 31 0 0 0-.5-4.8ZM9.8 15.1V8.9L15.6 12l-5.8 3.1Z" />
+                            </svg>
+                        </a>
+                        {% endif %}
+                        {% if contact.facebook %}
+                        <a href="{{ contact.facebook }}" target="_blank" rel="noopener" aria-label="Facebook">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path
+                                    d="M13.5 22v-8.2h2.8l.4-3.2h-3.2V8.5c0-.9.3-1.6 1.6-1.6h1.7V4.1c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.4H7.3v3.2h2.8V22h3.4Z" />
+                            </svg>
+                        </a>
+                        {% endif %}
+                        {% if contact.instagram %}
+                        <a href="{{ contact.instagram }}" target="_blank" rel="noopener" aria-label="Instagram">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="1.8" aria-hidden="true">
+                                <rect x="3" y="3" width="18" height="18" rx="5" />
+                                <circle cx="12" cy="12" r="4" />
+                                <circle cx="17.5" cy="6.5" r="0.6" fill="currentColor" />
+                            </svg>
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Tournaments -->
+                <nav class="footer-col" aria-label="Tournaments">
+                    <h4>Tournaments</h4>
+                    <ul>
+                        <li class="hidden" id="footerLiveItem">
+                            <a href="#" id="footerLiveLink" target="_blank" rel="noopener" class="footer-live-link">
+                                <span class="live-dot" aria-hidden="true"></span> Watch live
+                            </a>
+                        </li>
+                        <li><a href="/#upcoming">Upcoming tournaments</a></li>
+                        <li><a href="/#past">Results &amp; archive</a></li>
+                        <li><a href="/request-tournament">Request a tournament</a></li>
+                    </ul>
+                </nav>
+
+                <!-- For clubs -->
+                <nav class="footer-col" aria-label="For clubs">
+                    <h4>For Clubs</h4>
+                    <ul>
+                        {% if user %}
+                        <li><a href="/clubs/mine">My club</a></li>
+                        <li><a href="/athletes/new">Add an athlete</a></li>
+                        <li><a href="/settings">Account settings</a></li>
+                        {% else %}
+                        <li><a href="/login">Log in</a></li>
+                        <li><a href="/login">Register your club</a></li>
+                        {% endif %}
+                        {% if contact.whatsapp_community %}
+                        <li><a href="{{ contact.whatsapp_community }}" target="_blank" rel="noopener">Draws &amp;
+                                schedules (WhatsApp)</a></li>
+                        {% endif %}
+                    </ul>
+                </nav>
+
+                <!-- Contact -->
+                <div class="footer-col">
+                    <h4>Contact</h4>
+                    <ul>
+                        {% if contact.email %}
+                        <li><a href="mailto:{{ contact.email }}">{{ contact.email }}</a></li>
+                        {% endif %}
+                        {% if contact.phone %}
+                        <li><a href="tel:{{ footer_phone_href }}">{{ contact.phone }}</a></li>
+                        {% endif %}
+                        {% if footer_chat_digits %}
+                        <li><a href="https://wa.me/{{ footer_chat_digits }}" target="_blank" rel="noopener">WhatsApp
+                                chat</a></li>
+                        {% endif %}
+                        <li><a href="/#contact">All contact options</a></li>
+                    </ul>
+                </div>
+
+                <!-- Legal -->
+                <nav class="footer-col" aria-label="Legal">
+                    <h4>Legal</h4>
+                    <ul>
+                        <li><a href="/privacy">Privacy policy</a></li>
+                        <li><a href="/terms">Terms of use</a></li>
+                        <li><a href="/cookies">Cookie policy</a></li>
+                        <li><a href="/privacy#data-requests">Data &amp; GDPR requests</a></li>
+                    </ul>
+                </nav>
+            </div>
+
+            <div class="footer-bottom">
+                <span>&copy; <span id="footerYear">2026</span> TrueVAR. All rights reserved.</span>
+                <span class="footer-bottom-right">
+                    <span>Made in Slovakia</span>
+                    <a href="#" class="footer-top-link"
+                        onclick="window.scrollTo({ top: 0, behavior: 'smooth' }); return false;">Back to top &uarr;</a>
+                </span>
+            </div>
+        </div>
+    </footer>
 
     <script>
         // Hide the navbar on scroll-down, reveal it on scroll-up.
@@ -533,6 +965,116 @@
                     ticking = true;
                 }
             }, { passive: true });
+        })();
+    </script>
+
+    <script>
+        // ── LIVE NOW ──────────────────────────────────────────────────
+        // Decides, in the browser, which ONE tournament is live:
+        //   1. candidates: start date is TODAY in Europe/Bratislava and the
+        //      tournament has a YouTube playlistId
+        //   2. some already started -> the most recently started one
+        //      (Kyorugi 09:00 + Poomsae 14:00, at 15:00 -> Poomsae)
+        //   3. none started yet     -> the next one to start today
+        // One badge, one playlist. Re-checked every minute, so a page left
+        // open switches over at midnight / at the next start time.
+        (function () {
+            var pill = document.getElementById("livePill");
+            var pillTitle = document.getElementById("livePillTitle");
+            var footerItem = document.getElementById("footerLiveItem");
+            var footerLink = document.getElementById("footerLiveLink");
+            var yearEl = document.getElementById("footerYear");
+            var dataEl = document.getElementById("liveTournamentsData");
+
+            var TZ = "Europe/Bratislava";
+            var dayFmt;
+            try {
+                dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+            } catch (e) {
+                dayFmt = null; // very old browser: fall back to the device's own day
+            }
+
+            function localDay(d) {
+                if (dayFmt) return dayFmt.format(d); // "YYYY-MM-DD"
+                return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
+            }
+
+            // isoformat() without an offset is UTC (same rule as the server).
+            function parseStart(raw) {
+                if (!raw) return null;
+                var s = String(raw).trim().replace(" ", "T");
+                if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += "Z";
+                var d = new Date(s);
+                return isNaN(d.getTime()) ? null : d;
+            }
+
+            var pool = [];
+            try {
+                pool = JSON.parse((dataEl && dataEl.textContent) || "[]");
+            } catch (e) {
+                pool = [];
+            }
+
+            // The same tournament can arrive twice (list + detail) — dedupe by id.
+            var seen = {};
+            pool = pool.filter(function (t) {
+                if (!t || !t.playlistId) return false;
+                var key = t.id || t.playlistId;
+                if (seen[key]) return false;
+                seen[key] = true;
+                t._start = parseStart(t.dateTime);
+                return !!t._start;
+            });
+
+            function pickLive(now) {
+                var today = localDay(now);
+                var candidates = pool.filter(function (t) { return localDay(t._start) === today; });
+                if (!candidates.length) return null;
+
+                var started = candidates.filter(function (t) { return t._start <= now; });
+                if (started.length) {
+                    return started.reduce(function (a, b) { return b._start > a._start ? b : a; });
+                }
+                return candidates.reduce(function (a, b) { return b._start < a._start ? b : a; });
+            }
+
+            function playlistUrl(t) {
+                return "https://www.youtube.com/playlist?list=" + encodeURIComponent(t.playlistId);
+            }
+
+            var currentKey = null;
+
+            function render() {
+                var now = new Date();
+                if (yearEl) yearEl.textContent = localDay(now).slice(0, 4);
+
+                var live = pickLive(now);
+                var key = live ? (live.id || live.playlistId) : null;
+                if (key === currentKey) return;
+                currentKey = key;
+
+                if (!live) {
+                    if (pill) pill.classList.add("hidden");
+                    if (footerItem) footerItem.classList.add("hidden");
+                    return;
+                }
+
+                var url = playlistUrl(live);
+                if (pill) {
+                    pill.href = url;
+                    pill.title = "Watch " + live.title + " live on YouTube";
+                    pill.setAttribute("aria-label", "Live now: " + live.title + " — open the YouTube playlist");
+                    pillTitle.textContent = live.title; // textContent: no HTML injection
+                    pill.classList.remove("hidden");
+                }
+                if (footerLink) {
+                    footerLink.href = url;
+                    footerItem.classList.remove("hidden");
+                }
+            }
+
+            render();
+            if (pool.length) setInterval(render, 60 * 1000);
         })();
     </script>
 
