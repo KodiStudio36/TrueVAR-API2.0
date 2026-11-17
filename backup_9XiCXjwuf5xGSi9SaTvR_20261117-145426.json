@@ -1,0 +1,2897 @@
+{
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_pupils_2_men_44plus_07T8eZu85CrEfePFCI4d": {
+  "registeredAt": {
+   "__ts__": "2026-10-27T06:52:28.765000+00:00"
+  },
+  "categoryLabel": "Kyorugi · Pupils 2 · Men +44kg",
+  "ageCode": "pupils_2",
+  "entryTypeCode": "kyorugi",
+  "status": "active",
+  "clubId": "ilyoke",
+  "splitFrom": "cCbNqJlV59mPp288r2F0",
+  "paraClassCode": null,
+  "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "athleteIds": [
+   "07T8eZu85CrEfePFCI4d"
+  ],
+  "genderCode": "men",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "associationId": "SATKD26020508",
+  "beltClassCode": null
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_pupils_2_men_plus_44_07T8eZu85CrEfePFCI4d": null,
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_pupils_2_men_44plus_MqaR9nDNGkGYTI5VPxZJ": {
+  "registeredAt": {
+   "__ts__": "2026-11-02T21:26:19.341000+00:00"
+  },
+  "categoryLabel": "Kyorugi · Pupils 2 · Men +44kg",
+  "ageCode": "pupils_2",
+  "entryTypeCode": "kyorugi",
+  "status": "active",
+  "clubId": "star_klub",
+  "splitFrom": "cCbNqJlV59mPp288r2F0",
+  "paraClassCode": null,
+  "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "athleteIds": [
+   "MqaR9nDNGkGYTI5VPxZJ"
+  ],
+  "genderCode": "men",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "associationId": "SATKD24092601",
+  "beltClassCode": null
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_pupils_2_men_plus_44_MqaR9nDNGkGYTI5VPxZJ": null,
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_pupils_2_men_44plus_b9thKsK1oTYBP9YhHH0B": {
+  "registeredAt": {
+   "__ts__": "2026-10-27T08:01:40.885000+00:00"
+  },
+  "categoryLabel": "Kyorugi · Pupils 2 · Men +44kg",
+  "ageCode": "pupils_2",
+  "entryTypeCode": "kyorugi",
+  "status": "active",
+  "clubId": "ilyoke",
+  "splitFrom": "cCbNqJlV59mPp288r2F0",
+  "paraClassCode": null,
+  "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "athleteIds": [
+   "b9thKsK1oTYBP9YhHH0B"
+  ],
+  "genderCode": "men",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "associationId": "SATKD26020509",
+  "beltClassCode": null
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_pupils_2_men_plus_44_b9thKsK1oTYBP9YhHH0B": null,
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_pupils_2_men_44plus_fpHWVnGrSlqZdnZcWihC": {
+  "registeredAt": {
+   "__ts__": "2026-11-03T08:09:03.935000+00:00"
+  },
+  "categoryLabel": "Kyorugi · Pupils 2 · Men +44kg",
+  "ageCode": "pupils_2",
+  "entryTypeCode": "kyorugi",
+  "status": "active",
+  "clubId": "wJJxJSTS34RQLjYIzeNQ",
+  "splitFrom": "cCbNqJlV59mPp288r2F0",
+  "paraClassCode": null,
+  "clubName": "Tkd Forteca Korčula",
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "athleteIds": [
+   "fpHWVnGrSlqZdnZcWihC"
+  ],
+  "genderCode": "men",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "associationId": null,
+  "beltClassCode": null
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_pupils_2_men_plus_44_fpHWVnGrSlqZdnZcWihC": null,
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_younger_cadets_men_55plus_6ZQ7KBxpB652LIIiKKJe": {
+  "registeredAt": {
+   "__ts__": "2026-11-02T16:27:05.796000+00:00"
+  },
+  "categoryLabel": "Kyorugi · Younger Cadets · Men +55kg",
+  "ageCode": "younger_cadets",
+  "entryTypeCode": "kyorugi",
+  "status": "active",
+  "clubId": "pVE1VEVwkrr593WVNFTX",
+  "splitFrom": "cCbNqJlV59mPp288r2F0",
+  "paraClassCode": null,
+  "clubName": "TKD JASTREB",
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "athleteIds": [
+   "6ZQ7KBxpB652LIIiKKJe"
+  ],
+  "genderCode": "men",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "associationId": null,
+  "beltClassCode": null
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_younger_cadets_men_plus_55_6ZQ7KBxpB652LIIiKKJe": null,
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_younger_cadets_men_55plus_8zBlaZJbdoNxk6N54qBt": {
+  "registeredAt": {
+   "__ts__": "2026-10-28T20:57:46.540000+00:00"
+  },
+  "categoryLabel": "Kyorugi · Younger Cadets · Men +55kg",
+  "ageCode": "younger_cadets",
+  "entryTypeCode": "kyorugi",
+  "status": "active",
+  "clubId": "star_klub",
+  "splitFrom": "cCbNqJlV59mPp288r2F0",
+  "paraClassCode": null,
+  "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "athleteIds": [
+   "8zBlaZJbdoNxk6N54qBt"
+  ],
+  "genderCode": "men",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "associationId": "SATKD23062603",
+  "beltClassCode": null
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_younger_cadets_men_plus_55_8zBlaZJbdoNxk6N54qBt": null,
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_younger_cadets_men_55plus_cQEx1G8MVl02Ln6QMBqI": {
+  "categoryLabel": "Kyorugi · Younger Cadets Men +55kg",
+  "registeredAt": {
+   "__ts__": "2026-11-06T19:42:45.071000+00:00"
+  },
+  "ageCode": "younger_cadets",
+  "entryTypeCode": "kyorugi",
+  "status": "active",
+  "clubId": "star_klub",
+  "paraClassCode": null,
+  "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+  "movedFrom": "kyorugi_younger_cadets_men_55_cQEx1G8MVl02Ln6QMBqI",
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "athleteIds": [
+   "cQEx1G8MVl02Ln6QMBqI"
+  ],
+  "genderCode": "men",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "beltClassCode": null,
+  "associationId": "SATKD25100704"
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_younger_cadets_men_plus_55_cQEx1G8MVl02Ln6QMBqI": null,
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_younger_cadets_men_55plus_n8ClgkZG5CZnyCkXO563": {
+  "registeredAt": {
+   "__ts__": "2026-11-03T08:05:57.332000+00:00"
+  },
+  "categoryLabel": "Kyorugi · Younger Cadets · Men +55kg",
+  "ageCode": "younger_cadets",
+  "entryTypeCode": "kyorugi",
+  "status": "active",
+  "clubId": "wJJxJSTS34RQLjYIzeNQ",
+  "splitFrom": "cCbNqJlV59mPp288r2F0",
+  "paraClassCode": null,
+  "clubName": "Tkd Forteca Korčula",
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "athleteIds": [
+   "n8ClgkZG5CZnyCkXO563"
+  ],
+  "genderCode": "men",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "associationId": null,
+  "beltClassCode": null
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/registrations/kyorugi_younger_cadets_men_plus_55_n8ClgkZG5CZnyCkXO563": null,
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/division_rosters/pupils_2": {
+  "athletes": {
+   "kyorugi_pupils_2_men_34": {},
+   "kyorugi_pupils_2_women_26": {
+    "k0QUrRNpRpptk563CDpR": {
+     "placement": 1,
+     "members": [
+      {
+       "name": "Emma Fedorková",
+       "rank": 3,
+       "associationId": "SATKD25062501",
+       "clubId": "humenne",
+       "athleteId": "k0QUrRNpRpptk563CDpR",
+       "club": "Taekwondo klub Humenné",
+       "country": "SVK"
+      }
+     ]
+    },
+    "jY7HNEc0zWcj86hP07b2": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 2,
+       "associationId": "SATKD26021304",
+       "name": "Klementína Tkáčová",
+       "athleteId": "jY7HNEc0zWcj86hP07b2",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_men_26": {
+    "7ErilOI67nOHmIDct8ov": {
+     "placement": 5,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 2,
+       "associationId": "SATKD26020904",
+       "name": "Adam Milichovský",
+       "athleteId": "7ErilOI67nOHmIDct8ov",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "tMF6fxShA69XiTAouSrp": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "roznava",
+       "rank": 1,
+       "associationId": "SATKD26011803",
+       "name": "Noel Urban",
+       "athleteId": "tMF6fxShA69XiTAouSrp",
+       "club": "KORYO PANTHERS TAEKWONDO Rožňava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "zh0ke1PGhMLutotYLrFK": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 5,
+       "associationId": "SATKD25020103",
+       "name": "Filip Fecko",
+       "athleteId": "zh0ke1PGhMLutotYLrFK",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "FgQeoGkQf2XIwoKUFEbj": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "hakimi",
+       "rank": 2,
+       "associationId": "SATKD24111302",
+       "name": "Andrej Halko",
+       "athleteId": "FgQeoGkQf2XIwoKUFEbj",
+       "club": "TAEKWONDO HAKIMI Rožňava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "VoO7tlugRZeLXMrJwgvs": {
+     "placement": 5,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 6,
+       "associationId": "SATKD24012203",
+       "name": "Damián Fedák",
+       "athleteId": "VoO7tlugRZeLXMrJwgvs",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "vtdWKH5jo9Hr6bj2MEwZ": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "ok0fPQFvAUBmS9YFm67u",
+       "rank": 4,
+       "name": "Kovacs Lorand",
+       "athleteId": "vtdWKH5jo9Hr6bj2MEwZ",
+       "club": "Exigent Taekwondo Team",
+       "country": "ROU"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_women_38": {},
+   "kyorugi_pupils_2_women_41": {
+    "7QcMnwJ90DUAElhVtIwL": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Valéria Bodnárová",
+       "rank": 2,
+       "associationId": "SATKD26021306",
+       "clubId": "ilyoke",
+       "athleteId": "7QcMnwJ90DUAElhVtIwL",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "7K0tgs6nWH2lLk506rnG": {
+     "placement": 1,
+     "members": [
+      {
+       "name": "Hanna Juračová",
+       "rank": 2,
+       "associationId": "SATKD25092201",
+       "clubId": "star_klub",
+       "athleteId": "7K0tgs6nWH2lLk506rnG",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_men_22": {},
+   "kyorugi_pupils_2_men_28": {
+    "iUUk28Vhkfa5Ucw04KLx": {
+     "placement": 3,
+     "members": [
+      {
+       "name": "Maximilián Mráz",
+       "rank": 4,
+       "associationId": "SATKD24120202",
+       "clubId": "ryong",
+       "athleteId": "iUUk28Vhkfa5Ucw04KLx",
+       "club": "Športový klub polície Ryong Bratislava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "eYyG6sczLtfB8GgJkRNE": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "OLW5VDEzDwiuwrJHkaeC",
+       "rank": 6,
+       "name": "Jakov Ervaćinović",
+       "athleteId": "eYyG6sczLtfB8GgJkRNE",
+       "club": "Taekwondo klub Tigar Zagreb",
+       "country": "CRO"
+      }
+     ]
+    },
+    "EoEJBDvQ3wBOTz3j3Wi5": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 6,
+       "name": "LOVRO MIHOČINEC",
+       "athleteId": "EoEJBDvQ3wBOTz3j3Wi5",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    },
+    "ErV6Kg0TWnIsnV36frXh": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "wJJxJSTS34RQLjYIzeNQ",
+       "rank": 4,
+       "name": "Toni Ercegovac",
+       "athleteId": "ErV6Kg0TWnIsnV36frXh",
+       "club": "Tkd Forteca Korčula",
+       "country": "CRO"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_women_34": {
+    "cYY33kU28nach56hodaJ": {
+     "members": [
+      {
+       "clubId": "roznava",
+       "rank": 2,
+       "associationId": "SATKD25040401",
+       "name": "Eliška Plešová",
+       "athleteId": "cYY33kU28nach56hodaJ",
+       "club": "KORYO PANTHERS TAEKWONDO Rožňava",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_women_22": {},
+   "kyorugi_pupils_2_men_36": {
+    "zVSsyWbZoC5d0ruUBfhi": {
+     "placement": 5,
+     "members": [
+      {
+       "name": "Filip Longauer",
+       "rank": 5,
+       "associationId": "SATKD23062204",
+       "clubId": "ilyoke",
+       "athleteId": "zVSsyWbZoC5d0ruUBfhi",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "rpJXSjMxYTOkYYHc9t7n": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Jakub Kundrát",
+       "rank": 3,
+       "associationId": "SATKD25012405",
+       "clubId": "humenne",
+       "athleteId": "rpJXSjMxYTOkYYHc9t7n",
+       "club": "Taekwondo klub Humenné",
+       "country": "SVK"
+      }
+     ]
+    },
+    "nttvC9kzuLpoZWzRHrpg": {
+     "placement": 5,
+     "members": [
+      {
+       "name": "Rafael Čečko",
+       "rank": 4,
+       "associationId": "SATKD24012302",
+       "clubId": "ilyoke",
+       "athleteId": "nttvC9kzuLpoZWzRHrpg",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "2FGLISUl2wgVJwF2z34E": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "star_klub",
+       "rank": 2,
+       "associationId": "SATKD25092202",
+       "name": "Lukáš Jarabek",
+       "athleteId": "2FGLISUl2wgVJwF2z34E",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    },
+    "mKiHiEFkmmnstZHvXJAi": {
+     "placement": 1,
+     "members": [
+      {
+       "name": "Jakub Juhás",
+       "rank": 7,
+       "associationId": "SATKD23012804",
+       "clubId": "ilyoke",
+       "athleteId": "mKiHiEFkmmnstZHvXJAi",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "6EU6m9KY7pOgaWOa3ZxF": {
+     "placement": 3,
+     "members": [
+      {
+       "name": "Andrej Marcinčák",
+       "rank": 2,
+       "associationId": "SATKD25061807",
+       "clubId": "star_klub",
+       "athleteId": "6EU6m9KY7pOgaWOa3ZxF",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_women_44": {
+    "omuK5mB8OAl82QhYhq7Z": {
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 6,
+       "associationId": "SATKD23020401",
+       "name": "Rawan Ali Bashir",
+       "athleteId": "omuK5mB8OAl82QhYhq7Z",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_men_32": {
+    "qhtr0fZnAW8zHAgQxZXx": {
+     "placement": 5,
+     "members": [
+      {
+       "clubId": "roznava",
+       "rank": 2,
+       "associationId": "SATKD25040102",
+       "name": "Alexander Fábián",
+       "athleteId": "qhtr0fZnAW8zHAgQxZXx",
+       "club": "KORYO PANTHERS TAEKWONDO Rožňava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "qNCpiuBY4ROW2lAQpxJC": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Denys Hych",
+       "rank": 5,
+       "associationId": "SATKD24041801",
+       "clubId": "black_tiger",
+       "athleteId": "qNCpiuBY4ROW2lAQpxJC",
+       "club": "Black Tiger Taekwondo - Klub Snina",
+       "country": "SVK"
+      }
+     ]
+    },
+    "ea4t4ff4f8leduznd4rn": {
+     "placement": 5,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 4,
+       "name": "IVAN KALAFATIĆ",
+       "athleteId": "ea4t4ff4f8leduznd4rn",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    },
+    "1vvwG6bqdajs0QMYvTCQ": {
+     "placement": 5,
+     "members": [
+      {
+       "clubId": "mikulas",
+       "rank": 2,
+       "associationId": "SATKD26013004",
+       "name": "Tomáš Ústupský",
+       "athleteId": "1vvwG6bqdajs0QMYvTCQ",
+       "club": "Taekwondo 4U Liptovský Mikuláš",
+       "country": "SVK"
+      }
+     ]
+    },
+    "F1aQWyFPppICzWo4Otx9": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "ok0fPQFvAUBmS9YFm67u",
+       "rank": 4,
+       "name": "Ambrus Kristof",
+       "athleteId": "F1aQWyFPppICzWo4Otx9",
+       "club": "Exigent Taekwondo Team",
+       "country": "ROU"
+      }
+     ]
+    },
+    "K7INz2O86EgXVoatNbHa": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "hakimi",
+       "rank": 2,
+       "associationId": "SATKD23101702",
+       "name": "Ján Kováč",
+       "athleteId": "K7INz2O86EgXVoatNbHa",
+       "club": "TAEKWONDO HAKIMI Rožňava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "xSUwF02LoEwyxdcESZBp": {
+     "placement": 5,
+     "members": [
+      {
+       "name": "Peter Kocka",
+       "rank": 5,
+       "associationId": "SATKD24061702",
+       "clubId": "star_klub",
+       "athleteId": "xSUwF02LoEwyxdcESZBp",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    },
+    "5EIL79K6Mk98Ucw35Qyw": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "presov",
+       "rank": 1,
+       "associationId": "SATKD26011503",
+       "name": "Boris Urban",
+       "athleteId": "5EIL79K6Mk98Ucw35Qyw",
+       "club": "Ilyo Taekwondo Prešov",
+       "country": "SVK"
+      }
+     ]
+    },
+    "iaYSoSOEGhBmBARhlijA": {
+     "placement": 9,
+     "members": [
+      {
+       "clubId": "wJJxJSTS34RQLjYIzeNQ",
+       "rank": 3,
+       "name": "Fran Bačić",
+       "athleteId": "iaYSoSOEGhBmBARhlijA",
+       "club": "Tkd Forteca Korčula",
+       "country": "CRO"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_men_44plus": {
+    "MqaR9nDNGkGYTI5VPxZJ": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "star_klub",
+       "rank": 4,
+       "associationId": "SATKD24092601",
+       "name": "Damián Derian",
+       "athleteId": "MqaR9nDNGkGYTI5VPxZJ",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    },
+    "fpHWVnGrSlqZdnZcWihC": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "wJJxJSTS34RQLjYIzeNQ",
+       "rank": 3,
+       "name": "Toni Bačić",
+       "athleteId": "fpHWVnGrSlqZdnZcWihC",
+       "club": "Tkd Forteca Korčula",
+       "country": "CRO"
+      }
+     ]
+    },
+    "07T8eZu85CrEfePFCI4d": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 2,
+       "associationId": "SATKD26020508",
+       "name": "Sebastian Šnír",
+       "athleteId": "07T8eZu85CrEfePFCI4d",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "b9thKsK1oTYBP9YhHH0B": {
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 2,
+       "associationId": "SATKD26020509",
+       "name": "Teo Žatkovič",
+       "athleteId": "b9thKsK1oTYBP9YhHH0B",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_men_41": {
+    "0hTu2S7KNzn9pwWlhV2E": {
+     "members": [
+      {
+       "clubId": "hakimi",
+       "rank": 4,
+       "associationId": "SATKD22102702",
+       "name": "Dávid Denčo-Hristov",
+       "athleteId": "0hTu2S7KNzn9pwWlhV2E",
+       "club": "TAEKWONDO HAKIMI Rožňava",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_women_24": {
+    "aikjex6NgxyqPM3yED6j": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "haneul",
+       "rank": 2,
+       "associationId": "SATKD24121201",
+       "name": "Matilda Dugasová",
+       "athleteId": "aikjex6NgxyqPM3yED6j",
+       "club": "Haneul Taekwondo Trenčín",
+       "country": "SVK"
+      }
+     ]
+    },
+    "kEOSizzV5sw8EjyuixqA": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Chiara Goga",
+       "rank": 6,
+       "associationId": "SATKD23012404",
+       "clubId": "humenne",
+       "athleteId": "kEOSizzV5sw8EjyuixqA",
+       "club": "Taekwondo klub Humenné",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_women_28": {
+    "kVoNrcr9HqUnTP4VwW9X": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 4,
+       "name": "LOTA GROŠIĆ",
+       "athleteId": "kVoNrcr9HqUnTP4VwW9X",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    },
+    "ThgISrKJrbM33T6WGm2w": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "humenne",
+       "rank": 6,
+       "associationId": "SATKD23012402",
+       "name": "Timea Blisakova",
+       "athleteId": "ThgISrKJrbM33T6WGm2w",
+       "club": "Taekwondo klub Humenné",
+       "country": "SVK"
+      }
+     ]
+    },
+    "iqL0dU7fevVDEglaoibc": {
+     "placement": 3,
+     "members": [
+      {
+       "name": "Vanesa Lunio",
+       "rank": 2,
+       "associationId": "SATKD26020407",
+       "clubId": "ilyoke",
+       "athleteId": "iqL0dU7fevVDEglaoibc",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "ri9tfgyGCmG7sTBUnqQZ": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "OLW5VDEzDwiuwrJHkaeC",
+       "rank": 4,
+       "name": "Elena Đurđek",
+       "athleteId": "ri9tfgyGCmG7sTBUnqQZ",
+       "club": "Taekwondo klub Tigar Zagreb",
+       "country": "CRO"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_men_24": {
+    "VT8DlGz9HARvzg4EJxQ6": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "OLW5VDEzDwiuwrJHkaeC",
+       "rank": 1,
+       "name": "Petar Borac",
+       "athleteId": "VT8DlGz9HARvzg4EJxQ6",
+       "club": "Taekwondo klub Tigar Zagreb",
+       "country": "CRO"
+      }
+     ]
+    },
+    "pHSXTjDO3S3VVg0pbXeS": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 4,
+       "associationId": "SATKD22092902",
+       "name": "Šimon Dudáš",
+       "athleteId": "pHSXTjDO3S3VVg0pbXeS",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "ki8MCori2FP7FYTw2WEp": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "black_tiger",
+       "rank": 7,
+       "associationId": "SATKD22021403",
+       "name": "Tomáš Potocký",
+       "athleteId": "ki8MCori2FP7FYTw2WEp",
+       "club": "Black Tiger Taekwondo - Klub Snina",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_women_30": {
+    "mZJdemqmdRrfh5M6nNIJ": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "OLW5VDEzDwiuwrJHkaeC",
+       "rank": 4,
+       "name": "Ciara Jurković",
+       "athleteId": "mZJdemqmdRrfh5M6nNIJ",
+       "club": "Taekwondo klub Tigar Zagreb",
+       "country": "CRO"
+      }
+     ]
+    },
+    "tIInEW19PO9w3hGs6pKw": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "roznava",
+       "rank": 2,
+       "associationId": "SATKD25040103",
+       "name": "Ema Fábiánová",
+       "athleteId": "tIInEW19PO9w3hGs6pKw",
+       "club": "KORYO PANTHERS TAEKWONDO Rožňava",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_pupils_2_men_30": {
+    "6Zp8hfliTOiLKdVrd0BY": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "koryo",
+       "rank": 5,
+       "associationId": "SATKD20200000801",
+       "name": "Oliver Olách",
+       "athleteId": "6Zp8hfliTOiLKdVrd0BY",
+       "club": "KORYO TAEKWONDO SLÁVIA UPJŠ KOŠICE",
+       "country": "SVK"
+      }
+     ]
+    },
+    "4sRxvtFkCVIbRuAuydwS": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 5,
+       "name": "SVEN RAČKI",
+       "athleteId": "4sRxvtFkCVIbRuAuydwS",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    },
+    "ZtmbRalTIdpFxaqINTo5": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "OLW5VDEzDwiuwrJHkaeC",
+       "rank": 4,
+       "name": "Filip Škvorčević",
+       "athleteId": "ZtmbRalTIdpFxaqINTo5",
+       "club": "Taekwondo klub Tigar Zagreb",
+       "country": "CRO"
+      }
+     ]
+    },
+    "oor0JMdvbZQV70s21yLw": {
+     "placement": 5,
+     "members": [
+      {
+       "clubId": "ryong",
+       "rank": 6,
+       "associationId": "SATKD23052501",
+       "name": "Hugo Gerber",
+       "athleteId": "oor0JMdvbZQV70s21yLw",
+       "club": "Športový klub polície Ryong Bratislava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "ShiBLXilt7383Y1cls05": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 4,
+       "name": "BORNA MEKIĆ",
+       "athleteId": "ShiBLXilt7383Y1cls05",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    },
+    "XFxvbpuTr5YX8PsR3ZR7": {
+     "placement": 5,
+     "members": [
+      {
+       "clubId": "roznava",
+       "rank": 1,
+       "associationId": "SATKD26011804",
+       "name": "Norbert Baffi",
+       "athleteId": "XFxvbpuTr5YX8PsR3ZR7",
+       "club": "KORYO PANTHERS TAEKWONDO Rožňava",
+       "country": "SVK"
+      }
+     ]
+    }
+   }
+  }
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/division_rosters/younger_cadets": {
+  "athletes": {
+   "kyorugi_younger_cadets_women_46": {
+    "48WnQx0OI1hQVV3a6XNX": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "OLW5VDEzDwiuwrJHkaeC",
+       "rank": 8,
+       "name": "Gabriela Jurković",
+       "athleteId": "48WnQx0OI1hQVV3a6XNX",
+       "club": "Taekwondo klub Tigar Zagreb",
+       "country": "CRO"
+      }
+     ]
+    },
+    "Klx8q9UvZ0JGfDORHJBm": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 6,
+       "name": "MAGDALENA KALAFATIĆ",
+       "athleteId": "Klx8q9UvZ0JGfDORHJBm",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_men_26": {},
+   "kyorugi_younger_cadets_women_26": {},
+   "kyorugi_younger_cadets_men_30": {
+    "HcV8UYbimXeu4KjogyiV": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Damián Chimčák",
+       "rank": 9,
+       "associationId": "SATKD21110407",
+       "clubId": "black_tiger",
+       "athleteId": "HcV8UYbimXeu4KjogyiV",
+       "club": "Black Tiger Taekwondo - Klub Snina",
+       "country": "SVK"
+      }
+     ]
+    },
+    "wkEamIVDubQc1aBkOBXZ": {
+     "placement": 1,
+     "members": [
+      {
+       "name": "Teodor Farkas",
+       "rank": 8,
+       "associationId": "SATKD22021201",
+       "clubId": "falcon",
+       "athleteId": "wkEamIVDubQc1aBkOBXZ",
+       "club": "Falcon Taekwondo klub Rimavská Sobota",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_men_39": {
+    "m4J2YxQLp2l0lYboK8OL": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 8,
+       "name": "LUKA STANKOVIĆ",
+       "athleteId": "m4J2YxQLp2l0lYboK8OL",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    },
+    "RhM6Zax22HSdSb5uXkkU": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "koryo",
+       "rank": 1,
+       "associationId": "SATKD26062102",
+       "name": "Liam Kordík",
+       "athleteId": "RhM6Zax22HSdSb5uXkkU",
+       "club": "KORYO TAEKWONDO SLÁVIA UPJŠ KOŠICE",
+       "country": "SVK"
+      }
+     ]
+    },
+    "s0ZPYwgDFxAYC0dfeWZH": {
+     "placement": 5,
+     "members": [
+      {
+       "name": "Benjamin Babjak",
+       "rank": 9,
+       "associationId": "SATKD22013102",
+       "clubId": "black_tiger",
+       "athleteId": "s0ZPYwgDFxAYC0dfeWZH",
+       "club": "Black Tiger Taekwondo - Klub Snina",
+       "country": "SVK"
+      }
+     ]
+    },
+    "0G2IR5XLSFBRqUr5e9Ve": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "koryo",
+       "rank": 6,
+       "associationId": "SATKD24011601",
+       "name": "Matúš Lenárt",
+       "athleteId": "0G2IR5XLSFBRqUr5e9Ve",
+       "club": "KORYO TAEKWONDO SLÁVIA UPJŠ KOŠICE",
+       "country": "SVK"
+      }
+     ]
+    },
+    "yVLFPqIyysBac4ExegQe": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Michal Košara",
+       "rank": 5,
+       "associationId": "SATKD24012007",
+       "clubId": "ilyoke",
+       "athleteId": "yVLFPqIyysBac4ExegQe",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_women_36": {
+    "uZWxXFReJSLOB5sToP95": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "OLW5VDEzDwiuwrJHkaeC",
+       "rank": 4,
+       "name": "Korina Komljenović",
+       "athleteId": "uZWxXFReJSLOB5sToP95",
+       "club": "Taekwondo klub Tigar Zagreb",
+       "country": "CRO"
+      }
+     ]
+    },
+    "r83owBj2J7PJvsW4v3X8": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "HKYxfnza53VI3Tw8v3Qf",
+       "rank": 6,
+       "name": "Noemi Lechner",
+       "athleteId": "r83owBj2J7PJvsW4v3X8",
+       "club": "Tájfun SE",
+       "country": "HUN"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_women_34": {
+    "th5VcLvKpksP7tkWs0yA": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "haneul",
+       "rank": 2,
+       "associationId": "SATKD25061806",
+       "name": "Miroslava Dugasová",
+       "athleteId": "th5VcLvKpksP7tkWs0yA",
+       "club": "Haneul Taekwondo Trenčín",
+       "country": "SVK"
+      }
+     ]
+    },
+    "y6bmIG8w1RpIMwiIilbD": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "HKYxfnza53VI3Tw8v3Qf",
+       "rank": 7,
+       "name": "Elena Jecsak",
+       "athleteId": "y6bmIG8w1RpIMwiIilbD",
+       "club": "Tájfun SE",
+       "country": "HUN"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_men_36": {
+    "cDpwmGS3gg1SVyesiwB8": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "G9OVDMt74V2X1XSkbV3k",
+       "rank": 5,
+       "name": "LUKA MARTINOVIĆ",
+       "athleteId": "cDpwmGS3gg1SVyesiwB8",
+       "club": "PTK RUGVICA",
+       "country": "CRO"
+      }
+     ]
+    },
+    "yUuQtwQrMIRiBmWxZOld": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 5,
+       "associationId": "SATKD24100104",
+       "name": "Filip Podoba",
+       "athleteId": "yUuQtwQrMIRiBmWxZOld",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "tu50qWisjy059BkJmxkK": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Oleksandr Tomak",
+       "rank": 3,
+       "associationId": "SATKD24121803",
+       "clubId": "trencin",
+       "athleteId": "tu50qWisjy059BkJmxkK",
+       "club": "ILYO - TAEKWONDO TRENČÍN",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_men_34": {
+    "EPU7RtJDxdaPyLPEu0w1": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 8,
+       "name": "LEON KOVAČEVIĆ",
+       "athleteId": "EPU7RtJDxdaPyLPEu0w1",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    },
+    "XYU7GTRRGBxk2acl8fyM": {
+     "placement": 3,
+     "members": [
+      {
+       "name": "Simon Kačala",
+       "rank": 6,
+       "associationId": "SATKD20200000457",
+       "clubId": "koryo",
+       "athleteId": "XYU7GTRRGBxk2acl8fyM",
+       "club": "KORYO TAEKWONDO SLÁVIA UPJŠ KOŠICE",
+       "country": "SVK"
+      }
+     ]
+    },
+    "z2tjLszlBRv81IMFNpmw": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "ok0fPQFvAUBmS9YFm67u",
+       "rank": 4,
+       "name": "Ambrus Benjamin",
+       "athleteId": "z2tjLszlBRv81IMFNpmw",
+       "club": "Exigent Taekwondo Team",
+       "country": "ROU"
+      }
+     ]
+    },
+    "Mo6pYDED1b7qvgiUtMci": {
+     "placement": 3,
+     "members": [
+      {
+       "name": "Timon Gažúr",
+       "rank": 8,
+       "associationId": "SATKD20200000264",
+       "clubId": "ilyoke",
+       "athleteId": "Mo6pYDED1b7qvgiUtMci",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_men_46": {
+    "omS3GTflwQwEiqQWmi6l": {
+     "placement": 5,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 7,
+       "associationId": "SATKD22021436",
+       "name": "Marek Juhás",
+       "athleteId": "omS3GTflwQwEiqQWmi6l",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "vV3BBbzcSUAaO17FXGvB": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 7,
+       "associationId": "SATKD23093001",
+       "name": "Samuel Kušnír",
+       "athleteId": "vV3BBbzcSUAaO17FXGvB",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "HjGFB5pdjKsQXnIG2AuP": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "ryong",
+       "rank": 8,
+       "associationId": "SATKD21102805",
+       "name": "Andrej Horňák",
+       "athleteId": "HjGFB5pdjKsQXnIG2AuP",
+       "club": "Športový klub polície Ryong Bratislava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "Uu5XYbHLoUbKPI38GOVP": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "wJJxJSTS34RQLjYIzeNQ",
+       "rank": 4,
+       "name": "Domagoj Radovanović",
+       "athleteId": "Uu5XYbHLoUbKPI38GOVP",
+       "club": "Tkd Forteca Korčula",
+       "country": "CRO"
+      }
+     ]
+    },
+    "54A8luABQH9W2CvT14Kz": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "ok0fPQFvAUBmS9YFm67u",
+       "rank": 6,
+       "name": "Vasile Peter",
+       "athleteId": "54A8luABQH9W2CvT14Kz",
+       "club": "Exigent Taekwondo Team",
+       "country": "ROU"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_women_32": {
+    "1gQT6uIrA8QERnx2Fm7i": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "HKYxfnza53VI3Tw8v3Qf",
+       "rank": 5,
+       "name": "Nora Hotak",
+       "athleteId": "1gQT6uIrA8QERnx2Fm7i",
+       "club": "Tájfun SE",
+       "country": "HUN"
+      }
+     ]
+    },
+    "iHmcGlzxK0VMvKuTmujm": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 2,
+       "associationId": "SATKD26020518",
+       "name": "Ella Peti",
+       "athleteId": "iHmcGlzxK0VMvKuTmujm",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "VWOonPmGVYfzQAnS01WH": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 9,
+       "name": "LAURA PAVLEKOVIĆ",
+       "athleteId": "VWOonPmGVYfzQAnS01WH",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_men_42": {
+    "tkiFqU8NQYVUQd9HBtdo": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "wJJxJSTS34RQLjYIzeNQ",
+       "rank": 3,
+       "name": "Viggo Bačić",
+       "athleteId": "tkiFqU8NQYVUQd9HBtdo",
+       "club": "Tkd Forteca Korčula",
+       "country": "CRO"
+      }
+     ]
+    },
+    "bkjMjZiiAteQHRhs7KOa": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "hakimi",
+       "rank": 2,
+       "associationId": "SATKD23101704",
+       "name": "Martin Králik",
+       "athleteId": "bkjMjZiiAteQHRhs7KOa",
+       "club": "TAEKWONDO HAKIMI Rožňava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "BhLGNahZ4Czfr6xiPHCf": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "ok0fPQFvAUBmS9YFm67u",
+       "rank": 6,
+       "name": "Darius Aron Den Dulk",
+       "athleteId": "BhLGNahZ4Czfr6xiPHCf",
+       "club": "Exigent Taekwondo Team",
+       "country": "ROU"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_women_50": {},
+   "kyorugi_younger_cadets_men_50": {
+    "N36SCay0QJ55hrqWAyzQ": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "star_klub",
+       "rank": 5,
+       "associationId": "SATKD24092503",
+       "name": "Marko Derian",
+       "athleteId": "N36SCay0QJ55hrqWAyzQ",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    },
+    "tfZVtxv7EFWjMlgrXBKk": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "wJJxJSTS34RQLjYIzeNQ",
+       "rank": 4,
+       "name": "Damian Tomas",
+       "athleteId": "tfZVtxv7EFWjMlgrXBKk",
+       "club": "Tkd Forteca Korčula",
+       "country": "CRO"
+      }
+     ]
+    },
+    "tpXUkFFjDZbirYC54d0k": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "7iEVvRLf7WQd3jyhb0C8",
+       "rank": 9,
+       "name": "Viktor Beštić",
+       "athleteId": "tpXUkFFjDZbirYC54d0k",
+       "club": "Sokol-Wolf",
+       "country": "BIH"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_men_55": {},
+   "kyorugi_younger_cadets_women_39": {
+    "GmDEwfewMEUsNwQCtZLA": {
+     "placement": 5,
+     "members": [
+      {
+       "name": "Miriam Kováčová",
+       "rank": 5,
+       "associationId": "SATKD24061907",
+       "clubId": "star_klub",
+       "athleteId": "GmDEwfewMEUsNwQCtZLA",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    },
+    "N1JzGOVD2179T2RuR2ec": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "7iEVvRLf7WQd3jyhb0C8",
+       "rank": 6,
+       "name": "Jana Andrić",
+       "athleteId": "N1JzGOVD2179T2RuR2ec",
+       "club": "Sokol-Wolf",
+       "country": "BIH"
+      }
+     ]
+    },
+    "v0183PRFnE74Jnbf1Vlf": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "OLW5VDEzDwiuwrJHkaeC",
+       "rank": 8,
+       "name": "Rafaela Jurković",
+       "athleteId": "v0183PRFnE74Jnbf1Vlf",
+       "club": "Taekwondo klub Tigar Zagreb",
+       "country": "CRO"
+      }
+     ]
+    },
+    "ZrSv4Igtjfgro01mcPav": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 9,
+       "associationId": "SATKD22020728",
+       "name": "Rebeka Hudáková",
+       "athleteId": "ZrSv4Igtjfgro01mcPav",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "eY0ueGjbQ3ZJB8GwgT9p": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "hakimi",
+       "rank": 4,
+       "associationId": "SATKD20200000123",
+       "name": "Hana Burkovská",
+       "athleteId": "eY0ueGjbQ3ZJB8GwgT9p",
+       "club": "TAEKWONDO HAKIMI Rožňava",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_men_28": {
+    "jSLZEDDij9ThhY2oZAL0": {
+     "placement": 1,
+     "members": [
+      {
+       "name": "Michal Zagyi",
+       "rank": 8,
+       "associationId": "SATKD22032801",
+       "clubId": "ryong",
+       "athleteId": "jSLZEDDij9ThhY2oZAL0",
+       "club": "Športový klub polície Ryong Bratislava",
+       "country": "SVK"
+      }
+     ]
+    },
+    "s2U5GvhYGWh91UOnMI4K": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Peter Košara",
+       "rank": 5,
+       "associationId": "SATKD24012005",
+       "clubId": "ilyoke",
+       "athleteId": "s2U5GvhYGWh91UOnMI4K",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_women_55": {
+    "oUMWbvIUCMJeSTPblM27": {
+     "placement": 2,
+     "members": [
+      {
+       "name": "Freia Rheannon Polyák",
+       "rank": 8,
+       "associationId": "SATKD23062301",
+       "clubId": "ilyoke",
+       "athleteId": "oUMWbvIUCMJeSTPblM27",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    },
+    "bkKSlB5dsYlnEDkYwolV": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "ilyoke",
+       "rank": 5,
+       "associationId": "SATKD24012011",
+       "name": "Viktória Lunio",
+       "athleteId": "bkKSlB5dsYlnEDkYwolV",
+       "club": "Športový klub polície - ILYO Taekwondo Košice",
+       "country": "SVK"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_women_28": {},
+   "kyorugi_younger_cadets_men_55plus": {
+    "cQEx1G8MVl02Ln6QMBqI": {
+     "placement": 3,
+     "members": [
+      {
+       "name": "Juraj Marcinčák",
+       "rank": 2,
+       "associationId": "SATKD25100704",
+       "clubId": "star_klub",
+       "athleteId": "cQEx1G8MVl02Ln6QMBqI",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    },
+    "n8ClgkZG5CZnyCkXO563": {
+     "placement": 2,
+     "members": [
+      {
+       "clubId": "wJJxJSTS34RQLjYIzeNQ",
+       "rank": 4,
+       "name": "Ante Tulić",
+       "athleteId": "n8ClgkZG5CZnyCkXO563",
+       "club": "Tkd Forteca Korčula",
+       "country": "CRO"
+      }
+     ]
+    },
+    "8zBlaZJbdoNxk6N54qBt": {
+     "placement": 3,
+     "members": [
+      {
+       "clubId": "star_klub",
+       "rank": 6,
+       "associationId": "SATKD23062603",
+       "name": "Slavomír Rastislav Obyšovský",
+       "athleteId": "8zBlaZJbdoNxk6N54qBt",
+       "club": "STAR-CLUB BOJOVÝCH UMENÍ",
+       "country": "SVK"
+      }
+     ]
+    },
+    "6ZQ7KBxpB652LIIiKKJe": {
+     "placement": 1,
+     "members": [
+      {
+       "clubId": "pVE1VEVwkrr593WVNFTX",
+       "rank": 8,
+       "name": "TOMA KUKIĆ",
+       "athleteId": "6ZQ7KBxpB652LIIiKKJe",
+       "club": "TKD JASTREB",
+       "country": "CRO"
+      }
+     ]
+    }
+   },
+   "kyorugi_younger_cadets_women_30": {},
+   "kyorugi_younger_cadets_men_32": {}
+  }
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/meta/categoryCounts": {
+  "kyorugi_pupils_1_women_34": 0,
+  "kyorugi_pupils_1_women_22": 2,
+  "kyorugi_pupils_1_women_24": 4,
+  "kyorugi_younger_cadets_men_46": 5,
+  "kyorugi_younger_cadets_women_34": 2,
+  "kyorugi_pupils_2_women_41": 2,
+  "kyorugi_pupils_2_women_38": 0,
+  "kyorugi_pupils_1_men_22": 3,
+  "kyorugi_younger_cadets_men_42": 3,
+  "kyorugi_pupils_2_men_28": 4,
+  "kyorugi_pupils_2_women_34": 1,
+  "kyorugi_younger_cadets_men_50": 3,
+  "kyorugi_pupils_2_women_22": 0,
+  "kyorugi_younger_cadets_men_55": 0,
+  "kyorugi_pupils_2_women_44": 1,
+  "kyorugi_younger_cadets_men_34": 4,
+  "kyorugi_pupils_2_men_32": 9,
+  "kyorugi_pupils_2_men_44plus": 4,
+  "kyorugi_pupils_2_men_41": 1,
+  "kyorugi_pupils_2_women_24": 2,
+  "kyorugi_pupils_2_women_28": 4,
+  "kyorugi_younger_cadets_men_28": 2,
+  "kyorugi_pupils_2_men_24": 3,
+  "kyorugi_pupils_1_women_36": 1,
+  "kyorugi_younger_cadets_men_55plus": 4,
+  "kyorugi_younger_cadets_women_55": 2,
+  "kyorugi_younger_cadets_women_46": 2,
+  "kyorugi_younger_cadets_men_32": 0,
+  "kyorugi_younger_cadets_men_26": 0,
+  "kyorugi_pupils_2_men_34": 0,
+  "kyorugi_younger_cadets_men_39": 5,
+  "kyorugi_younger_cadets_women_36": 2,
+  "kyorugi_pupils_2_men_26": 6,
+  "kyorugi_pupils_2_women_26": 2,
+  "kyorugi_pupils_1_men_28": 2,
+  "kyorugi_younger_cadets_women_32": 3,
+  "kyorugi_younger_cadets_men_36": 3,
+  "kyorugi_younger_cadets_women_50": 0,
+  "kyorugi_pupils_2_men_36": 6,
+  "kyorugi_pupils_1_men_26": 4,
+  "kyorugi_younger_cadets_women_39": 5,
+  "kyorugi_pupils_1_men_24": 4,
+  "kyorugi_younger_cadets_women_28": 0,
+  "kyorugi_younger_cadets_men_30": 2,
+  "kyorugi_pupils_2_women_30": 2,
+  "kyorugi_pupils_2_men_30": 6
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/brackets/PyNhBWChxdXPueMesZjD": {
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "system": "single_elimination",
+  "entries": [
+   {
+    "name": "Damián Derian",
+    "athleteIds": [
+     "MqaR9nDNGkGYTI5VPxZJ"
+    ],
+    "seed": 1,
+    "entryId": "MqaR9nDNGkGYTI5VPxZJ",
+    "clubId": "star_klub",
+    "associationIds": [
+     "SATKD24092601"
+    ],
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "country": "SVK"
+   },
+   {
+    "name": "Teo Žatkovič",
+    "athleteIds": [
+     "b9thKsK1oTYBP9YhHH0B"
+    ],
+    "seed": 2,
+    "entryId": "b9thKsK1oTYBP9YhHH0B",
+    "clubId": "ilyoke",
+    "associationIds": [
+     "SATKD26020509"
+    ],
+    "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+    "country": "SVK"
+   },
+   {
+    "name": "Sebastian Šnír",
+    "athleteIds": [
+     "07T8eZu85CrEfePFCI4d"
+    ],
+    "seed": 3,
+    "entryId": "07T8eZu85CrEfePFCI4d",
+    "clubId": "ilyoke",
+    "associationIds": [
+     "SATKD26020508"
+    ],
+    "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+    "country": "SVK"
+   },
+   {
+    "name": "Toni Bačić",
+    "athleteIds": [
+     "fpHWVnGrSlqZdnZcWihC"
+    ],
+    "seed": 4,
+    "entryId": "fpHWVnGrSlqZdnZcWihC",
+    "clubId": "wJJxJSTS34RQLjYIzeNQ",
+    "associationIds": [
+     null
+    ],
+    "clubName": "Tkd Forteca Korčula",
+    "country": "CRO"
+   }
+  ],
+  "categoryLabel": "Kyorugi · Pupils 2 Men +44kg",
+  "placementStrategy": "club_country_spread",
+  "pssHitLevelSetId": "satkd_extraleague",
+  "status": "generated",
+  "format": "duel",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "createdAt": {
+   "__ts__": "2026-11-06T21:29:06.790000+00:00"
+  },
+  "discipline": "kyorugi",
+  "orderingStrategy": "registration_order"
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/brackets/dCI9dGb7BEp4eysWukNo": {
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "system": "single_elimination",
+  "entries": [
+   {
+    "name": "Slavomír Rastislav Obyšovský",
+    "athleteIds": [
+     "8zBlaZJbdoNxk6N54qBt"
+    ],
+    "seed": 1,
+    "entryId": "8zBlaZJbdoNxk6N54qBt",
+    "clubId": "star_klub",
+    "associationIds": [
+     "SATKD23062603"
+    ],
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "country": "SVK"
+   },
+   {
+    "name": "TOMA KUKIĆ",
+    "athleteIds": [
+     "6ZQ7KBxpB652LIIiKKJe"
+    ],
+    "seed": 2,
+    "entryId": "6ZQ7KBxpB652LIIiKKJe",
+    "clubId": "pVE1VEVwkrr593WVNFTX",
+    "associationIds": [
+     null
+    ],
+    "clubName": "TKD JASTREB",
+    "country": "CRO"
+   },
+   {
+    "name": "Ante Tulić",
+    "athleteIds": [
+     "n8ClgkZG5CZnyCkXO563"
+    ],
+    "seed": 3,
+    "entryId": "n8ClgkZG5CZnyCkXO563",
+    "clubId": "wJJxJSTS34RQLjYIzeNQ",
+    "associationIds": [
+     null
+    ],
+    "clubName": "Tkd Forteca Korčula",
+    "country": "CRO"
+   },
+   {
+    "name": "Juraj Marcinčák",
+    "athleteIds": [
+     "cQEx1G8MVl02Ln6QMBqI"
+    ],
+    "seed": 4,
+    "entryId": "cQEx1G8MVl02Ln6QMBqI",
+    "clubId": "star_klub",
+    "associationIds": [
+     "SATKD25100704"
+    ],
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "country": "SVK"
+   }
+  ],
+  "categoryLabel": "Kyorugi · Younger Cadets Men +55kg",
+  "placementStrategy": "club_country_spread",
+  "pssHitLevelSetId": "satkd_extraleague",
+  "status": "generated",
+  "format": "duel",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "createdAt": {
+   "__ts__": "2026-11-06T21:29:06.790000+00:00"
+  },
+  "discipline": "kyorugi",
+  "orderingStrategy": "registration_order"
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/results/kyorugi_pupils_2_men_44plus": {
+  "system": "single_elimination",
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "status": "complete",
+  "categoryLabel": "Kyorugi · Pupils 2 Men +44kg",
+  "computedAt": {
+   "__ts__": "2026-11-17T13:27:43.275000+00:00"
+  },
+  "placements": {
+   "MqaR9nDNGkGYTI5VPxZJ": {
+    "placement": 1,
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "onRoster": true,
+    "country": "SVK",
+    "name": "Damián Derian",
+    "clubId": "star_klub"
+   },
+   "fpHWVnGrSlqZdnZcWihC": {
+    "placement": 2,
+    "clubName": "Tkd Forteca Korčula",
+    "onRoster": true,
+    "country": "CRO",
+    "name": "Toni Bačić",
+    "clubId": "wJJxJSTS34RQLjYIzeNQ"
+   },
+   "07T8eZu85CrEfePFCI4d": {
+    "placement": 3,
+    "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+    "onRoster": true,
+    "country": "SVK",
+    "name": "Sebastian Šnír",
+    "clubId": "ilyoke"
+   }
+  }
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/results/kyorugi_younger_cadets_men_55plus": {
+  "system": "single_elimination",
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "status": "complete",
+  "categoryLabel": "Kyorugi · Younger Cadets Men +55kg",
+  "computedAt": {
+   "__ts__": "2026-11-17T13:27:43.275000+00:00"
+  },
+  "placements": {
+   "6ZQ7KBxpB652LIIiKKJe": {
+    "placement": 1,
+    "clubName": "TKD JASTREB",
+    "onRoster": true,
+    "country": "CRO",
+    "name": "TOMA KUKIĆ",
+    "clubId": "pVE1VEVwkrr593WVNFTX"
+   },
+   "n8ClgkZG5CZnyCkXO563": {
+    "placement": 2,
+    "clubName": "Tkd Forteca Korčula",
+    "onRoster": true,
+    "country": "CRO",
+    "name": "Ante Tulić",
+    "clubId": "wJJxJSTS34RQLjYIzeNQ"
+   },
+   "8zBlaZJbdoNxk6N54qBt": {
+    "placement": 3,
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "onRoster": true,
+    "country": "SVK",
+    "name": "Slavomír Rastislav Obyšovský",
+    "clubId": "star_klub"
+   },
+   "cQEx1G8MVl02Ln6QMBqI": {
+    "placement": 3,
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "onRoster": true,
+    "country": "SVK",
+    "name": "Juraj Marcinčák",
+    "clubId": "star_klub"
+   }
+  }
+ },
+ "tournaments/9XiCXjwuf5xGSi9SaTvR/results/kyorugi_younger_cadets_men_plus_55": null,
+ "sports/taekwondo/disciplines/kyorugi/matches/9XiCXjwuf5xGSi9SaTvR_116": {
+  "resultsProcessed": true,
+  "bracketMatchNumber": 2,
+  "win": "red",
+  "winnerEntryId": "fpHWVnGrSlqZdnZcWihC",
+  "scheduledWithRelaxedConstraints": false,
+  "hitLevel": 13,
+  "breakTime": "00:30",
+  "courtId": "1",
+  "resultsProcessingStartedAt": {
+   "__ts__": "2026-11-08T11:52:48.003000+00:00"
+  },
+  "requiresPlexiHelmet": false,
+  "displayNumber": 116.0,
+  "win_score": "0-2",
+  "blue": {
+   "name": "Sebastian Šnír",
+   "clubId": "ilyoke",
+   "athleteIds": [
+    "07T8eZu85CrEfePFCI4d"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "penalties": "1",
+     "head": 0,
+     "points": "1",
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "penalties": 0,
+     "head": 0,
+     "points": "0",
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "penalties": 0,
+     "head": 0,
+     "points": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "07T8eZu85CrEfePFCI4d",
+   "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+   "country": "SVK"
+  },
+  "roundPhase": "SF",
+  "queuePosition": 15.0,
+  "bracketRound": 1,
+  "roundTime": "01:00",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "red": {
+   "name": "Toni Bačić",
+   "clubId": "wJJxJSTS34RQLjYIzeNQ",
+   "athleteIds": [
+    "fpHWVnGrSlqZdnZcWihC"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "penalties": "1",
+     "head": 0,
+     "points": "3",
+     "rotation_head": 0,
+     "hits": 6,
+     "trunk": 1,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "penalties": 0,
+     "head": 0,
+     "points": "2",
+     "rotation_head": 0,
+     "hits": 3,
+     "trunk": 1,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "penalties": 0,
+     "head": 0,
+     "points": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "fpHWVnGrSlqZdnZcWihC",
+   "clubName": "Tkd Forteca Korčula",
+   "country": "CRO"
+  },
+  "tournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+  "status": "completed",
+  "pssHitLevelSetId": "satkd_extraleague",
+  "round": 2,
+  "isRanked": true,
+  "resolvedVestGen": "gen2",
+  "pssSize": 3,
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "win_type": "ptf",
+  "end_time": {
+   "__ts__": "2026-11-08T12:52:47.657086+00:00"
+  }
+ },
+ "sports/taekwondo/disciplines/kyorugi/matches/9XiCXjwuf5xGSi9SaTvR_125": {
+  "resultsProcessed": true,
+  "bracketMatchNumber": 1,
+  "win": "blue",
+  "winnerEntryId": "MqaR9nDNGkGYTI5VPxZJ",
+  "scheduledWithRelaxedConstraints": false,
+  "hitLevel": 13,
+  "breakTime": "00:30",
+  "courtId": "1",
+  "resultsProcessingStartedAt": {
+   "__ts__": "2026-11-08T13:02:54.364000+00:00"
+  },
+  "requiresPlexiHelmet": false,
+  "displayNumber": 125.0,
+  "win_score": "2-0",
+  "blue": {
+   "name": "Damián Derian",
+   "source": {
+    "matchId": "9XiCXjwuf5xGSi9SaTvR_115",
+    "slot": "winner"
+   },
+   "athleteIds": [
+    "MqaR9nDNGkGYTI5VPxZJ"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "penalties": "0",
+     "head": 0,
+     "points": "7",
+     "rotation_head": 0,
+     "hits": 7,
+     "trunk": 3,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "penalties": 0,
+     "head": 0,
+     "points": "10",
+     "rotation_head": 0,
+     "hits": 7,
+     "trunk": 5,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "penalties": 0,
+     "head": 0,
+     "points": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "MqaR9nDNGkGYTI5VPxZJ",
+   "clubId": "star_klub",
+   "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+   "country": "SVK"
+  },
+  "roundPhase": "F",
+  "queuePosition": 24.0,
+  "bracketRound": 2,
+  "roundTime": "01:00",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "red": {
+   "name": "Toni Bačić",
+   "source": {
+    "matchId": "9XiCXjwuf5xGSi9SaTvR_116",
+    "slot": "winner"
+   },
+   "athleteIds": [
+    "fpHWVnGrSlqZdnZcWihC"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "penalties": "1",
+     "head": 0,
+     "points": "2",
+     "rotation_head": 0,
+     "hits": 7,
+     "trunk": 1,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "penalties": 0,
+     "head": 0,
+     "points": "0",
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "penalties": 0,
+     "head": 0,
+     "points": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "fpHWVnGrSlqZdnZcWihC",
+   "clubId": "wJJxJSTS34RQLjYIzeNQ",
+   "clubName": "Tkd Forteca Korčula",
+   "country": "CRO"
+  },
+  "tournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+  "status": "completed",
+  "pssHitLevelSetId": "satkd_extraleague",
+  "round": 2,
+  "isRanked": true,
+  "resolvedVestGen": "gen2",
+  "pssSize": 3,
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "win_type": "ptf",
+  "end_time": {
+   "__ts__": "2026-11-08T14:02:53.924418+00:00"
+  }
+ },
+ "sports/taekwondo/disciplines/kyorugi/matches/9XiCXjwuf5xGSi9SaTvR_204": {
+  "resultsProcessed": true,
+  "bracketMatchNumber": 1,
+  "win": "red",
+  "winnerEntryId": "6ZQ7KBxpB652LIIiKKJe",
+  "scheduledWithRelaxedConstraints": false,
+  "hitLevel": 15,
+  "breakTime": "00:30",
+  "courtId": "2",
+  "resultsProcessingStartedAt": {
+   "__ts__": "2026-11-08T09:49:42.826000+00:00"
+  },
+  "requiresPlexiHelmet": true,
+  "displayNumber": 204.0,
+  "win_score": "0-2",
+  "blue": {
+   "name": "Slavomír Rastislav Obyšovský",
+   "clubId": "star_klub",
+   "athleteIds": [
+    "8zBlaZJbdoNxk6N54qBt"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "points": "0",
+     "head": 0,
+     "penalties": "0",
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": "0",
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": 0,
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "8zBlaZJbdoNxk6N54qBt",
+   "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+   "country": "SVK"
+  },
+  "roundPhase": "SF",
+  "queuePosition": 3.0,
+  "bracketRound": 1,
+  "roundTime": "01:00",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "red": {
+   "name": "TOMA KUKIĆ",
+   "clubId": "pVE1VEVwkrr593WVNFTX",
+   "athleteIds": [
+    "6ZQ7KBxpB652LIIiKKJe"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "points": "10",
+     "head": 0,
+     "penalties": "0",
+     "rotation_head": 0,
+     "hits": 7,
+     "trunk": 5,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": "10",
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 7,
+     "trunk": 5,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": 0,
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "6ZQ7KBxpB652LIIiKKJe",
+   "clubName": "TKD JASTREB",
+   "country": "CRO"
+  },
+  "tournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+  "status": "completed",
+  "pssHitLevelSetId": "satkd_extraleague",
+  "round": 2,
+  "isRanked": true,
+  "resolvedVestGen": "gen3",
+  "pssSize": 3,
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "win_type": "ptf",
+  "end_time": {
+   "__ts__": "2026-11-08T10:49:42.474879+00:00"
+  }
+ },
+ "sports/taekwondo/disciplines/kyorugi/matches/9XiCXjwuf5xGSi9SaTvR_205": {
+  "resultsProcessed": true,
+  "bracketMatchNumber": 2,
+  "win": "blue",
+  "winnerEntryId": "n8ClgkZG5CZnyCkXO563",
+  "scheduledWithRelaxedConstraints": false,
+  "hitLevel": 15,
+  "breakTime": "00:30",
+  "courtId": "2",
+  "resultsProcessingStartedAt": {
+   "__ts__": "2026-11-08T09:56:36.329000+00:00"
+  },
+  "requiresPlexiHelmet": true,
+  "displayNumber": 205.0,
+  "win_score": "2-0",
+  "blue": {
+   "name": "Ante Tulić",
+   "clubId": "wJJxJSTS34RQLjYIzeNQ",
+   "athleteIds": [
+    "n8ClgkZG5CZnyCkXO563"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "points": "6",
+     "head": 0,
+     "penalties": "0",
+     "rotation_head": 0,
+     "hits": 4,
+     "trunk": 3,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": "6",
+     "head": 0,
+     "penalties": "2",
+     "rotation_head": 0,
+     "hits": 5,
+     "trunk": 3,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": 0,
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "n8ClgkZG5CZnyCkXO563",
+   "clubName": "Tkd Forteca Korčula",
+   "country": "CRO"
+  },
+  "roundPhase": "SF",
+  "queuePosition": 4.0,
+  "bracketRound": 1,
+  "roundTime": "01:00",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "red": {
+   "name": "Juraj Marcinčák",
+   "clubId": "star_klub",
+   "athleteIds": [
+    "cQEx1G8MVl02Ln6QMBqI"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "points": "0",
+     "head": 0,
+     "penalties": "0",
+     "rotation_head": 0,
+     "hits": 1,
+     "trunk": 0,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": "4",
+     "head": 0,
+     "penalties": "0",
+     "rotation_head": 0,
+     "hits": 1,
+     "trunk": 1,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": 0,
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "cQEx1G8MVl02Ln6QMBqI",
+   "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+   "country": "SVK"
+  },
+  "tournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+  "status": "completed",
+  "pssHitLevelSetId": "satkd_extraleague",
+  "round": 2,
+  "isRanked": true,
+  "resolvedVestGen": "gen3",
+  "pssSize": 3,
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "win_type": "ptf",
+  "end_time": {
+   "__ts__": "2026-11-08T10:56:35.978057+00:00"
+  }
+ },
+ "sports/taekwondo/disciplines/kyorugi/matches/9XiCXjwuf5xGSi9SaTvR_230": {
+  "resultsProcessed": true,
+  "bracketMatchNumber": 1,
+  "win": "blue",
+  "winnerEntryId": "6ZQ7KBxpB652LIIiKKJe",
+  "scheduledWithRelaxedConstraints": false,
+  "hitLevel": 15,
+  "breakTime": "00:30",
+  "courtId": "2",
+  "resultsProcessingStartedAt": {
+   "__ts__": "2026-11-08T13:11:27.635000+00:00"
+  },
+  "requiresPlexiHelmet": true,
+  "displayNumber": 230.0,
+  "win_score": "2-0",
+  "blue": {
+   "name": "TOMA KUKIĆ",
+   "source": {
+    "matchId": "9XiCXjwuf5xGSi9SaTvR_204",
+    "slot": "winner"
+   },
+   "athleteIds": [
+    "6ZQ7KBxpB652LIIiKKJe"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "points": "8",
+     "head": 2,
+     "penalties": "0",
+     "rotation_head": 0,
+     "hits": 2,
+     "trunk": 1,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": "8",
+     "head": 2,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 1,
+     "trunk": 1,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": 0,
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "6ZQ7KBxpB652LIIiKKJe",
+   "clubId": "pVE1VEVwkrr593WVNFTX",
+   "clubName": "TKD JASTREB",
+   "country": "CRO"
+  },
+  "roundPhase": "F",
+  "queuePosition": 29.0,
+  "bracketRound": 2,
+  "roundTime": "01:00",
+  "tournamentId": "9XiCXjwuf5xGSi9SaTvR",
+  "red": {
+   "name": "Ante Tulić",
+   "source": {
+    "matchId": "9XiCXjwuf5xGSi9SaTvR_205",
+    "slot": "winner"
+   },
+   "athleteIds": [
+    "n8ClgkZG5CZnyCkXO563"
+   ],
+   "points": [
+    {
+     "rotation_trunk": 0,
+     "points": "2",
+     "head": 0,
+     "penalties": "0",
+     "rotation_head": 0,
+     "hits": 1,
+     "trunk": 1,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": "4",
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 4,
+     "trunk": 2,
+     "punch": 0
+    },
+    {
+     "rotation_trunk": 0,
+     "points": 0,
+     "head": 0,
+     "penalties": 0,
+     "rotation_head": 0,
+     "hits": 0,
+     "trunk": 0,
+     "punch": 0
+    }
+   ],
+   "entryId": "n8ClgkZG5CZnyCkXO563",
+   "clubId": "wJJxJSTS34RQLjYIzeNQ",
+   "clubName": "Tkd Forteca Korčula",
+   "country": "CRO"
+  },
+  "tournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+  "status": "completed",
+  "pssHitLevelSetId": "satkd_extraleague",
+  "round": 2,
+  "isRanked": true,
+  "resolvedVestGen": "gen3",
+  "pssSize": 3,
+  "categoryCode": "kyorugi_younger_cadets_men_55plus",
+  "win_type": "ptf",
+  "end_time": {
+   "__ts__": "2026-11-08T14:11:27.294067+00:00"
+  }
+ },
+ "athletes/07T8eZu85CrEfePFCI4d": {
+  "sports": {
+   "taekwondo": {
+    "rank": 2,
+    "totalMedals": 1,
+    "clubId": "ilyoke",
+    "lastTournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+    "associationId": "SATKD26020508",
+    "lastTournamentId": "9XiCXjwuf5xGSi9SaTvR",
+    "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+    "disciplines": {
+     "kyorugi": {
+      "peakScore": 580,
+      "medals": {
+       "silver": 0,
+       "bronze": 1,
+       "gold": 0
+      },
+      "avgScore": 580,
+      "matchesCount": 1,
+      "lastCompeteCategory": "kyorugi_pupils_2_men_44plus",
+      "categories": {
+       "kyorugi_pupils_2_men_44plus": {
+        "peakScore": 580,
+        "medals": {
+         "silver": 0,
+         "bronze": 1,
+         "gold": 0
+        },
+        "currentScore": 580,
+        "avgScore": 580,
+        "matchesCount": 1
+       }
+      }
+     }
+    }
+   }
+  },
+  "birthday": {
+   "__ts__": "2018-08-08T00:00:00+00:00"
+  },
+  "firstName": "sebastian",
+  "createdAt": {
+   "__ts__": "2026-08-18T19:07:26.648000+00:00"
+  },
+  "lastName": "snir",
+  "displayName": "Sebastian Šnír",
+  "gender": "male",
+  "country": "SVK"
+ },
+ "athletes/6ZQ7KBxpB652LIIiKKJe": {
+  "lastNameDisplay": "KUKIĆ",
+  "sports": {
+   "taekwondo": {
+    "rank": 8,
+    "totalMedals": 1,
+    "isPara": false,
+    "clubId": "pVE1VEVwkrr593WVNFTX",
+    "lastTournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+    "lastTournamentId": "9XiCXjwuf5xGSi9SaTvR",
+    "clubName": "TKD JASTREB",
+    "disciplines": {
+     "kyorugi": {
+      "peakScore": 924,
+      "medals": {
+       "silver": 0,
+       "bronze": 0,
+       "gold": 1
+      },
+      "avgScore": 919,
+      "lastCompeteCategory": "kyorugi_younger_cadets_men_55plus",
+      "matchesCount": 2,
+      "categories": {
+       "kyorugi_younger_cadets_men_55plus": {
+        "peakScore": 924,
+        "medals": {
+         "silver": 0,
+         "bronze": 0,
+         "gold": 1
+        },
+        "currentScore": 924,
+        "avgScore": 919,
+        "matchesCount": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "birthday": {
+   "__ts__": "2015-03-11T00:00:00+00:00"
+  },
+  "firstNameDisplay": "TOMA",
+  "firstName": "toma",
+  "createdAt": {
+   "__ts__": "2026-11-02T16:13:44.552000+00:00"
+  },
+  "lastName": "kukic",
+  "displayName": "TOMA KUKIĆ",
+  "gender": "male",
+  "country": "CRO"
+ },
+ "athletes/8zBlaZJbdoNxk6N54qBt": {
+  "sports": {
+   "taekwondo": {
+    "rank": 6,
+    "totalMedals": 1,
+    "clubId": "star_klub",
+    "lastTournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+    "associationId": "SATKD23062603",
+    "lastTournamentId": "9XiCXjwuf5xGSi9SaTvR",
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "disciplines": {
+     "kyorugi": {
+      "peakScore": 786,
+      "medals": {
+       "silver": 0,
+       "bronze": 1,
+       "gold": 0
+      },
+      "avgScore": 786,
+      "matchesCount": 1,
+      "lastCompeteCategory": "kyorugi_younger_cadets_men_55plus",
+      "categories": {
+       "kyorugi_younger_cadets_men_55plus": {
+        "peakScore": 786,
+        "medals": {
+         "silver": 0,
+         "bronze": 1,
+         "gold": 0
+        },
+        "currentScore": 786,
+        "avgScore": 786,
+        "matchesCount": 1
+       }
+      }
+     }
+    }
+   }
+  },
+  "birthday": {
+   "__ts__": "2016-12-26T00:00:00+00:00"
+  },
+  "firstName": "slavomir rastislav",
+  "createdAt": {
+   "__ts__": "2026-08-18T19:07:29.077000+00:00"
+  },
+  "lastName": "obysovsky",
+  "displayName": "Slavomír Rastislav Obyšovský",
+  "gender": "male",
+  "country": "SVK"
+ },
+ "athletes/MqaR9nDNGkGYTI5VPxZJ": {
+  "sports": {
+   "taekwondo": {
+    "rank": 4,
+    "totalMedals": 2,
+    "clubId": "star_klub",
+    "lastTournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+    "associationId": "SATKD24092601",
+    "lastTournamentId": "9XiCXjwuf5xGSi9SaTvR",
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "disciplines": {
+     "kyorugi": {
+      "peakScore": 742,
+      "medals": {
+       "silver": 0,
+       "bronze": 0,
+       "gold": 2
+      },
+      "avgScore": 728,
+      "lastCompeteCategory": "kyorugi_pupils_2_men_44plus",
+      "matchesCount": 3,
+      "categories": {
+       "kyorugi_pupils_2_men_44plus": {
+        "peakScore": 742,
+        "medals": {
+         "silver": 0,
+         "bronze": 0,
+         "gold": 2
+        },
+        "currentScore": 742,
+        "avgScore": 728,
+        "matchesCount": 3
+       }
+      }
+     }
+    }
+   }
+  },
+  "birthday": {
+   "__ts__": "2017-04-21T00:00:00+00:00"
+  },
+  "firstName": "damian",
+  "createdAt": {
+   "__ts__": "2026-08-18T19:07:27.883000+00:00"
+  },
+  "lastName": "derian",
+  "displayName": "Damián Derian",
+  "gender": "male",
+  "country": "SVK"
+ },
+ "athletes/b9thKsK1oTYBP9YhHH0B": {
+  "sports": {
+   "taekwondo": {
+    "rank": 2,
+    "totalMedals": 1,
+    "clubId": "ilyoke",
+    "lastTournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+    "associationId": "SATKD26020509",
+    "lastTournamentId": "9XiCXjwuf5xGSi9SaTvR",
+    "clubName": "Športový klub polície - ILYO Taekwondo Košice",
+    "disciplines": {
+     "kyorugi": {
+      "peakScore": 586,
+      "medals": {
+       "silver": 0,
+       "bronze": 1,
+       "gold": 0
+      },
+      "avgScore": 586,
+      "matchesCount": 1,
+      "lastCompeteCategory": "kyorugi_pupils_2_men_44plus",
+      "categories": {
+       "kyorugi_pupils_2_men_44plus": {
+        "peakScore": 586,
+        "medals": {
+         "silver": 0,
+         "bronze": 1,
+         "gold": 0
+        },
+        "currentScore": 586,
+        "avgScore": 586,
+        "matchesCount": 1
+       }
+      }
+     }
+    }
+   }
+  },
+  "birthday": {
+   "__ts__": "2018-08-31T00:00:00+00:00"
+  },
+  "firstName": "teo",
+  "createdAt": {
+   "__ts__": "2026-08-18T19:07:26.648000+00:00"
+  },
+  "lastName": "zatkovic",
+  "displayName": "Teo Žatkovič",
+  "gender": "male",
+  "country": "SVK"
+ },
+ "athletes/cQEx1G8MVl02Ln6QMBqI": {
+  "sports": {
+   "taekwondo": {
+    "rank": 2,
+    "totalMedals": 1,
+    "clubId": "star_klub",
+    "lastTournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+    "associationId": "SATKD25100704",
+    "lastTournamentId": "9XiCXjwuf5xGSi9SaTvR",
+    "clubName": "STAR-CLUB BOJOVÝCH UMENÍ",
+    "disciplines": {
+     "kyorugi": {
+      "peakScore": 586,
+      "medals": {
+       "silver": 0,
+       "bronze": 1,
+       "gold": 0
+      },
+      "avgScore": 586,
+      "matchesCount": 1,
+      "lastCompeteCategory": "kyorugi_younger_cadets_men_55plus",
+      "categories": {
+       "kyorugi_younger_cadets_men_55plus": {
+        "peakScore": 586,
+        "medals": {
+         "silver": 0,
+         "bronze": 1,
+         "gold": 0
+        },
+        "currentScore": 586,
+        "avgScore": 586,
+        "matchesCount": 1
+       }
+      }
+     }
+    }
+   }
+  },
+  "birthday": {
+   "__ts__": "2016-12-20T00:00:00+00:00"
+  },
+  "firstName": "juraj",
+  "createdAt": {
+   "__ts__": "2026-08-18T19:07:29.077000+00:00"
+  },
+  "lastName": "marcincak",
+  "displayName": "Juraj Marcinčák",
+  "gender": "male",
+  "country": "SVK"
+ },
+ "athletes/fpHWVnGrSlqZdnZcWihC": {
+  "lastNameDisplay": "Bačić",
+  "sports": {
+   "taekwondo": {
+    "rank": 3,
+    "totalMedals": 1,
+    "isPara": false,
+    "clubId": "wJJxJSTS34RQLjYIzeNQ",
+    "lastTournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+    "lastTournamentId": "9XiCXjwuf5xGSi9SaTvR",
+    "clubName": "Tkd Forteca Korčula",
+    "disciplines": {
+     "kyorugi": {
+      "peakScore": 620,
+      "medals": {
+       "silver": 1,
+       "bronze": 0,
+       "gold": 0
+      },
+      "avgScore": 613,
+      "lastCompeteCategory": "kyorugi_pupils_2_men_44plus",
+      "matchesCount": 2,
+      "categories": {
+       "kyorugi_pupils_2_men_44plus": {
+        "peakScore": 620,
+        "medals": {
+         "silver": 1,
+         "bronze": 0,
+         "gold": 0
+        },
+        "currentScore": 606,
+        "avgScore": 613,
+        "matchesCount": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "birthday": {
+   "__ts__": "2017-12-25T00:00:00+00:00"
+  },
+  "firstNameDisplay": "Toni",
+  "firstName": "toni",
+  "createdAt": {
+   "__ts__": "2026-11-03T08:08:10.475000+00:00"
+  },
+  "lastName": "bacic",
+  "displayName": "Toni Bačić",
+  "gender": "male",
+  "country": "CRO"
+ },
+ "athletes/n8ClgkZG5CZnyCkXO563": {
+  "lastNameDisplay": "Tulić",
+  "sports": {
+   "taekwondo": {
+    "rank": 4,
+    "totalMedals": 1,
+    "isPara": false,
+    "clubId": "wJJxJSTS34RQLjYIzeNQ",
+    "lastTournamentName": "18th International Ilyo Cup 2026 Kyorugi Day 2",
+    "lastTournamentId": "9XiCXjwuf5xGSi9SaTvR",
+    "clubName": "Tkd Forteca Korčula",
+    "disciplines": {
+     "kyorugi": {
+      "peakScore": 714,
+      "medals": {
+       "silver": 1,
+       "bronze": 0,
+       "gold": 0
+      },
+      "avgScore": 709,
+      "lastCompeteCategory": "kyorugi_younger_cadets_men_55plus",
+      "matchesCount": 2,
+      "categories": {
+       "kyorugi_younger_cadets_men_55plus": {
+        "peakScore": 714,
+        "medals": {
+         "silver": 1,
+         "bronze": 0,
+         "gold": 0
+        },
+        "currentScore": 704,
+        "avgScore": 709,
+        "matchesCount": 2
+       }
+      }
+     }
+    }
+   }
+  },
+  "birthday": {
+   "__ts__": "2015-01-09T00:00:00+00:00"
+  },
+  "firstNameDisplay": "Ante",
+  "firstName": "ante",
+  "createdAt": {
+   "__ts__": "2026-11-03T08:05:47.067000+00:00"
+  },
+  "lastName": "tulic",
+  "displayName": "Ante Tulić",
+  "gender": "male",
+  "country": "CRO"
+ }
+}

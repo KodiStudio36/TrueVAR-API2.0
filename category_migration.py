@@ -1,734 +1,557 @@
 #!/usr/bin/env python3
 """
-Migrate ONE tournament's poomsae category schema (tournament_categories/{id})
-and move its existing registrations into the new categories.
+fix_category_codes.py — repairs category codes that were written in the
+wrong format (e.g. "kyorugi_cadets_women_59plus" instead of
+"kyorugi_cadets_women_plus_59") everywhere TrueVAR stores them.
 
-    # 1. Dry run (default) — reads only, prints the plan, writes a local backup
-    python scripts/migrate_poomsae_categories.py TOURNAMENT_ID poomsae_categories.json
+The correct codes are rebuilt from the tournament's own schema
+(tournament_categories/{id}.categories), with exactly the rule in
+category-schema.js:
 
-    # 2. Apply it
-    python scripts/migrate_poomsae_categories.py TOURNAMENT_ID poomsae_categories.json --apply
+    {entryType}_{age}[_{belt}][_{para}]_{gender}[_{weight} | _plus_{topWeight}]
 
-    # 3. Undo (puts back schema, registrations, rosters, counts, draw)
-    python scripts/migrate_poomsae_categories.py TOURNAMENT_ID --restore backups/<file>.json
+Every stored code is checked against that list. A wrong one is mapped to
+the right one when there is exactly ONE match; anything it can't place is
+listed and left alone (add it with --map OLD=NEW).
 
-What it does
-------------
-* Backs up everything it touches BEFORE writing anything — to a local JSON
-  file AND to Firestore (tournament_categories_backups/{id}__{stamp}):
-  the category doc, every registration, every division roster,
-  meta/categoryCounts and meta/poomsaeDraw.
-* A registration is moved ONLY when its category no longer exists in the
-  new schema (minimal change). The new age division comes from the first
-  athlete's birth year (same rule as tournament.html); belt class, entry
-  type and gender are kept. Example: Individual Class A "Seniors over 30"
-  → under 40 / under 50 / over 50; Class B "Seniors under 40" → over 30.
-  Para pairs/teams split by para class → one mixed category per age.
-* Each move is its own Firestore transaction, written exactly like the
-  app's own move endpoint (old registration → status "moved" + movedTo,
-  new registration with movedFrom, roster entry moved with its original
-  members/registeredAt, categoryCounts -1/+1). Original registeredAt is
-  kept. Every written doc is tagged with migrationId.
-* Then writes the new schema, re-checks every active registration against
-  it, and corrects categoryCounts drift with Increment deltas.
-* Copies poomsae-draw pool assignments from the old age division to the new
-  one (e.g. seniors_over_30|class_a → seniors_under_40|class_a) when the new
-  key has none. An already generated draw is NOT redrawn — you'll be told.
+Recognised wrong spellings, for example for the open top of cadets women:
+    kyorugi_cadets_women_59plus   cadets_women_plus_59   kyorugi_cadets_women_+59
+    kyorugi_cadets_women_59+      kyorugi_cadets_women_over_59   …_plus59  …_59_plus
+and for a normal class: …_-59  …_59kg  …_u59  …_under_59  …_minus_59  …_59.0
+plus labels instead of codes (male/female, "Younger Cadets"), and a missing
+entry-type prefix.
 
-Safety stops (override with --force):
-* brackets already committed for the tournament (they reference the old
-  category codes);
-* registrations it cannot place (no birth year, no fitting division) —
-  listed in the plan; with --force those stay where they are.
+WHAT IT FIXES, per tournament
+    tournaments/{id}/registrations/{code}_{entryId}   doc id + categoryCode
+    tournaments/{id}/division_rosters/{age}           athletes.{code} map keys
+    tournaments/{id}/meta/categoryCounts              keys (recounted from the
+                                                      active registrations)
+    tournaments/{id}/brackets/*                       categoryCode
+    tournaments/{id}/results/{code}                   doc id + categoryCode
+    sports/{s}/disciplines/{d}/matches                categoryCode
+                                                      (where tournamentId == id)
+    sports/{s}/disciplines/{d}/performances           categoryCode (poomsae)
+    athletes/{id}  sports.{s}.disciplines.{d}.categories.{code} + lastCompeteCategory
+                   (only the athletes registered in the tournament)
 
-Run it while registration is closed (or nobody is registering): club
-registrations made under the old schema in the middle of the run would land
-in old category codes. The final check reports any that do.
+SAFE BY DEFAULT
+    Without --apply nothing is written: it prints every change it would make.
+    With --apply it first saves every document it will touch to a JSON backup
+    (backup_<tournament>_<time>.json), then writes.
+    Conflicts (e.g. the same entry already registered under the correct code
+    AND still active under the wrong one) are reported and skipped.
 
-Credentials: run from the backend root so infrastructure.firebase_client is
-importable, or pass --credentials service-account.json (or set
-GOOGLE_APPLICATION_CREDENTIALS).
+USAGE
+    pip install firebase-admin
+    export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+
+    python fix_category_codes.py --tournament <ID>            # dry run
+    python fix_category_codes.py --tournament <ID> --apply
+    python fix_category_codes.py --all                        # every tournament
+    python fix_category_codes.py --all --apply
+    python fix_category_codes.py --tournament <ID> --map kyorugi_cadets_woman_59=kyorugi_cadets_women_59
+    python fix_category_codes.py --restore backup_<ID>_<time>.json     # undo
+    python fix_category_codes.py --check-schema schema.json --codes a b c     # offline test
 """
-from __future__ import annotations
-
 import argparse
-import copy
 import datetime as dt
+import itertools
 import json
-import os
+import re
 import sys
-from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from collections import defaultdict
 
-SCRIPT_VERSION = "1"
+SPORT_KEY = "taekwondo"
 
-
-# ───────────────────────────── schema parsing ─────────────────────────────
-# Python port of parseCategories / resolveEligibleCategories in
-# tournament.html (poomsae: no weight dimension), including the per-class
-# `age_codes` and para rules.
-
-PARA_CATEGORIES = [
-    "P11", "P12", "P21", "P22", "P23", "P31", "P32", "P33", "P34", "P35",
-    "P41", "P42", "P43", "P44", "P45", "P51", "P52", "P53", "P60", "P72",
-]
-DEFAULT_PARA_CLASS_OPTIONS = [{"code": c.lower(), "label": c, "match_value": c} for c in PARA_CATEGORIES]
+# ═══════════════════════════════════════════════════════════════════════
+# Valid codes from the schema — Python port of category-schema.js flatten()
+# ═══════════════════════════════════════════════════════════════════════
+PARA_CATEGORIES = ["P11", "P12", "P21", "P22", "P23", "P31", "P32", "P33", "P34", "P35",
+                   "P41", "P42", "P43", "P44", "P45", "P51", "P52", "P53", "P60", "P72"]
+DEFAULT_PARA = [{"code": c.lower(), "label": c, "match_value": c} for c in PARA_CATEGORIES]
+IMPLICIT = {"code": "", "label": ""}
 
 
-def discipline_dimensions(categories: dict, sport: Optional[str], discipline: Optional[str]) -> List[dict]:
-    schemas = (categories or {}).get("sportSchemas") or {}
-    if not schemas:
+def weight_str(w) -> str:
+    if isinstance(w, float) and w.is_integer():
+        w = int(w)
+    return str(w)
+
+
+def para_classes(entry_opt: dict) -> list:
+    if entry_opt.get("requires_para") is False:
         return []
-    sport_key = sport if sport in schemas else next(iter(schemas))
-    discs = (schemas[sport_key] or {}).get("disciplines") or {}
-    if not discs:
+    explicit = entry_opt.get("para_class_options")
+    explicit = explicit if isinstance(explicit, list) else None
+    requires = (entry_opt.get("requires_para") is True
+                or str(entry_opt.get("code") or "").lower().startswith("para_")
+                or bool(explicit))
+    if not requires:
         return []
-    disc_key = discipline if discipline in discs else next(iter(discs))
-    return (discs[disc_key] or {}).get("dimensions") or []
+    return explicit if explicit is not None else DEFAULT_PARA
 
 
-def _same_para_mode(raw) -> Optional[str]:
-    if raw is True or raw == "class":
-        return "class"
-    if raw == "group":
-        return "group"
-    return None
+def flatten(dimensions: list) -> list:
+    """-> [{code, parts: {entry, age, belt, para, gender}, weight, plus}]"""
+    dims = {d.get("key"): d for d in dimensions or []}
+    entry_dim, age_dim, gender_dim, weight_dim = (dims.get(k) for k in ("entry_type", "age", "gender", "weight"))
+    entry_opts = (entry_dim or {}).get("options") or [{"code": "individual", "label": "Individual"}]
 
-
-def parse_entry_types(dimensions: List[dict]) -> Dict[str, dict]:
-    by_key = {d.get("key"): d for d in dimensions}
-    if "weight" in by_key:
-        raise SystemExit("This script handles poomsae schemas only (found a weight dimension).")
-    entry_dim, age_dim, gender_dim = by_key.get("entry_type"), by_key.get("age"), by_key.get("gender")
-    entry_opts = (entry_dim or {}).get("options") or [{"code": "individual", "label": "Individual", "participantCount": 1}]
-
-    out: Dict[str, dict] = {}
+    out = []
     for e in entry_opts:
-        age_opts = e.get("age_options") or (age_dim or {}).get("options") or []
-        gender_opts = e.get("gender_options") or (gender_dim or {}).get("options") or []
-        belts = e.get("belt_class_options") or [{"code": "", "label": "", "min": None, "max": None}]
-
-        explicit = e.get("para_class_options") if isinstance(e.get("para_class_options"), list) else None
-        code = e.get("code") or ""
-        requires_para = e.get("requires_para") is not False and bool(
-            e.get("requires_para") is True or code.lower().startswith("para_") or (explicit and len(explicit) > 0)
-        )
-        para_src = [] if not requires_para else (explicit if explicit is not None else DEFAULT_PARA_CLASS_OPTIONS)
-        paras = para_src or [{"code": "", "label": "", "match_value": None}]
-
-        classes = []
-        for b in belts:
-            for p in paras:
-                classes.append({
-                    "code": "_".join(x for x in [b.get("code"), p.get("code")] if x),
-                    "label": " ".join(x for x in [b.get("label"), p.get("label")] if x),
-                    "beltCode": b.get("code") or None,
-                    "paraCode": p.get("code") or None,
-                    "paraMatch": str(p["match_value"]).upper() if p.get("match_value") else None,
-                    "ageCodes": b.get("age_codes") if isinstance(b.get("age_codes"), list) else None,
-                })
-
-        divisions = []
-        for a in age_opts:
-            cls_here = [c for c in classes if not c["ageCodes"] or a["code"] in c["ageCodes"]]
-            if not cls_here or not gender_opts:
-                continue
-            divisions.append({
-                "code": a["code"], "label": a.get("label", a["code"]),
-                "min": a.get("min"), "max": a.get("max"),
-                "classes": cls_here, "genders": gender_opts,
-            })
-        out[code] = {
-            "code": code, "label": e.get("label", code),
-            "requiresPara": requires_para,
-            "sameParaClass": _same_para_mode(e.get("same_para_class")) if requires_para else None,
-            "divisions": divisions,
-        }
+        ages = e.get("age_options") or (age_dim or {}).get("options") or []
+        genders = e.get("gender_options") or (gender_dim or {}).get("options") or []
+        belts = e.get("belt_class_options") or [IMPLICIT]
+        paras = para_classes(e) or [IMPLICIT]
+        for a in ages:
+            for b in belts:
+                if isinstance(b.get("age_codes"), list) and a.get("code") not in b["age_codes"]:
+                    continue
+                for p in paras:
+                    for g in genders:
+                        base = "_".join(x for x in (a.get("code"), b.get("code"), p.get("code"), g.get("code")) if x)
+                        parts = {"entry": e, "age": a, "belt": b, "para": p, "gender": g}
+                        if weight_dim:
+                            ths = (weight_dim.get("thresholds_by") or {}).get(f"{a.get('code')}|{g.get('code')}") or []
+                            if not ths:
+                                continue
+                            for w in ths:
+                                out.append({"code": f"{e['code']}_{base}_{weight_str(w)}", "parts": parts,
+                                            "weight": weight_str(w), "plus": False})
+                            if weight_dim.get("open_top"):
+                                top = weight_str(ths[-1])
+                                out.append({"code": f"{e['code']}_{base}_plus_{top}", "parts": parts,
+                                            "weight": top, "plus": True})
+                        else:
+                            out.append({"code": f"{e['code']}_{base}", "parts": parts, "weight": None, "plus": False})
     return out
 
 
-def category_code(entry: dict, div: dict, cls: dict, gender: dict) -> str:
-    return f"{entry['code']}_" + "_".join(x for x in [div["code"], cls["code"], gender["code"]] if x)
+# ═══════════════════════════════════════════════════════════════════════
+# Wrong spelling -> right code
+# ═══════════════════════════════════════════════════════════════════════
+def slug(text) -> str:
+    s = re.sub(r"[^a-z0-9+\-]+", "_", str(text or "").lower())
+    return re.sub(r"_+", "_", s).strip("_")
 
 
-def category_label(entry: dict, div: dict, cls: dict, gender: dict) -> str:
-    return " · ".join(x for x in [entry["label"], div["label"], cls["label"], gender.get("label", "")] if x)
+def normalize_input(code: str) -> str:
+    s = str(code or "").strip().lower()
+    s = re.sub(r"[\s·]+", "_", s)                          # spaces / separators
+    s = re.sub(r"(\d+)\.0+(?!\d)", r"\1", s)               # 59.0 -> 59
+    s = re.sub(r"(\d)\s*kg", r"\1", s)                     # 59kg -> 59
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s
 
 
-def all_categories(entry_types: Dict[str, dict]) -> Dict[str, dict]:
-    """categoryCode → {entry, div, cls, gender, label}."""
-    cats = {}
-    for e in entry_types.values():
-        for d in e["divisions"]:
-            for c in d["classes"]:
-                for g in d["genders"]:
-                    cats[category_code(e, d, c, g)] = {
-                        "entry": e, "div": d, "cls": c, "gender": g,
-                        "label": category_label(e, d, c, g),
-                    }
-    return cats
+def weight_aliases(w: str, plus: bool) -> set:
+    if plus:
+        return {f"plus_{w}", f"{w}plus", f"{w}_plus", f"plus{w}", f"+{w}", f"{w}+", f"_+{w}",
+                f"over_{w}", f"over{w}", f"o{w}", f"above_{w}", f"plus_+{w}"}
+    return {w, f"-{w}", f"u{w}", f"u_{w}", f"under_{w}", f"minus_{w}", f"minus{w}", f"m{w}", f"_-{w}"}
 
 
-# ───────────────────────────── planning (pure) ─────────────────────────────
-
-def _birth_year(athlete: dict) -> Optional[int]:
-    b = (athlete or {}).get("birthday")
-    if hasattr(b, "year"):
-        return b.year
-    if isinstance(b, str) and len(b) >= 4 and b[:4].isdigit():
-        return int(b[:4])
-    if isinstance(b, dict) and "__ts__" in b:
-        return int(b["__ts__"][:4])
-    return None
-
-
-def _sport_data(athlete: dict, sport: Optional[str]) -> dict:
-    return ((athlete or {}).get("sports") or {}).get(sport) or {}
-
-
-def _para_key(athlete: dict, sport: Optional[str], mode: str) -> Optional[str]:
-    c = str(_sport_data(athlete, sport).get("paraCategory") or "").strip().upper()
-    if not c:
-        return None
-    return c[:2] if mode == "group" else c
-
-
-def _fits(div: dict, year: int) -> bool:
-    lo, hi = div.get("min"), div.get("max")
-    return (lo is None or year >= lo) and (hi is None or year <= hi)
-
-
-def _span(div: dict) -> int:
-    lo, hi = div.get("min"), div.get("max")
-    if lo is None or hi is None:
-        return 10 ** 6
-    return hi - lo
-
-
-def plan_migration(
-    registrations: Dict[str, dict],
-    athletes: Dict[str, dict],
-    new_entry_types: Dict[str, dict],
-    sport: Optional[str],
-) -> dict:
-    """
-    registrations: {docId: data} (all statuses); athletes: {athleteId: data}.
-    Returns {"moves": [...], "unchanged": n, "relabel": [...],
-             "unresolved": [...], "warnings": [...]}
-    """
-    new_cats = all_categories(new_entry_types)
-    moves, relabel, unresolved, warnings = [], [], [], []
-    unchanged = 0
-    taken = {doc_id for doc_id, r in registrations.items() if r.get("status", "active") == "active"}
-
-    for doc_id, r in sorted(registrations.items()):
-        if r.get("status", "active") != "active":
-            continue
-        old_code = r.get("categoryCode") or ""
-        ids = list(r.get("athleteIds") or [])
-        entry_id = "-".join(sorted(ids))
-        members = [athletes.get(a) for a in ids]
-        entry = new_entry_types.get(r.get("entryTypeCode") or "")
-
-        # Same-para-class check (report only — staff decide what to do).
-        if entry and entry["sameParaClass"] and len(ids) > 1:
-            keys = [_para_key(m, sport, entry["sameParaClass"]) for m in members]
-            if not all(keys) or len(set(keys)) > 1:
-                got = [str(_sport_data(m, sport).get("paraCategory") or "—") for m in members]
-                warnings.append(f"{doc_id}: members have different/missing para classes ({', '.join(got)}) — "
-                                f"allowed to stay, but new club registrations like this are now rejected.")
-
-        if old_code in new_cats:
-            if new_cats[old_code]["label"] != r.get("categoryLabel"):
-                relabel.append({"docId": doc_id, "label": new_cats[old_code]["label"]})
-            unchanged += 1
-            continue
-
-        def fail(reason):
-            unresolved.append({"docId": doc_id, "categoryCode": old_code, "reason": reason})
-
-        if not entry:
-            fail(f"entry type '{r.get('entryTypeCode')}' is not in the new schema")
-            continue
-        if any(m is None for m in members):
-            fail("an athlete document is missing")
-            continue
-
-        belt = r.get("beltClassCode") or None
-        # Para class: keep the old one when the new schema still splits by
-        # class, otherwise derive from the athletes; drop it when unsplit.
-        split_para = any(c["paraCode"] for d in entry["divisions"] for c in d["classes"])
-        para = None
-        if split_para:
-            para = r.get("paraClassCode")
-            if not para:
-                pcs = {str(_sport_data(m, sport).get("paraCategory") or "").lower() for m in members}
-                para = pcs.pop() if len(pcs) == 1 else None
-            if not para:
-                fail("cannot tell the para class")
-                continue
-
-        def class_in(div):
-            for c in div["classes"]:
-                if (c["beltCode"] or None) == belt and (c["paraCode"] or None) == (para or None):
-                    return c
-            return None
-
-        def gender_in(div):
-            gs = div["genders"]
-            same = [g for g in gs if g["code"] == r.get("genderCode")]
-            if same:
-                return same[0]
-            return gs[0] if len(gs) == 1 else None
-
-        year = _birth_year(members[0])
-        candidates = [d for d in entry["divisions"] if class_in(d) and gender_in(d)]
-        if year is not None:
-            fitting = [d for d in candidates if _fits(d, year)]
-        else:
-            fitting = [d for d in candidates if d["code"] == r.get("ageCode")]
-        if not fitting:
-            fail("no age division in the new schema fits "
-                 + (f"birth year {year}" if year is not None else "(no birth year on file)"))
-            continue
-        same_age = [d for d in fitting if d["code"] == r.get("ageCode")]
-        if same_age:
-            div = same_age[0]
-        else:
-            fitting.sort(key=_span)
-            if len(fitting) > 1 and _span(fitting[0]) == _span(fitting[1]):
-                fail("more than one age division fits equally: " + ", ".join(d["code"] for d in fitting))
-                continue
-            div = fitting[0]
-
-        cls, gender = class_in(div), gender_in(div)
-        new_code = category_code(entry, div, cls, gender)
-        new_doc_id = f"{new_code}_{entry_id}"
-        if new_doc_id in taken:
-            fail(f"target {new_doc_id} is already registered")
-            continue
-        taken.add(new_doc_id)
-        moves.append({
-            "oldDocId": doc_id, "newDocId": new_doc_id, "entryId": entry_id,
-            "entryTypeCode": entry["code"],
-            "oldCategoryCode": old_code, "newCategoryCode": new_code,
-            "oldAgeCode": r.get("ageCode"), "newAgeCode": div["code"],
-            "beltClassCode": cls["beltCode"], "paraClassCode": cls["paraCode"],
-            "genderCode": gender["code"], "categoryLabel": new_cats[new_code]["label"],
-            "birthYear": year,
-            "names": ", ".join(
-                (m.get("displayName") or f"{m.get('firstName', '')} {m.get('lastName', '')}".strip()) for m in members),
-        })
-
-    return {"moves": moves, "unchanged": unchanged, "relabel": relabel,
-            "unresolved": unresolved, "warnings": warnings}
-
-
-def draw_copies(draw: dict, moves: List[dict]) -> Dict[str, Dict[str, Any]]:
-    """New poomsae-draw keys to add (never overwrites an existing key)."""
-    out: Dict[str, Dict[str, Any]] = defaultdict(dict)
-    for m in moves:
-        belt = m["beltClassCode"] or ""
-        old_k, new_k = f"{m['oldAgeCode']}|{belt}", f"{m['newAgeCode']}|{belt}"
-        for field in ("assignments", "excludedGroups"):
-            src = (draw or {}).get(field) or {}
-            if old_k in src and new_k not in src and new_k not in out[field]:
-                out[field][new_k] = src[old_k]
-        src = (draw or {}).get("excludedRows") or {}
-        entry = m["entryTypeCode"]
-        old_r, new_r = f"{entry}|{old_k}", f"{entry}|{new_k}"
-        if old_r in src and new_r not in src and new_r not in out["excludedRows"]:
-            out["excludedRows"][new_r] = src[old_r]
-    return {k: v for k, v in out.items() if v}
-
-
-# ───────────────────────────── serialisation ─────────────────────────────
-
-def to_jsonable(v):
-    if isinstance(v, dict):
-        return {k: to_jsonable(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [to_jsonable(x) for x in v]
-    if isinstance(v, dt.datetime):
-        return {"__ts__": v.isoformat()}
-    if v is not None and not isinstance(v, (str, int, float, bool)):
-        return {"__repr__": repr(v)}  # GeoPoint / reference etc. — not used here
-    return v
-
-
-def from_jsonable(v):
-    if isinstance(v, dict):
-        if set(v) == {"__ts__"}:
-            return dt.datetime.fromisoformat(v["__ts__"])
-        return {k: from_jsonable(x) for k, x in v.items()}
-    if isinstance(v, list):
-        return [from_jsonable(x) for x in v]
-    return v
-
-
-# ───────────────────────────── Firestore I/O ─────────────────────────────
-
-def connect(credentials_path: Optional[str]):
-    if not credentials_path:
-        try:
-            sys.path.insert(0, os.getcwd())
-            from infrastructure.firebase_client import init_firestore  # type: ignore
-            return init_firestore()
-        except Exception:
-            pass
-    import firebase_admin
-    from firebase_admin import credentials, firestore
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(credentials_path) if credentials_path else credentials.ApplicationDefault()
-        firebase_admin.initialize_app(cred)
-    return firestore.client()
-
-
-def fs():
-    from firebase_admin import firestore
-    return firestore
-
-
-def load_state(db, tid: str) -> dict:
-    t_ref = db.collection("tournaments").document(tid)
-    t = t_ref.get()
-    if not t.exists:
-        raise SystemExit(f"Tournament {tid} not found.")
-    cat = db.collection("tournament_categories").document(tid).get()
-    meta = t_ref.collection("meta")
-    counts = meta.document("categoryCounts").get()
-    draw = meta.document("poomsaeDraw").get()
-    return {
-        "tournament": t.to_dict() or {},
-        "categoryDoc": cat.to_dict() if cat.exists else None,
-        "registrations": {d.id: d.to_dict() for d in t_ref.collection("registrations").stream()},
-        "rosters": {d.id: d.to_dict() for d in t_ref.collection("division_rosters").stream()},
-        "categoryCounts": counts.to_dict() if counts.exists else None,
-        "poomsaeDraw": draw.to_dict() if draw.exists else None,
-        "bracketCount": sum(1 for _ in t_ref.collection("brackets").limit(1).stream()),
-    }
-
-
-def load_athletes(db, registrations: Dict[str, dict]) -> Dict[str, dict]:
-    ids = sorted({a for r in registrations.values() if r.get("status", "active") == "active"
-                  for a in (r.get("athleteIds") or [])})
-    refs = [db.collection("athletes").document(a) for a in ids]
-    out = {}
-    for i in range(0, len(refs), 100):
-        for snap in db.get_all(refs[i:i + 100]):
-            if snap.exists:
-                out[snap.id] = snap.to_dict()
+def option_aliases(opt: dict, allow_empty: bool = False) -> set:
+    out = {slug(opt.get("code")), slug(opt.get("label")), slug(opt.get("match_value"))}
+    out.discard("")
+    if allow_empty or not opt.get("code"):
+        out.add("")
     return out
 
 
-def write_backup(db, tid: str, state: dict, migration_id: str, backup_dir: str) -> str:
-    os.makedirs(backup_dir, exist_ok=True)
-    payload = {
-        "scriptVersion": SCRIPT_VERSION, "tournamentId": tid, "migrationId": migration_id,
-        "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
-        **{k: state[k] for k in ("categoryDoc", "registrations", "rosters", "categoryCounts", "poomsaeDraw")},
-    }
-    path = os.path.join(backup_dir, f"{tid}__{migration_id}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(to_jsonable(payload), f, ensure_ascii=False, indent=1)
-    return path
+class CodeFixer:
+    def __init__(self, dimensions: list, manual: dict | None = None):
+        self.leaves = flatten(dimensions)
+        self.valid = {l["code"] for l in self.leaves}
+        alias_to = defaultdict(set)
+        for leaf in self.leaves:
+            p = leaf["parts"]
+            ws = weight_aliases(leaf["weight"], leaf["plus"]) if leaf["weight"] is not None else {""}
+            for combo in itertools.product(
+                option_aliases(p["entry"], allow_empty=True),
+                option_aliases(p["age"]),
+                option_aliases(p["belt"]),
+                option_aliases(p["para"]),
+                option_aliases(p["gender"]),
+                ws,
+            ):
+                alias = "_".join(x for x in combo if x)
+                alias = re.sub(r"_+", "_", alias).strip("_")
+                alias_to[alias].add(leaf["code"])
+        # Only unambiguous spellings; a valid code always maps to itself.
+        self.alias = {a: next(iter(c)) for a, c in alias_to.items() if len(c) == 1}
+        for v in self.valid:
+            self.alias[v] = v
+        self.manual = manual or {}
+        self.unknown: set = set()
 
-
-def backup_categories_in_firestore(db, tid: str, state: dict, migration_id: str) -> str:
-    doc_id = f"{tid}__{migration_id}"
-    db.collection("tournament_categories_backups").document(doc_id).set({
-        "tournamentId": tid, "migrationId": migration_id,
-        "categories": (state["categoryDoc"] or {}).get("categories"),
-        "categoryDoc": state["categoryDoc"],
-        "backedUpAt": fs().SERVER_TIMESTAMP,
-    })
-    return doc_id
-
-
-def apply_move(db, tid: str, m: dict, migration_id: str) -> None:
-    firestore = fs()
-    t_ref = db.collection("tournaments").document(tid)
-    regs = t_ref.collection("registrations")
-    old_ref, new_ref = regs.document(m["oldDocId"]), regs.document(m["newDocId"])
-    old_roster = t_ref.collection("division_rosters").document(m["oldAgeCode"])
-    new_roster = t_ref.collection("division_rosters").document(m["newAgeCode"])
-    counts_ref = t_ref.collection("meta").document("categoryCounts")
-    tx = db.transaction()
-
-    @firestore.transactional
-    def _run(tx):
-        old = old_ref.get(transaction=tx)
-        if not old.exists:
-            raise RuntimeError("old registration vanished")
-        od = old.to_dict()
-        if od.get("status", "active") != "active" or od.get("categoryCode") != m["oldCategoryCode"]:
-            raise RuntimeError("old registration changed since the plan — re-run the dry run")
-        new = new_ref.get(transaction=tx)
-        if new.exists and new.to_dict().get("status", "active") == "active":
-            raise RuntimeError("target already registered")
-        roster_snap = old_roster.get(transaction=tx)
-        roster_entry = (((roster_snap.to_dict() or {}).get("athletes") or {})
-                        .get(m["oldCategoryCode"]) or {}).get(m["entryId"]) if roster_snap.exists else None
-        new_roster_snap = new_roster.get(transaction=tx) if new_roster.id != old_roster.id else roster_snap
-
-        nd = dict(od)
-        nd.update({
-            "ageCode": m["newAgeCode"], "beltClassCode": m["beltClassCode"],
-            "paraClassCode": m["paraClassCode"], "genderCode": m["genderCode"],
-            "categoryCode": m["newCategoryCode"], "categoryLabel": m["categoryLabel"],
-            "status": "active", "movedFrom": old_ref.id, "migrationId": migration_id,
-            "migratedAt": firestore.SERVER_TIMESTAMP,
-        })
-        nd.pop("movedTo", None)
-        tx.set(new_ref, nd)
-        tx.set(old_ref, {"status": "moved", "movedTo": new_ref.id, "migrationId": migration_id}, merge=True)
-
-        old_path = f"athletes.{m['oldCategoryCode']}.{m['entryId']}"
-        new_path = f"athletes.{m['newCategoryCode']}.{m['entryId']}"
-        entry = roster_entry if roster_entry is not None else {"members": []}
-        if new_roster.id == old_roster.id:
-            if roster_snap.exists:
-                upd = {new_path: entry}
-                if roster_entry is not None:
-                    upd[old_path] = firestore.DELETE_FIELD
-                tx.update(old_roster, upd)
-            else:
-                tx.set(new_roster, {"athletes": {m["newCategoryCode"]: {m["entryId"]: entry}}}, merge=True)
-        else:
-            if roster_entry is not None:
-                tx.update(old_roster, {old_path: firestore.DELETE_FIELD})
-            tx.set(new_roster, {"athletes": {m["newCategoryCode"]: {m["entryId"]: entry}}}, merge=True)
-
-        tx.set(counts_ref, {
-            m["oldCategoryCode"]: firestore.Increment(-1),
-            m["newCategoryCode"]: firestore.Increment(1),
-        }, merge=True)
-
-    _run(tx)
-
-
-def fix_counts(db, tid: str) -> Dict[str, int]:
-    """Make categoryCounts equal the number of active registrations (deltas only)."""
-    firestore = fs()
-    t_ref = db.collection("tournaments").document(tid)
-    counts_ref = t_ref.collection("meta").document("categoryCounts")
-    actual = Counter(d.to_dict().get("categoryCode") for d in t_ref.collection("registrations").stream()
-                     if d.to_dict().get("status", "active") == "active")
-    stored = (counts_ref.get().to_dict() or {})
-    deltas = {}
-    for code in set(actual) | set(stored):
+    def fix(self, code):
+        """-> correct code, or None when it can't be placed (left alone)."""
         if not code:
-            continue
-        have = stored.get(code, 0) if isinstance(stored.get(code, 0), (int, float)) else 0
-        if actual.get(code, 0) != have:
-            deltas[code] = actual.get(code, 0) - have
-    if deltas:
-        counts_ref.set({k: firestore.Increment(v) for k, v in deltas.items()}, merge=True)
-    return deltas
+            return None
+        if code in self.manual:
+            return self.manual[code]
+        if code in self.valid:
+            return code
+        hit = self.alias.get(normalize_input(code))
+        if hit is None:
+            self.unknown.add(code)
+        return hit
+
+    def changed(self, code):
+        """-> new code when `code` is wrong and fixable, else None."""
+        new = self.fix(code)
+        return new if new and new != code else None
 
 
-def restore(db, tid: str, path: str) -> None:
-    with open(path, encoding="utf-8") as f:
-        b = from_jsonable(json.load(f))
-    if b.get("tournamentId") != tid:
-        raise SystemExit("Backup belongs to another tournament.")
+# ═══════════════════════════════════════════════════════════════════════
+# Firestore
+# ═══════════════════════════════════════════════════════════════════════
+def fp(*parts) -> str:
+    """Field path that is safe for map keys with + - etc."""
+    from google.cloud.firestore_v1.field_path import FieldPath
+    return FieldPath(*parts).to_api_repr()
+
+
+def jsonable(v):
+    if isinstance(v, dict):
+        return {k: jsonable(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [jsonable(x) for x in v]
+    if hasattr(v, "isoformat"):
+        return {"__ts__": v.isoformat()}
+    if hasattr(v, "path") and hasattr(v, "id"):   # DocumentReference
+        return f"ref:{v.path}"
+    return v
+
+
+class Plan:
+    """Collected writes + what they replace, applied in batches."""
+
+    def __init__(self, db):
+        self.db = db
+        self.ops = []        # (kind, ref, data)
+        self.backup = {}     # path -> original data
+        self.log = []
+        self.conflicts = []
+
+    def keep(self, snap):
+        if snap.reference.path not in self.backup:
+            self.backup[snap.reference.path] = jsonable(snap.to_dict()) if snap.exists else None
+
+    def add(self, kind, ref, data=None):
+        self.ops.append((kind, ref, data))
+
+    def apply(self):
+        from firebase_admin import firestore  # noqa: F401
+        for i in range(0, len(self.ops), 400):
+            batch = self.db.batch()
+            for kind, ref, data in self.ops[i:i + 400]:
+                if kind == "set":
+                    batch.set(ref, data)
+                elif kind == "update":
+                    batch.update(ref, data)
+                elif kind == "delete":
+                    batch.delete(ref)
+            batch.commit()
+
+
+def fix_tournament(db, tid: str, manual: dict, apply: bool) -> dict:
+    from firebase_admin import firestore
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
     t_ref = db.collection("tournaments").document(tid)
-    mig = b.get("migrationId")
-    writes: List[Tuple[str, Any, Optional[dict]]] = []
+    t_snap = t_ref.get()
+    if not t_snap.exists:
+        print(f"[{tid}] tournament not found — skipped")
+        return {}
+    t = t_snap.to_dict() or {}
+    sport = str(t.get("sport") or SPORT_KEY).lower()
+    discipline = str(t.get("discipline") or "").lower()
+    title = t.get("title") or tid
 
-    if b.get("categoryDoc") is not None:
-        writes.append(("set", db.collection("tournament_categories").document(tid), b["categoryDoc"]))
-    regs = t_ref.collection("registrations")
-    current = {d.id: d.to_dict() for d in regs.stream()}
-    for doc_id, data in b["registrations"].items():
-        writes.append(("set", regs.document(doc_id), data))
-    rosters = t_ref.collection("division_rosters")
-    stray_roster_paths: Dict[str, List[str]] = defaultdict(list)
-    for doc_id, data in current.items():
-        if doc_id not in b["registrations"] and data.get("migrationId") == mig:
-            writes.append(("delete", regs.document(doc_id), None))
-            entry_id = "-".join(sorted(data.get("athleteIds") or []))
-            if data.get("ageCode") not in b["rosters"]:
-                # roster doc created by the migration → take the entry out again
-                stray_roster_paths[data["ageCode"]].append(f"athletes.{data['categoryCode']}.{entry_id}")
-    for doc_id, data in b["rosters"].items():
-        writes.append(("set", rosters.document(doc_id), data))
-    meta = t_ref.collection("meta")
-    if b.get("categoryCounts") is not None:
-        writes.append(("set", meta.document("categoryCounts"), b["categoryCounts"]))
-    if b.get("poomsaeDraw") is not None:
-        writes.append(("set", meta.document("poomsaeDraw"), b["poomsaeDraw"]))
+    cat_snap = db.collection("tournament_categories").document(tid).get()
+    cats = (cat_snap.to_dict() or {}).get("categories") or {} if cat_snap.exists else {}
+    schemas = (cats.get("sportSchemas") or {})
+    sport_schema = schemas.get(sport) or (next(iter(schemas.values())) if schemas else {})
+    disciplines = sport_schema.get("disciplines") or {}
+    disc_schema = disciplines.get(discipline) or (next(iter(disciplines.values())) if disciplines else None)
+    if not disc_schema:
+        print(f"[{tid}] {title}: no category schema — skipped")
+        return {}
+    discipline = discipline or disc_schema.get("key") or ""
+    fixer = CodeFixer(disc_schema.get("dimensions") or [], manual)
+    plan = Plan(db)
+    print(f"\n══ {title}  ({tid})  {sport}/{discipline}  — {len(fixer.valid)} valid codes")
 
-    for i in range(0, len(writes), 400):
-        batch = db.batch()
-        for op, ref, data in writes[i:i + 400]:
-            batch.set(ref, data) if op == "set" else batch.delete(ref)
-        batch.commit()
-    firestore = fs()
-    for age_code, paths in stray_roster_paths.items():
-        ref = rosters.document(age_code)
-        if ref.get().exists:
-            ref.update({p: firestore.DELETE_FIELD for p in paths})
-    print(f"Restored {len(writes)} documents from {path}.")
-    print("Note: rosters/registrations created AFTER the migration in new age divisions are not touched,")
-    print("      and registrations made after the migration in restored roster docs were overwritten.")
+    # ── registrations ───────────────────────────────────────────────────
+    regs = {s.id: s for s in t_ref.collection("registrations").stream()}
+    active_by_code = defaultdict(int)
+    athlete_ids = set()
+    final_regs = {}  # doc id -> data, after the fix (for recounting)
+    for rid, snap in regs.items():
+        r = snap.to_dict() or {}
+        athlete_ids.update(r.get("athleteIds") or [])
+        code = r.get("categoryCode")
+        entry_id = "-".join(sorted(r.get("athleteIds") or []))
+        if not entry_id and code and rid.startswith(code + "_"):
+            entry_id = rid[len(code) + 1:]
+        # The code may be wrong in the field, the doc id, or both.
+        id_code = rid[: -len(entry_id) - 1] if entry_id and rid.endswith("_" + entry_id) else None
+        canon = fixer.fix(code) or fixer.fix(id_code)
+        if not canon or not entry_id:
+            final_regs[rid] = r
+            continue
+        new_id = f"{canon}_{entry_id}"
+        if new_id == rid and code == canon:
+            final_regs[rid] = r
+            continue
+        new_data = {**r, "categoryCode": canon}
+        if new_id == rid:
+            plan.keep(snap)
+            plan.add("update", snap.reference, {"categoryCode": canon})
+            plan.log.append(f"registration {rid}: categoryCode {code} -> {canon}")
+            final_regs[rid] = new_data
+            continue
+        target = regs.get(new_id)
+        active = r.get("status", "active") == "active"
+        if target is not None:
+            t_active = (target.to_dict() or {}).get("status", "active") == "active"
+            if active and t_active:
+                plan.conflicts.append(f"registration {rid}: same entry already active as {new_id} — left as is")
+                final_regs[rid] = r
+                continue
+            if not active:
+                plan.keep(snap)
+                plan.add("delete", snap.reference)
+                plan.log.append(f"registration {rid}: withdrawn duplicate of {new_id} — deleted")
+                continue
+            plan.keep(target)  # active wrong one replaces an inactive right one
+        plan.keep(snap)
+        new_ref = t_ref.collection("registrations").document(new_id)
+        if target is None:
+            plan.backup.setdefault(new_ref.path, None)
+        plan.add("set", new_ref, new_data)
+        plan.add("delete", snap.reference)
+        plan.log.append(f"registration {rid} -> {new_id}")
+        final_regs[new_id] = new_data
+    for r in final_regs.values():
+        if r.get("status", "active") == "active" and r.get("categoryCode"):
+            active_by_code[r["categoryCode"]] += 1
+
+    # ── division rosters ────────────────────────────────────────────────
+    for snap in t_ref.collection("division_rosters").stream():
+        athletes = (snap.to_dict() or {}).get("athletes") or {}
+        updates = {}
+        for code, entries in athletes.items():
+            canon = fixer.changed(code)
+            if not canon:
+                continue
+            existing = athletes.get(canon) or {}
+            for entry_id, entry in (entries or {}).items():
+                if entry_id in existing:
+                    plan.conflicts.append(f"roster {snap.id}: {entry_id} in both {code} and {canon} — kept {canon}")
+                    continue
+                updates[fp("athletes", canon, entry_id)] = entry
+            updates[fp("athletes", code)] = firestore.DELETE_FIELD
+            plan.log.append(f"roster {snap.id}: {code} -> {canon} ({len(entries or {})} entries)")
+        if updates:
+            plan.keep(snap)
+            plan.add("update", snap.reference, updates)
+
+    # ── category counts (recounted from active registrations) ───────────
+    counts_ref = t_ref.collection("meta").document("categoryCounts")
+    counts_snap = counts_ref.get()
+    counts = counts_snap.to_dict() or {} if counts_snap.exists else {}
+    updates = {}
+    touched = set()
+    for code in counts:
+        canon = fixer.changed(code)
+        if canon:
+            updates[fp(code)] = firestore.DELETE_FIELD
+            touched.add(canon)
+            plan.log.append(f"categoryCounts: {code} ({counts[code]}) -> {canon}")
+    for canon in touched:
+        updates[fp(canon)] = active_by_code.get(canon, 0)
+    if updates:
+        plan.keep(counts_snap)
+        plan.add("update", counts_ref, updates)
+
+    # ── brackets ────────────────────────────────────────────────────────
+    for snap in t_ref.collection("brackets").stream():
+        code = (snap.to_dict() or {}).get("categoryCode")
+        canon = fixer.changed(code)
+        if canon:
+            plan.keep(snap)
+            plan.add("update", snap.reference, {"categoryCode": canon})
+            plan.log.append(f"bracket {snap.id}: {code} -> {canon}")
+
+    # ── results/{code} ──────────────────────────────────────────────────
+    results = {s.id: s for s in t_ref.collection("results").stream()}
+    for rid, snap in results.items():
+        data = snap.to_dict() or {}
+        canon = fixer.changed(rid) or fixer.changed(data.get("categoryCode"))
+        if not canon:
+            continue
+        if canon != rid and canon in results:
+            plan.conflicts.append(f"results {rid}: {canon} already exists — old one deleted, "
+                                  f"re-run 'compute results' to rebuild")
+            plan.keep(snap)
+            plan.add("delete", snap.reference)
+            continue
+        plan.keep(snap)
+        new_ref = t_ref.collection("results").document(canon)
+        plan.backup.setdefault(new_ref.path, None)
+        plan.add("set", new_ref, {**data, "categoryCode": canon})
+        if canon != rid:
+            plan.add("delete", snap.reference)
+        plan.log.append(f"results {rid} -> {canon}")
+
+    # ── matches + performances ─────────────────────────────────────────
+    disc_ref = db.collection("sports").document(sport).collection("disciplines").document(discipline)
+    for coll in ("matches", "performances"):
+        q = disc_ref.collection(coll).where(filter=FieldFilter("tournamentId", "==", tid))
+        n = 0
+        for snap in q.stream():
+            code = (snap.to_dict() or {}).get("categoryCode")
+            canon = fixer.changed(code)
+            if canon:
+                plan.keep(snap)
+                plan.add("update", snap.reference, {"categoryCode": canon})
+                n += 1
+                plan.log.append(f"{'match' if coll == 'matches' else 'performance'} {snap.id}: {code} -> {canon}")
+
+    # ── athlete stats (ELO per category) ───────────────────────────────
+    ids = sorted(athlete_ids)
+    for i in range(0, len(ids), 100):
+        refs = [db.collection("athletes").document(a) for a in ids[i:i + 100]]
+        for snap in db.get_all(refs):
+            if not snap.exists:
+                continue
+            d = ((((snap.to_dict() or {}).get("sports") or {}).get(sport) or {})
+                 .get("disciplines") or {}).get(discipline) or {}
+            base = ("sports", sport, "disciplines", discipline)
+            cats_map = d.get("categories") or {}
+            updates = {}
+            for code, stats in cats_map.items():
+                canon = fixer.changed(code)
+                if not canon:
+                    continue
+                if canon in cats_map:
+                    plan.conflicts.append(f"athlete {snap.id}: stats under both {code} and {canon} — not merged")
+                    continue
+                updates[fp(*base, "categories", canon)] = stats
+                updates[fp(*base, "categories", code)] = firestore.DELETE_FIELD
+                plan.log.append(f"athlete {snap.id}: stats {code} -> {canon}")
+            last = d.get("lastCompeteCategory")
+            canon = fixer.changed(last)
+            if canon:
+                updates[fp(*base, "lastCompeteCategory")] = canon
+                plan.log.append(f"athlete {snap.id}: lastCompeteCategory {last} -> {canon}")
+            if updates:
+                plan.keep(snap)
+                plan.add("update", snap.reference, updates)
+
+    # ── report ─────────────────────────────────────────────────────────
+    for line in plan.log:
+        print("  ✎", line)
+    for line in plan.conflicts:
+        print("  ⚠", line)
+    if fixer.unknown:
+        print("  ? codes not in this tournament's schema (left alone — use --map OLD=NEW):")
+        for c in sorted(fixer.unknown):
+            print("      ", c)
+    print(f"  → {len(plan.log)} change(s), {len(plan.conflicts)} conflict(s), {len(fixer.unknown)} unknown code(s)")
+
+    if apply and plan.ops:
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = f"backup_{tid}_{stamp}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(plan.backup, f, ensure_ascii=False, indent=1)
+        print(f"  backup written: {path}  ({len(plan.backup)} docs)")
+        plan.apply()
+        print(f"  ✓ applied {len(plan.ops)} write(s)")
+    elif plan.ops:
+        print("  (dry run — nothing written; add --apply)")
+    return {"changes": len(plan.log), "conflicts": len(plan.conflicts), "unknown": sorted(fixer.unknown)}
 
 
-# ───────────────────────────── reporting ─────────────────────────────
-
-def print_plan(plan: dict, old_cats: Dict[str, dict], new_cats: Dict[str, dict], verbose: bool = False) -> None:
-    removed = sorted(set(old_cats) - set(new_cats))
-    added = sorted(set(new_cats) - set(old_cats))
-    print(f"\nSchema: {len(old_cats)} → {len(new_cats)} categories "
-          f"({len(added)} new, {len(removed)} no longer offered; --verbose lists them)")
-    if verbose:
-        for c in added:
-            print(f"  + {c}")
-        for c in removed:
-            print(f"  - {c}")
-
-    print(f"\nRegistrations: {plan['unchanged']} stay, {len(plan['moves'])} move, "
-          f"{len(plan['unresolved'])} cannot be placed")
-    by_pair = defaultdict(list)
-    for m in plan["moves"]:
-        by_pair[(m["oldCategoryCode"], m["newCategoryCode"])].append(m)
-    for (o, n), ms in sorted(by_pair.items()):
-        print(f"\n  {o}\n    → {n}  ({len(ms)})")
-        for m in ms:
-            print(f"      · {m['names']}  (born {m['birthYear'] or '?'})")
-    if plan["relabel"]:
-        print(f"\n  {len(plan['relabel'])} registration label(s) refreshed in place")
-    if plan["unresolved"]:
-        print("\n  CANNOT PLACE (left where they are with --force):")
-        for u in plan["unresolved"]:
-            print(f"    ! {u['docId']}: {u['reason']}")
-    if plan["warnings"]:
-        print("\n  Warnings:")
-        for w in plan["warnings"]:
-            print(f"    ~ {w}")
-
-
-def main(argv=None) -> int:
+def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("tournament_id")
-    ap.add_argument("schema_file", nargs="?", help="new categories JSON ({\"categories\": {...}} or the categories object)")
-    ap.add_argument("--apply", action="store_true", help="write changes (default is a dry run)")
-    ap.add_argument("--force", action="store_true", help="continue despite committed brackets / unplaceable entries")
-    ap.add_argument("--restore", metavar="BACKUP_JSON", help="undo a migration from its backup file")
-    ap.add_argument("--credentials", help="service-account JSON (otherwise app config / ADC)")
-    ap.add_argument("--backup-dir", default="backups")
-    ap.add_argument("--verbose", action="store_true", help="list every added/removed category code")
-    args = ap.parse_args(argv)
+    ap.add_argument("--tournament", action="append", default=[], help="tournament id (repeatable)")
+    ap.add_argument("--all", action="store_true", help="every tournament")
+    ap.add_argument("--apply", action="store_true", help="actually write (default: dry run)")
+    ap.add_argument("--map", action="append", default=[], metavar="OLD=NEW", help="manual fix for one code")
+    ap.add_argument("--cred", help="service account JSON (default: GOOGLE_APPLICATION_CREDENTIALS)")
+    ap.add_argument("--restore", metavar="BACKUP", help="put back every doc from a backup_*.json file")
+    ap.add_argument("--check-schema", metavar="FILE", help="offline: schema JSON to test codes against")
+    ap.add_argument("--codes", nargs="*", default=[], help="offline: codes to test with --check-schema")
+    args = ap.parse_args()
 
-    db = connect(args.credentials)
-    tid = args.tournament_id
+    manual = {}
+    for m in args.map:
+        old, _, new = m.partition("=")
+        if not new:
+            sys.exit(f"--map needs OLD=NEW, got {m!r}")
+        manual[old.strip()] = new.strip()
+
+    if args.check_schema:
+        with open(args.check_schema, encoding="utf-8") as f:
+            data = json.load(f)
+        data = data.get("categories", data)
+        sport = next(iter(data["sportSchemas"].values()))
+        for disc in sport["disciplines"].values():
+            fixer = CodeFixer(disc["dimensions"], manual)
+            print(f"{disc.get('key')}: {len(fixer.valid)} valid codes")
+            for c in args.codes:
+                print(f"  {c:45} -> {fixer.fix(c)}")
+        return
 
     if args.restore:
-        if not args.apply:
-            print("Restore is destructive — add --apply to confirm.")
-            return 1
-        restore(db, tid, args.restore)
-        return 0
+        import firebase_admin
+        from firebase_admin import credentials, firestore
+        firebase_admin.initialize_app(credentials.Certificate(args.cred) if args.cred else None)
+        db = firestore.client()
+        with open(args.restore, encoding="utf-8") as f:
+            backup = json.load(f)
+        def revive(v):
+            if isinstance(v, dict):
+                if set(v) == {"__ts__"}:
+                    return dt.datetime.fromisoformat(v["__ts__"])
+                return {k: revive(x) for k, x in v.items()}
+            if isinstance(v, list):
+                return [revive(x) for x in v]
+            return v
+        items = [(p, revive(d)) for p, d in backup.items()]
+        for i in range(0, len(items), 400):
+            batch = db.batch()
+            for path, data in items[i:i + 400]:
+                ref = db.document(path)
+                if data is None:
+                    batch.delete(ref)   # didn't exist before the fix
+                else:
+                    batch.set(ref, data)
+            batch.commit()
+        print(f"Restored {len(items)} doc(s) from {args.restore}.")
+        return
 
-    if not args.schema_file:
-        ap.error("schema_file is required (unless --restore)")
-    with open(args.schema_file, encoding="utf-8") as f:
-        raw = json.load(f)
-    new_categories = raw.get("categories", raw)
-    if "sportSchemas" not in new_categories:
-        raise SystemExit("Schema file has no sportSchemas.")
+    if not args.tournament and not args.all:
+        sys.exit("Give --tournament ID (repeatable) or --all.")
 
-    state = load_state(db, tid)
-    sport = state["tournament"].get("sport")
-    discipline = state["tournament"].get("discipline")
-    old_categories = (state["categoryDoc"] or {}).get("categories") or {}
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+    firebase_admin.initialize_app(credentials.Certificate(args.cred) if args.cred else None)
+    db = firestore.client()
 
-    new_types = parse_entry_types(discipline_dimensions(new_categories, sport, discipline))
-    old_cats = all_categories(parse_entry_types(discipline_dimensions(old_categories, sport, discipline))) \
-        if old_categories else {}
-    new_cats = all_categories(new_types)
-
-    athletes = load_athletes(db, state["registrations"])
-    plan = plan_migration(state["registrations"], athletes, new_types, sport)
-
-    migration_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    print(f"Tournament {tid} — {state['tournament'].get('title', '')} ({sport}/{discipline})")
-    print_plan(plan, old_cats, new_cats, args.verbose)
-    draw_add = draw_copies(state["poomsaeDraw"] or {}, plan["moves"])
-    if draw_add:
-        print("\nPoomsae draw settings copied to new divisions:")
-        for field, items in draw_add.items():
-            for k, v in items.items():
-                print(f"  {field}[{k}] = {v}")
-    if ((state["poomsaeDraw"] or {}).get("draw") or {}).get("rows") and plan["moves"]:
-        print("\n  NOTE: a poomsae draw was already generated — re-run the draw for the new divisions.")
-
-    blockers = []
-    if state["bracketCount"]:
-        blockers.append("brackets are already committed for this tournament")
-    if plan["unresolved"]:
-        blockers.append(f"{len(plan['unresolved'])} registration(s) cannot be placed")
-
-    backup_path = write_backup(db, tid, state, migration_id, args.backup_dir)
-    print(f"\nLocal backup: {backup_path}")
-
-    if not args.apply:
-        print("\nDRY RUN — nothing written to Firestore. Re-run with --apply.")
-        if blockers:
-            print("Would stop because: " + "; ".join(blockers) + " (use --force to override).")
-        return 0
-    if blockers and not args.force:
-        print("\nSTOPPED: " + "; ".join(blockers) + ". Fix them or re-run with --force.")
-        return 2
-
-    fs_backup = backup_categories_in_firestore(db, tid, state, migration_id)
-    print(f"Firestore backup: tournament_categories_backups/{fs_backup}")
-
-    done, failed = 0, []
-    for m in plan["moves"]:
-        try:
-            apply_move(db, tid, m, migration_id)
-            done += 1
-        except Exception as exc:  # keep going; every move is atomic on its own
-            failed.append((m["oldDocId"], str(exc)))
-    regs = db.collection("tournaments").document(tid).collection("registrations")
-    for r in plan["relabel"]:
-        regs.document(r["docId"]).set({"categoryLabel": r["label"]}, merge=True)
-
-    if draw_add:
-        db.collection("tournaments").document(tid).collection("meta").document("poomsaeDraw") \
-            .set(draw_add, merge=True)
-
-    # Whole-document set (no merge): a merge would deep-merge the new
-    # schema into the old one and leave removed keys behind.
-    cat_doc = dict(state["categoryDoc"] or {})
-    cat_doc.update({
-        "tournamentId": tid,
-        "categories": new_categories,
-        "updatedAt": fs().SERVER_TIMESTAMP,
-        "lastMigrationId": migration_id,
-        "previousCategoriesBackup": fs_backup,
-    })
-    db.collection("tournament_categories").document(tid).set(cat_doc)
-
-    deltas = fix_counts(db, tid)
-    after = load_state(db, tid)
-    stragglers = [d for d, r in after["registrations"].items()
-                  if r.get("status", "active") == "active" and r.get("categoryCode") not in new_cats]
-
-    print(f"\nMoved {done}/{len(plan['moves'])} registrations; schema replaced.")
-    if deltas:
-        print(f"categoryCounts corrected: {deltas}")
-    for doc_id, err in failed:
-        print(f"  FAILED {doc_id}: {err}")
-    if stragglers:
-        print(f"  {len(stragglers)} active registration(s) still in categories the new schema lacks:")
-        for s in stragglers:
-            print(f"    ! {s}")
-        print("  Move them from the category manager (admin-move), or run this script again.")
-    print(f"\nUndo: python {sys.argv[0]} {tid} --restore {backup_path} --apply")
-    return 1 if failed else 0
+    ids = args.tournament or [s.id for s in db.collection("tournaments").stream()]
+    total = {"changes": 0, "conflicts": 0}
+    for tid in ids:
+        r = fix_tournament(db, tid, manual, args.apply)
+        total["changes"] += r.get("changes", 0)
+        total["conflicts"] += r.get("conflicts", 0)
+    print(f"\nDone — {total['changes']} change(s), {total['conflicts']} conflict(s) across {len(ids)} tournament(s)."
+          + ("" if args.apply else " Dry run: run again with --apply to write."))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

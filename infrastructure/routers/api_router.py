@@ -2661,6 +2661,16 @@ class CategoryResultSummary(BaseModel):
 #       or deleted athlete, a reopened final). The public tournament page
 #       reads these.
 #
+# ALONE IN A CATEGORY: an athlete who is the only entry of a category gets
+# placement 1 — shown as 1st on the tournament page — but is flagged
+# `alone: true` (on the roster entry, on their results-doc placement and
+# on the results doc itself). Club standings count them as "alone", never
+# as a 1st (they beat nobody). A lone kyorugi athlete has no bracket and no
+# matches at all; a lone poomsae cut-off athlete still performs, and
+# gets 1st from the Final as usual (or straight away if they have no match).
+# "Only entry" = the bracket doc's entries when there is one (it follows
+# replacements / deleted matches), else the registration roster.
+#
 # The match docs' `resultsProcessed` flag is NOT touched any more — it
 # belongs to processMatchResult (its claim against double processing),
 # and setting it here marked whole categories "processed" even when
@@ -2668,6 +2678,19 @@ class CategoryResultSummary(BaseModel):
 CUT_OFF_PHASE_ORDER = ("F", "SF", "PR")
 NOT_PERFORMED_STATUSES = {"withdrawn", "dns", "dsq", "disqualified", "cancelled", "walkover"}
 DECIDED_STATUSES = ("done", "walkover", "completed")
+
+
+def _roster_corner(entry_id: str, entry: Dict) -> Dict:
+    """A results-doc corner for a roster entry (no match to take it from)."""
+    members = [m for m in (entry.get("members") or []) if isinstance(m, dict)]
+    first = members[0] if members else {}
+    return {
+        "entryId": entry_id,
+        "name": " & ".join(m.get("name") or "" for m in members).strip(" &") or entry_id,
+        "clubId": first.get("clubId"),
+        "clubName": first.get("club"),
+        "country": first.get("country"),
+    }
 
 
 def _is_cut_off_category(system: Optional[str], matches: List[Dict], is_poomsae: bool) -> bool:
@@ -2838,6 +2861,7 @@ def compute_tournament_results_endpoint(
                           through. Once every Final performance is in.
       round robin         bouts won, then total score. Once every bout is
                           decided.
+      only one entry      1st, flagged alone (not a 1st in club standings).
 
     Unranked matches (isRanked false — friendlies, exhibitions) are left
     out entirely. Safe to run any number of times — every run starts from
@@ -2890,11 +2914,29 @@ def compute_tournament_results_endpoint(
 
     # + categories with a stored result but no ranked matches any more (all
     # unranked / deleted): their result and placements get cleared.
-    categories = sorted(set(by_category) | set(bracket_docs) | existing_results)
+    # + categories with exactly one entry and nothing pushed (a lone kyorugi
+    # athlete never gets a bracket): they get 1st, flagged alone.
+    def _roster_entries(cat: str) -> Dict[str, Dict]:
+        out: Dict[str, Dict] = {}
+        for _age, entries in rosters_by_category.get(cat, []):
+            out.update({eid: e for eid, e in entries.items() if isinstance(e, dict)})
+        return out
+
+    single_roster = {cat for cat in rosters_by_category if len(_roster_entries(cat)) == 1}
+    categories = sorted(set(by_category) | set(bracket_docs) | existing_results | single_roster)
     for cat in categories:
         matches = by_category.get(cat, [])
         bdoc = bracket_docs.get(cat) or {}
         system_field = bdoc.get("system")
+
+        # Who is in the category now: the bracket's entries, else the roster.
+        roster_entries = _roster_entries(cat)
+        bracket_entries = bdoc.get("entries")
+        if isinstance(bracket_entries, list) and bracket_entries:
+            people = [e.get("entryId") for e in bracket_entries if isinstance(e, dict) and e.get("entryId")]
+        else:
+            people = list(roster_entries)
+        alone_id = people[0] if len(people) == 1 else None
 
         if _is_cut_off_category(system_field, matches, is_poomsae):
             system = "cut_off"
@@ -2909,6 +2951,19 @@ def compute_tournament_results_endpoint(
             placements, detail, incomplete = _elimination_placements(matches)
             rounds = max([int(m["bracketRound"]) for m in matches if m.get("bracketRound") is not None] or [0])
 
+        if alone_id and not matches:
+            # Only entry, nothing to fight / perform: 1st, flagged alone.
+            entry = roster_entries.get(alone_id)
+            bentry = next((e for e in (bracket_entries or []) if isinstance(e, dict) and e.get("entryId") == alone_id), None)
+            corner = _roster_corner(alone_id, entry) if entry else {
+                "entryId": alone_id, "name": (bentry or {}).get("name"), "clubId": (bentry or {}).get("clubId"),
+                "clubName": (bentry or {}).get("clubName"), "country": (bentry or {}).get("country"),
+            }
+            placements, detail, incomplete = {alone_id: (1, corner)}, None, 0
+        # Alone = the only entry AND the only one placed (a lone cut-off
+        # athlete who performed). Never when others were placed too.
+        is_alone = bool(alone_id and placements and set(placements) == {alone_id})
+
         new = placements or {}
         on_roster = set()
         removed = 0
@@ -2918,6 +2973,7 @@ def compute_tournament_results_endpoint(
                     continue
                 path = f"athletes.{cat}.{entry_id}.placement"
                 had = entry.get("placement")
+                alone_path = f"athletes.{cat}.{entry_id}.alone"
                 if entry_id in new:
                     on_roster.add(entry_id)
                     if had != new[entry_id][0]:
@@ -2925,6 +2981,12 @@ def compute_tournament_results_endpoint(
                 elif had is not None:
                     roster_updates.setdefault(age_code, {})[path] = firestore.DELETE_FIELD
                     removed += 1
+                # 1st on the page, but not counted as a win in club standings.
+                if is_alone and entry_id in new:
+                    if entry.get("alone") is not True:
+                        roster_updates.setdefault(age_code, {})[alone_path] = True
+                elif "alone" in entry:
+                    roster_updates.setdefault(age_code, {})[alone_path] = firestore.DELETE_FIELD
 
         if placements is None:
             if cat in existing_results:
@@ -2942,6 +3004,9 @@ def compute_tournament_results_endpoint(
             "system": system,
             "status": "partial" if incomplete else "complete",
             "computedAt": firestore.SERVER_TIMESTAMP,
+            # Only entry of the category — club standings count it as
+            # "alone", not as a 1st place.
+            "alone": is_alone,
             "placements": {
                 entry_id: {
                     "placement": place,
@@ -2950,12 +3015,15 @@ def compute_tournament_results_endpoint(
                     "clubName": corner.get("clubName"),
                     "country": corner.get("country"),
                     "onRoster": entry_id in on_roster,
+                    **({"alone": True} if is_alone else {}),
                 }
                 for entry_id, (place, corner) in new.items()
             },
         }))
 
         notes = []
+        if is_alone:
+            notes.append("Only entry — 1st place, counted as \"alone\" (not a 1st) in club standings.")
         if not new:
             notes.append("No placements could be derived from the matches.")
         off_roster = [corner.get("name") or eid for eid, (_, corner) in new.items() if eid not in on_roster]

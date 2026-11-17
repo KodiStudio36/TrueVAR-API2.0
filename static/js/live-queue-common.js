@@ -1194,7 +1194,8 @@ function showNewResultsSummary({ printed, changedCodes, finished, printedBefore,
 // place (1, 1, 3).
 //
 // Alone in a category: they get the "alone" points INSTEAD of 1st-place
-// points (no one to beat) — even if Compute Results gave them 1st.
+// points (no one to beat) — even though Compute Results gives them 1st
+// (shown on the tournament page) and flags it `alone`.
 // Poomsae cut-off has no won matches, so that field / column only shows
 // when the tournament has head-to-head bouts (kyorugi, side by side).
 // ═══════════════════════════════════════════════════════════════════
@@ -1303,12 +1304,20 @@ async function printClubStandingsPdf() {
             const people = bracket && Array.isArray(bracket.entries)
                 ? bracket.entries.map(e => ({ clubId: e.clubId || null }))
                 : roster.map(e => ({ clubId: clubOf(e) }));
+            const result = resultsByCategory[code];
+            // Alone: the only entry now, or flagged by 🏅 Compute Results
+            // (it shows as 1st on the tournament page, but beat nobody).
+            const aloneResult = result && result.placements
+                ? Object.values(result.placements).find(p => p && p.alone) : null;
+            if (aloneResult) {
+                bump(aloneResult.clubId || (people[0] && people[0].clubId), "alone", 1);
+                return;
+            }
             if (people.length === 0) return;
             if (people.length === 1) {
                 bump(people[0].clubId, "alone", 1); // alone — not counted as a 1st
                 return;
             }
-            const result = resultsByCategory[code];
             if (result && result.placements) {
                 Object.values(result.placements).forEach(p => bumpPlace(p && p.clubId, p && p.placement));
             } else {

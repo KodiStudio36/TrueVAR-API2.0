@@ -195,7 +195,7 @@ by opening every division by hand. #}
 </div>
 
 {# ═══════════════════════════════════════════════════════════════════════
-ROSTER ROW STYLES — fixed-width placement badge so "1st"/"2nd"/"=3rd"
+ROSTER ROW STYLES — fixed-width placement badge so "1st"/"2nd"/"11th"
 labels of different lengths don't stair-step the athlete names below
 them, and a real @media rule (not JS) to hide the club name on narrow
 viewports. Being plain CSS, this reacts live the instant the viewport
@@ -547,8 +547,10 @@ immediately, with no resize listener or re-render needed.
                                 }));
                                 if (weightDim.open_top) {
                                     const top = thresholds[thresholds.length - 1];
+                                    // Open top: "plus_{top}" (kyorugi_cadets_women_plus_59) —
+                                    // same rule as category-schema.js openTopLeafCode().
                                     weightCats.push({
-                                        code: `${codeBase}_${top}plus`,
+                                        code: `${codeBase}_plus_${top}`,
                                         label: `+${top}${unit}`,
                                         maxWeight: null,
                                     });
@@ -1007,11 +1009,6 @@ immediately, with no resize listener or re-render needed.
                 return pa - pb;
             });
 
-            const placementCounts = {};
-            Object.values(entries).forEach(e => {
-                if (e.placement != null) placementCounts[e.placement] = (placementCounts[e.placement] || 0) + 1;
-            });
-
             const rowsHtml = sortedEntries.map(([entryId, entry]) => {
                 const members = entry.members || [];
                 const namesHtml = members.map(m => {
@@ -1029,18 +1026,22 @@ immediately, with no resize listener or re-render needed.
                 const canRemove = ownEntry && !isTournamentStarted();
                 const canManage = canEdit || canRemove;
 
+                // Shared places just read "3rd", "5th" (no "="). Gold / silver /
+                // bronze for 1–3; every other place is white with a thin border.
                 const placement = entry.placement;
-                const isSharedPlacement = placement != null && (placementCounts[placement] || 0) > 1;
-                const placementLabel = placement == null ? "" : (
-                    isSharedPlacement ? `=${ordinalLabel(placement)}` : ordinalLabel(placement)
-                );
+                const placementLabel = placement == null ? "" : ordinalLabel(placement);
                 const placementColors = placement === 1
-                    ? { bg: "#fef3c7", fg: "#b45309" }
+                    ? { bg: "#fef3c7", fg: "#b45309", border: "transparent" }
                     : placement === 2
-                        ? { bg: "#e2e8f0", fg: "#475569" }
-                        : { bg: "#ffedd5", fg: "#c2410c" };
+                        ? { bg: "#e2e8f0", fg: "#475569", border: "transparent" }
+                        : placement === 3
+                            ? { bg: "#ffedd5", fg: "#c2410c", border: "transparent" }
+                            : { bg: "#ffffff", fg: "#475569", border: "#cbd5e1" };
+                // Only entry of the category: shown as 1st, but it isn't counted
+                // as a 1st in club standings (Compute Results flags it `alone`).
+                const placementTitle = entry.alone ? "Only entry in this category — not counted as a 1st place in club standings" : "";
                 const placementBadge = placementLabel ? `
-                        <span class="roster-place-badge" style="font-weight: 700; font-size: 0.78rem; background: ${placementColors.bg}; color: ${placementColors.fg};">
+                        <span class="roster-place-badge" title="${escapeHtml(placementTitle)}" style="font-weight: 700; font-size: 0.78rem; background: ${placementColors.bg}; color: ${placementColors.fg}; border: 1px solid ${placementColors.border};">
                             ${escapeHtml(placementLabel)}
                         </span>
                     ` : "";

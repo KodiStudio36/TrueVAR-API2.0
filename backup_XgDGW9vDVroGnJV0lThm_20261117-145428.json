@@ -1,0 +1,44 @@
+{
+ "sports/taekwondo/disciplines/kyorugi/matches/XgDGW9vDVroGnJV0lThm_101": {
+  "tournamentName": "Test Kyorugi",
+  "status": "ready",
+  "bracketMatchNumber": 2,
+  "winnerEntryId": null,
+  "pssHitLevelSetId": "satkd_extraleague",
+  "scheduledWithRelaxedConstraints": false,
+  "hitLevel": 21,
+  "breakTime": "00:30",
+  "courtId": "1",
+  "resolvedVestGen": "gen3",
+  "requiresPlexiHelmet": false,
+  "pssSize": 4,
+  "categoryCode": "kyorugi_pupils_2_men_44plus",
+  "displayNumber": 101,
+  "isRanked": true,
+  "blue": {
+   "clubId": "7iEVvRLf7WQd3jyhb0C8",
+   "name": "Đorđe Mirković",
+   "athleteIds": [
+    "jZpPHpgMv10hrxV3sXMb"
+   ],
+   "entryId": "jZpPHpgMv10hrxV3sXMb",
+   "clubName": "Sokol-Wolf",
+   "country": "BIH"
+  },
+  "roundPhase": "SF",
+  "tournamentId": "XgDGW9vDVroGnJV0lThm",
+  "bracketRound": 1,
+  "roundTime": "01:30",
+  "red": {
+   "name": "Mock Athlete 12",
+   "clubId": "mock_club_1",
+   "athleteIds": [
+    "mock_athlete_12"
+   ],
+   "entryId": "mock_athlete_12",
+   "clubName": "Mock Club 1",
+   "country": "SVK"
+  },
+  "queuePosition": 0
+ }
+}
