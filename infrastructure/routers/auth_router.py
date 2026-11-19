@@ -13,6 +13,7 @@ from infrastructure.firebase_client import init_firestore
 from infrastructure.auth_common import EXPIRES_IN, SESSION_COOKIE_NAME, create_session_jwt, get_admin_club_id, get_current_user, get_user_roles
 from infrastructure.routers.operator_auth import register_template_globals
 from usecases.tournament_usecase import GetAllTournamentsUseCase, GetTournamentUseCase
+from usecases.tournament_archive import build_series
 
 router = APIRouter(tags=["Auth & Showcase"])
 templates = Jinja2Templates(directory="templates")
@@ -263,24 +264,19 @@ async def main_page(
     tournament_repo=Depends(get_tournament_repo),
 ):
     """
-    Renders the landing page with two feeds:
+    Renders the landing page:
       - `tournaments`: active-status tournaments for the horizontal
         "upcoming" rail. main.html additionally keeps only those whose day
-        is today or later, since "active" just means not-yet-archived, not
-        necessarily still in the future.
-      - `archived_tournaments`: EVERY past tournament, newest first.
-        main.html shows 6 and reveals 6 more per "Show more" click, so it
-        needs the whole list — a limit here would hide the newest ones
-        (the repo returns oldest first).
+        is today or later, since "active" just means not-yet-archived.
+    The past-tournaments showcase below it is static (edited in main.html),
+    so archived tournaments aren't loaded here.
     """
     tournaments = _all_tournaments(tournament_repo, "active")
-    archived_tournaments = _by_date_desc(_all_tournaments(tournament_repo, "archived"))
 
     return templates.TemplateResponse(request, "main.html", {
         "request": request,
         "user": user,
         "tournaments": tournaments,
-        "archived_tournaments": archived_tournaments,
         "now": datetime.now(timezone.utc),
     })
 
@@ -295,6 +291,26 @@ async def login_page(request: Request, user: Optional[dict] = Depends(get_curren
 @router.get("/register")
 async def register_page(request: Request, user: Optional[dict] = Depends(get_current_user)):
     return templates.TemplateResponse(request, "register.html", {"request": request, "user": user})
+
+
+# NOTE: must stay ABOVE /tournaments/{tournament_id}, otherwise "past"
+# is captured as a tournament id.
+@router.get("/tournaments/past")
+async def past_tournaments_page(
+    request: Request,
+    user: Optional[dict] = Depends(get_current_user),
+    tournament_repo=Depends(get_tournament_repo),
+):
+    """
+    Archive of every public archived tournament, grouped into
+    series → seasons → days → events (see usecases/tournament_archive.py).
+    """
+    series = build_series(_all_tournaments(tournament_repo, "archived"))
+    return templates.TemplateResponse(request, "past_tournaments.html", {
+        "request": request,
+        "user": user,
+        "series": series,
+    })
 
 
 @router.get("/tournaments/{tournament_id}")

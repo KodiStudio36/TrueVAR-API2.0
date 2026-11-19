@@ -19,6 +19,12 @@
         </a>
 
         <div class="nav-right">
+            {% if can(request, "operator:manage") %}
+            <a href="/dashboard/operators" class="nav-action">Operators</a>
+            {% endif %}
+            {% if can(request, "inventory:manage") %}
+            <a href="/dashboard/inventory" class="nav-action">Inventory</a>
+            {% endif %}
             {# Tournaments menu: opens on hover, on keyboard focus, and on click/tap. #}
             <div class="nav-menu" id="nav-tournaments">
                 <button type="button" class="nav-action nav-menu-btn" aria-haspopup="true" aria-expanded="false"
@@ -39,12 +45,6 @@
                     {% endif %}
                 </div>
             </div>
-            {% if can(request, "inventory:manage") %}
-            <a href="/dashboard/inventory" class="nav-action">Inventory</a>
-            {% endif %}
-            {% if can(request, "operator:manage") %}
-            <a href="/dashboard/operators" class="nav-action">Operators</a>
-            {% endif %}
 
             {% if nav_user %}
             <a href="/settings" class="profile-link" aria-label="Open account settings">

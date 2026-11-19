@@ -130,48 +130,229 @@
         }
     }
 
-    /* ── PAST: capped grid + conditional view-more ─────────────── */
-    .archived-section {
+    /* ── SHOWCASE: static marketing block ───────────────────────
+       One ornament everywhere: the diagonal hatch from the archive
+       card. On tournament cards it fades in from the right, tinted in
+       the sport colour, and the actions sit on top of it. */
+    .showcase-section {
+        --sc-tkd: #1b3a6b;
+        --sc-tkd-soft: #e8eef8;
+        --sc-box: #b3262f;
+        --sc-box-soft: #fbeaeb;
         padding-top: clamp(2.5rem, 7vw, 4rem);
         padding-bottom: clamp(2.5rem, 7vw, 4rem);
         border-top: 1px solid var(--border);
     }
 
-    /* When Past Tournaments steps in as the section right after the
-       hero (no upcoming rail above it), it shouldn't carry the divider
-       that normally separates it from the upcoming rail. */
-    .archived-section--first {
+    .showcase-section--first {
         border-top: none;
     }
 
-    .view-more-row {
+    .showcase-header {
         display: flex;
-        justify-content: center;
-        margin-top: clamp(1.25rem, 4vw, 2rem);
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: clamp(1.1rem, 4vw, 1.75rem);
     }
 
-    /* !important: the cards carry an inline display:flex, which would
-       otherwise beat this rule and keep "hidden" cards visible. */
-    .show-more-link {
-        background: none;
-        border: none;
-        padding: 0.25rem 0.5rem;
-        font: inherit;
+    .showcase-all {
         font-weight: 600;
         color: var(--ink);
-        cursor: pointer;
+        text-decoration: none;
+        white-space: nowrap;
         display: inline-flex;
         align-items: center;
         gap: 0.35rem;
     }
 
-    .show-more-link:hover {
+    .showcase-all:hover {
         text-decoration: underline;
         text-underline-offset: 3px;
     }
 
-    .archived-card[hidden] {
-        display: none !important;
+    .showcase-grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        grid-auto-rows: 1fr;
+        /* every card the same height */
+        gap: clamp(0.85rem, 2.5vw, 1.25rem);
+    }
+
+    /* card */
+    .sc-card {
+        --accent: var(--sc-tkd);
+        --accent-soft: var(--sc-tkd-soft);
+        --ghost: rgba(27, 58, 107, 0.2);
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        padding: clamp(1.1rem, 3vw, 1.5rem);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 1.25rem;
+        transition: border-color 0.15s ease, box-shadow 0.2s ease;
+    }
+
+    .sc-card--boxing {
+        --accent: var(--sc-box);
+        --accent-soft: var(--sc-box-soft);
+        --ghost: rgba(179, 38, 47, 0.2);
+    }
+
+    .sc-card:hover {
+        border-color: var(--border-strong);
+        box-shadow: 0 12px 28px -22px rgba(15, 35, 71, 0.45);
+    }
+
+    /* outlined sport word, bleeding off the bottom-left corner
+       (the actions own the bottom-right) */
+    .sc-ghost {
+        position: absolute;
+        z-index: -1;
+        bottom: 0.2rem;
+        right: 0.5rem;
+        font-family: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
+        font-weight: 900;
+        font-size: 8rem;
+        line-height: 1;
+        letter-spacing: 0.01em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: transparent;
+        -webkit-text-stroke: 1.5px var(--ghost);
+        pointer-events: none;
+        user-select: none;
+    }
+
+
+    .sc-info {
+        min-width: 0;
+    }
+
+    /* sport tag in the accent colour */
+    .sc-sport {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 0.25rem 0.6rem;
+        border-radius: 4px;
+        background: var(--accent-soft);
+        color: var(--accent);
+    }
+
+    .sc-sport::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+
+    .sc-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+
+    .sc-title {
+        margin: 0 0 0.45rem;
+        font-size: clamp(1.6rem, 1.5vw + 1rem, 2rem);
+        line-height: 1.15;
+    }
+
+    .sc-meta {
+        font-size: 0.95rem;
+        color: var(--text-muted);
+    }
+
+    .sc-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-top: 0.9rem;
+    }
+
+    .sc-chips span {
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--ink);
+    }
+
+    /* one button system, always bottom-right; Watch replay is last */
+    .sc-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.65rem;
+    }
+
+    .sc-actions .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        white-space: nowrap;
+        min-width: 150px;
+    }
+
+    .sc-actions .btn svg {
+        flex-shrink: 0;
+    }
+
+    .sc-card--featured {
+        grid-column: 1 / -1;
+    }
+
+    .sc-card--featured .sc-title {
+        font-size: clamp(1.9rem, 2.5vw + 1rem, 2.6rem);
+        line-height: 1.1;
+    }
+
+    /* archive: keeps its hatch */
+    .sc-card--archive {
+        background:
+            repeating-linear-gradient(118deg, var(--border) 0 1px, transparent 1px 12px),
+            var(--surface);
+    }
+
+    .sc-count {
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 600;
+        font-size: 3rem;
+        line-height: 1;
+    }
+
+    .sc-count em {
+        font-style: normal;
+        color: var(--sc-tkd);
+    }
+
+    @media (max-width: 860px) {
+        .showcase-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 520px) {
+        .sc-actions .btn {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .sc-ghost {
+            display: none;
+        }
+
+        .showcase-header .showcase-all {
+            display: none;
+        }
     }
 
     /* ── CONTACT ─────────────────────────────────────────────── */
@@ -386,66 +567,108 @@ rail all day, also after its start time.
 </div>
 {% endif %}
 
-<!-- ═══════════════════════════ PAST ════════════════════════════ -->
+<!-- ═══════════════════════════ SHOWCASE (past) ═════════════════ -->
 {#
-`archived_tournaments` holds the archived tournaments (all of them —
-"Show more" reveals what was rendered, it doesn't fetch). Sorted here,
-newest first; tournaments without a date go last. 6 are shown, each
-"Show more" click reveals 6 more. If there's no upcoming rail, this
-section is the one directly under the hero — hence `--first`.
+Static marketing block — edit the values below, no route data needed.
+`sport` drives the accent colour: "taekwondo" (navy) or "boxing" (red).
+`replay` can be any URL (YouTube, your player page…).
 #}
-{% set archived_dated = (archived_tournaments or []) | selectattr("dateTime") | sort(attribute="dateTime", reverse=true)
-| list %}
-{% set archived_undated = (archived_tournaments or []) | rejectattr("dateTime") | list %}
-{% set archived_all = archived_dated + archived_undated %}
-{% set archived_page = 6 %}
+{% set sc_featured = {
+"sport": "taekwondo",
+"title": "18th International Ilyo Cup",
+"location": "Košice, Slovakia",
+"date": "07–08 Nov 2026",
+"chips": ["2 days", "Kyorugi", "Poomsae"],
+"results": "/tournaments/past#international-ilyo-cup",
+"replay": "https://www.youtube.com/playlist?list=PLMIGdFFPBXbY",
+} %}
+{% set sc_replay = {
+"sport": "boxing",
+"title": "Olympic Hopes 2026",
+"location": "Bratislava, Slovakia",
+"date": "03–05 Jul 2026",
+"chips": ["3 days", "Finals"],
+"replay": "https://www.youtube.com/playlist?list=PLY-AwXN7NNf8",
+} %}
+{% set sc_archive_count = "20" %}
 
-{% if archived_all %}
-<div class="archived-section{{ ' archived-section--first' if not upcoming else '' }}">
-    <div style="margin-bottom: clamp(1.1rem, 4vw, 1.75rem);">
-        <h2>Past Tournaments</h2>
-        <p class="text-muted" style="font-size: 1.05rem; margin-top: 0.5rem;">
-            Results and rosters from tournaments that have already taken place.
-        </p>
-    </div>
+{% macro play_icon() -%}
+<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <path d="M5 3.2v9.6a.6.6 0 0 0 .9.5l7.6-4.8a.6.6 0 0 0 0-1L5.9 2.7a.6.6 0 0 0-.9.5Z" />
+</svg>
+{%- endmacro %}
 
-    <div class="card-grid" id="archivedGrid">
-        {% for t in archived_all %}
-        <div class="panel archived-card" {% if loop.index> archived_page %}hidden{% endif %}
-            style="padding: clamp(0.9rem, 3vw, 1.5rem); display: flex; flex-direction: column; justify-content:
-            space-between;">
-            <div>
-                <span class="tag tag-neutral">{{ t.sport | default('Multi-Sport') }}</span>
-                <h3 style="margin-top: 0.9rem; margin-bottom: 0.7rem;">{{ t.title }}</h3>
-                <p class="text-muted" style="font-size: 0.95rem; margin-bottom: 0.25rem;">
-                    {{ t.location | default('Location to be announced') }}
-                </p>
-                <p class="text-muted" style="font-size: 0.95rem;">
-                    {{ (t.dateTime.strftime("%d %b %Y") ) if t.dateTime else 'Date unavailable' }}
-                </p>
-            </div>
-            <div style="margin-top: 1.1rem;">
-                <a href="/tournaments/{{ t.id }}" class="btn btn-secondary" style="width: 100%;">
-                    View Results
-                </a>
-            </div>
+{% macro arrow_icon() -%}
+<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path d="M3 8h9.5M8.5 3.5L13 8l-4.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+        stroke-linejoin="round" />
+</svg>
+{%- endmacro %}
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@900&display=swap" rel="stylesheet">
+
+<div class="showcase-section{{ ' showcase-section--first' if not upcoming else '' }}">
+    <div class="showcase-header">
+        <div>
+            <h2>Tournaments Archive</h2>
+            <p class="text-muted" style="font-size: 1.05rem; margin-top: 0.5rem;">
+                Results and full match replays from recent events.
+            </p>
         </div>
-        {% endfor %}
-    </div>
-
-    {% if archived_all | length > archived_page %}
-    <div class="view-more-row">
-        <button type="button" class="show-more-link" id="archivedMore" data-page="{{ archived_page }}">
-            Show more
+        <a class="showcase-all" href="/tournaments/past">
+            View all
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M3.5 6L8 10.5L12.5 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
                     stroke-linejoin="round" />
             </svg>
-        </button>
+        </a>
     </div>
-    {% endif %}
+
+    <div class="showcase-grid">
+        {# ── featured ── #}
+        <article class="panel sc-card sc-card--featured sc-card--{{ sc_featured.sport }}">
+            <span class="sc-ghost" aria-hidden="true">{{ sc_featured.sport }}</span>
+            <div class="sc-info">
+                <h3 class="sc-title">{{ sc_featured.title }}</h3>
+                <p class="sc-meta">{{ sc_featured.location }} · {{ sc_featured.date }}</p>
+                <div class="sc-chips">{% for c in sc_featured.chips %}<span>{{ c }}</span>{% endfor %}</div>
+            </div>
+            <div class="sc-actions">
+                <a href="{{ sc_featured.results }}" class="btn btn-secondary">Results</a>
+                <a href="{{ sc_featured.replay }}" class="btn btn-primary" target="_blank" rel="noopener">{{ play_icon()
+                    }} Watch replay</a>
+            </div>
+        </article>
+
+        {# ── replay ── #}
+        <article class="panel sc-card sc-card--{{ sc_replay.sport }}">
+            <span class="sc-ghost" aria-hidden="true">{{ sc_replay.sport }}</span>
+            <div class="sc-info">
+                <h3 class="sc-title">{{ sc_replay.title }}</h3>
+                <p class="sc-meta">{{ sc_replay.location }} · {{ sc_replay.date }}</p>
+                <div class="sc-chips">{% for c in sc_replay.chips %}<span>{{ c }}</span>{% endfor %}</div>
+            </div>
+            <div class="sc-actions">
+                <a href="{{ sc_replay.replay }}" class="btn btn-primary" target="_blank" rel="noopener">{{ play_icon()
+                    }} Watch replay</a>
+            </div>
+        </article>
+
+        {# ── archive ── #}
+        <article class="panel sc-card sc-card--archive">
+            <div class="sc-info">
+                <div class="sc-count">{{ sc_archive_count }}<em>+</em></div>
+                <p class="sc-meta" style="margin-top: 0.35rem;">past tournaments with results and replays</p>
+            </div>
+            <div class="sc-actions">
+                <a href="/tournaments/past" class="btn btn-secondary">Browse all {{ arrow_icon() }}</a>
+            </div>
+        </article>
+    </div>
 </div>
-{% endif %}
 
 <!-- ═══════════════════════════ CONTACT ═════════════════════════ -->
 {#
@@ -577,20 +800,6 @@ replace("(", "") | replace(")", "") %}
         rail.addEventListener("scroll", updateButtons, { passive: true });
         window.addEventListener("resize", updateButtons);
         updateButtons();
-    })();
-
-    // "Show more" on past tournaments: reveals the next 6 each click,
-    // disappears once everything is shown.
-    (function () {
-        var btn = document.getElementById("archivedMore");
-        var grid = document.getElementById("archivedGrid");
-        if (!btn || !grid) return;
-        var page = parseInt(btn.getAttribute("data-page"), 10) || 6;
-        btn.addEventListener("click", function () {
-            var hidden = grid.querySelectorAll(".archived-card[hidden]");
-            for (var i = 0; i < hidden.length && i < page; i++) hidden[i].hidden = false;
-            if (hidden.length <= page) btn.parentNode.remove();
-        });
     })();
 </script>
 {% endblock %}

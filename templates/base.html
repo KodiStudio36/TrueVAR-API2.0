@@ -411,6 +411,11 @@
             text-decoration: underline;
         }
 
+        .nav-link.is-current {
+            text-decoration: underline;
+            text-decoration-thickness: 2px;
+        }
+
         /* Whole chip is now a link into Settings */
         .profile-link {
             display: flex;
@@ -740,12 +745,15 @@
             {# Role links — nav_roles() is a template global (operator_auth.py);
             one lookup per request, shared with the page if it uses it too. #}
             {% set nav = nav_roles(request, user) if nav_roles is defined else {} %}
-            {% if nav.clubId %}
-            <a href="/clubs/mine" class="nav-link">My Club</a>
-            {% endif %}
             {% if nav.operator %}
             <a href="/dashboard" class="nav-link">Dashboard</a>
             {% endif %}
+            {% if nav.clubId %}
+            <a href="/clubs/mine" class="nav-link">My Club</a>
+            {% endif %}
+            {% set on_archive = request is defined and request and request.url.path.startswith('/tournaments/past') %}
+            <a href="/tournaments/past" class="nav-link{{ ' is-current' if on_archive else '' }}" {% if on_archive
+                %}aria-current="page" {% endif %}>Archive</a>
             <a href="/settings" class="profile-link" aria-label="Open account settings">
                 <img src="{{ user.photoUrl }}" alt="" class="user-avatar" referrerpolicy="no-referrer">
                 <span class="user-chip-text">

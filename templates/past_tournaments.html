@@ -1,0 +1,969 @@
+{% extends "base.html" %}
+
+{% block title %}TrueVAR — Past Tournaments{% endblock %}
+
+{% block content %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@900&display=swap" rel="stylesheet">
+
+<style>
+    /* Same vocabulary as the home-page showcase: white panels, tinted
+       sport tags, pill chips, serif titles, the outlined sport word
+       bottom-right, the diagonal hatch for "numbers" blocks, and
+       actions on the right with Watch replay always last. */
+    .arc {
+        --sc-tkd: #1b3a6b;
+        --sc-tkd-soft: #e8eef8;
+        --sc-box: #b3262f;
+        --sc-box-soft: #fbeaeb;
+        --hatch-bg: repeating-linear-gradient(118deg, var(--border) 0 1px, transparent 1px 12px);
+    }
+
+    .sport-taekwondo {
+        --accent: var(--sc-tkd);
+        --accent-soft: var(--sc-tkd-soft);
+        --ghost: rgba(27, 58, 107, 0.2);
+    }
+
+    .sport-boxing {
+        --accent: var(--sc-box);
+        --accent-soft: var(--sc-box-soft);
+        --ghost: rgba(179, 38, 47, 0.2);
+    }
+
+    /* ── shared bits ─────────────────────────────────────────── */
+    .sc-sport {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 0.25rem 0.6rem;
+        border-radius: 4px;
+        background: var(--accent-soft, var(--page-bg));
+        color: var(--accent, var(--ink));
+        text-transform: capitalize;
+    }
+
+    .sc-sport::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+
+    .sc-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+
+    .sc-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+
+    .sc-chips span {
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--ink);
+    }
+
+    .sc-meta {
+        font-size: 0.95rem;
+        color: var(--text-muted);
+    }
+
+    .sc-ghost {
+        position: absolute;
+        z-index: -1;
+        right: -0.03em;
+        bottom: -0.2em;
+        font-family: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
+        font-weight: 900;
+        line-height: 1;
+        letter-spacing: 0.01em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: transparent;
+        -webkit-text-stroke: 1.5px var(--ghost, var(--border-strong));
+        pointer-events: none;
+        user-select: none;
+    }
+
+    .actions {
+        display: flex;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .actions .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.45rem;
+        white-space: nowrap;
+    }
+
+    .actions .btn svg {
+        flex-shrink: 0;
+    }
+
+    .btn-sm {
+        padding: 0.45rem 0.85rem;
+        font-size: 0.88rem;
+        border-radius: 7px;
+    }
+
+    .btn[aria-disabled="true"] {
+        opacity: 0.4;
+        pointer-events: none;
+    }
+
+    /* ── HEADER ──────────────────────────────────────────────── */
+    .arc-head {
+        padding-top: clamp(2rem, 6vw, 3.25rem);
+        padding-bottom: clamp(1.25rem, 4vw, 1.75rem);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1.25rem;
+    }
+
+    .arc-back {
+        font-size: 0.92rem;
+        color: var(--text-muted);
+        text-decoration: none;
+    }
+
+    .arc-back:hover {
+        color: var(--ink);
+    }
+
+    .arc-head h1 {
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 600;
+        font-size: clamp(2rem, 4vw + 0.5rem, 2.8rem);
+        line-height: 1.12;
+        color: var(--ink);
+        margin-top: 0.6rem;
+    }
+
+    .arc-head p {
+        color: var(--text-muted);
+        font-size: 1.05rem;
+        margin-top: 0.45rem;
+        max-width: 46ch;
+    }
+
+    /* numbers on hatch — the "20+" card, stretched */
+    .arc-stats {
+        display: flex;
+        padding: 0;
+        overflow: hidden;
+        background: var(--hatch-bg), var(--surface);
+    }
+
+    .arc-stats div {
+        padding: 0.85rem 1.25rem;
+        min-width: 84px;
+    }
+
+    .arc-stats div+div {
+        border-left: 1px solid var(--border);
+    }
+
+    .arc-stats strong {
+        display: block;
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 600;
+        font-size: 1.9rem;
+        line-height: 1;
+        color: var(--ink);
+    }
+
+    .arc-stats span {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+    }
+
+    /* ── FILTERS ─────────────────────────────────────────────── */
+    .arc-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: clamp(1.1rem, 4vw, 1.5rem);
+    }
+
+    .chip {
+        font: inherit;
+        font-size: 0.88rem;
+        font-weight: 600;
+        padding: 0.45rem 0.95rem;
+        border-radius: 999px;
+        border: 1px solid var(--border-strong);
+        background: var(--surface);
+        color: var(--ink);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .chip:hover {
+        border-color: var(--ink);
+    }
+
+    .chip[aria-pressed="true"] {
+        background: var(--ink);
+        border-color: var(--ink);
+        color: var(--surface);
+    }
+
+    .chip i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+
+    .arc-search {
+        margin-left: auto;
+        position: relative;
+        flex: 0 1 260px;
+    }
+
+    .arc-search input {
+        width: 100%;
+        box-sizing: border-box;
+        font: inherit;
+        font-size: 0.92rem;
+        padding: 0.5rem 1rem 0.5rem 2.2rem;
+        border-radius: 999px;
+        border: 1px solid var(--border-strong);
+        background: var(--surface);
+        color: var(--ink);
+    }
+
+    .arc-search input:focus {
+        outline: 2px solid var(--ink);
+        outline-offset: 1px;
+    }
+
+    .arc-search svg {
+        position: absolute;
+        left: 0.8rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+    }
+
+    /* ── SERIES GRID ─────────────────────────────────────────── */
+    .series-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+        gap: clamp(1rem, 2.5vw, 1.4rem) clamp(0.85rem, 2.5vw, 1.25rem);
+        padding-bottom: clamp(3rem, 8vw, 4.5rem);
+    }
+
+    /* playlist card: the panel plus two sheets peeking out on top,
+       like a YouTube playlist thumbnail */
+    .s-card {
+        all: unset;
+        box-sizing: border-box;
+        position: relative;
+        display: block;
+        cursor: pointer;
+        padding-top: 12px;
+    }
+
+    .s-card[hidden] {
+        display: none;
+    }
+
+    .s-card::before,
+    .s-card::after {
+        content: "";
+        position: absolute;
+        height: 24px;
+        border-radius: 10px 10px 0 0;
+        background: #d5d9e0;
+        transition: transform 0.2s ease;
+    }
+
+    .s-card::before {
+        top: 0;
+        left: 24px;
+        right: 24px;
+
+    }
+
+    .s-card::after {
+        top: 6px;
+        left: 12px;
+        right: 12px;
+        background: #e4e7ec;
+    }
+
+    .s-inner {
+        position: relative;
+        z-index: 1;
+        overflow: hidden;
+        isolation: isolate;
+        aspect-ratio: 1 / 0.86;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: clamp(1.1rem, 3vw, 1.4rem);
+        color: var(--ink);
+        transition: border-color 0.15s ease, box-shadow 0.2s ease;
+    }
+
+    .s-inner .sc-ghost {
+        font-size: 6rem;
+        bottom: 0.1rem;
+        left: 5rem;
+    }
+
+    .s-card:hover .s-inner,
+    .s-card:focus-visible .s-inner {
+        border-color: var(--border-strong);
+        box-shadow: 0 12px 28px -22px rgba(15, 35, 71, 0.45);
+    }
+
+    .s-card:focus-visible .s-inner {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
+    }
+
+    .s-card.is-active .s-inner {
+        border-color: var(--ink);
+        box-shadow: 0 0 0 1px var(--ink);
+    }
+
+    /* selected card: the outlined sport word lights up in its colour */
+    .s-card.is-active .sc-ghost {
+        color: var(--ghost);
+    }
+
+    .s-card.is-active::before {
+        background: #9aa3b2;
+    }
+
+    .s-card.is-active::after {
+        background: #c3c9d3;
+    }
+
+    /* "≡ 7 events" badge, like YouTube's playlist count */
+    .s-count {
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        padding: 0.25rem 0.6rem;
+        border-radius: 6px;
+        background: var(--ink);
+        color: var(--surface);
+    }
+
+    .s-pins {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+
+    /* TrueVAR's own tournaments — same shape as the events pin,
+       navy-tinted so it reads as the house badge */
+    .s-truevar {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        padding: 0.25rem 0.6rem;
+        border-radius: 6px;
+        background: var(--sc-tkd-soft);
+        color: var(--sc-tkd);
+        box-shadow: inset 0 0 0 1px rgba(27, 58, 107, 0.25);
+    }
+
+    .s-title {
+        display: block;
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 600;
+        font-size: clamp(1.45rem, 1vw + 1.1rem, 1.75rem);
+        line-height: 1.15;
+        margin: 0.9rem 0 0.4rem;
+    }
+
+    .s-foot {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 0.75rem;
+    }
+
+    .s-open {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        flex-shrink: 0;
+    }
+
+    .s-open svg {
+        transition: transform 0.2s ease;
+    }
+
+    .s-card.is-active .s-open svg {
+        transform: rotate(180deg);
+    }
+
+    /* ── DETAIL PANEL ────────────────────────────────────────── */
+    .detail {
+        grid-column: 1 / -1;
+        padding: 0;
+        overflow: hidden;
+        animation: drop 0.3s cubic-bezier(.2, .7, .2, 1) both;
+    }
+
+    .detail-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.9rem clamp(1rem, 3vw, 1.4rem);
+        border-bottom: 1px solid var(--border);
+    }
+
+    .close-btn {
+        flex-shrink: 0;
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        border: 1px solid var(--border-strong);
+        background: var(--surface);
+        color: var(--ink);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .close-btn:hover {
+        background: var(--page-bg);
+    }
+
+    .season-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+
+    .season-tab {
+        font: inherit;
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 600;
+        font-size: 1.05rem;
+        cursor: pointer;
+        padding: 0.45rem 1.1rem;
+        border-radius: 999px;
+        border: 1px solid var(--border-strong);
+        background: var(--surface);
+        color: var(--ink);
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .season-tab:hover {
+        border-color: var(--ink);
+    }
+
+    .season-tab[aria-selected="true"] {
+        background: var(--ink);
+        border-color: var(--ink);
+        color: var(--surface);
+    }
+
+    .season-panel {
+        padding: clamp(1rem, 3vw, 1.4rem);
+        background: var(--hatch-bg), var(--page-bg);
+    }
+
+    .season-panel[hidden] {
+        display: none;
+    }
+
+    .season-note {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        margin-bottom: 0.85rem;
+    }
+
+    .days {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: clamp(0.75rem, 2vw, 1rem);
+    }
+
+    .day-card {
+        padding: 0;
+        overflow: hidden;
+        animation: rise 0.35s cubic-bezier(.2, .7, .2, 1) both;
+        animation-delay: calc(var(--i, 0) * 50ms);
+    }
+
+    .day-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.9rem 1.1rem 0.75rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .day-no {
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 600;
+        font-size: 1.2rem;
+    }
+
+    .ev {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.75rem 1.1rem;
+    }
+
+    .ev+.ev {
+        border-top: 1px solid var(--border);
+    }
+
+    .ev-name {
+        font-weight: 600;
+    }
+
+    .arc-empty {
+        grid-column: 1 / -1;
+        text-align: center;
+        color: var(--text-muted);
+        padding: 3rem 1rem;
+    }
+
+    @keyframes rise {
+        from {
+            opacity: 0;
+            transform: translateY(8px);
+        }
+
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+
+    @keyframes drop {
+        from {
+            opacity: 0;
+            transform: translateY(-6px);
+        }
+
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+        .detail,
+        .day-card {
+            animation: none;
+        }
+    }
+
+    @media (max-width: 640px) {
+        .arc-search {
+            margin-left: 0;
+            flex: 1 1 100%;
+            order: -1;
+        }
+
+        .arc-stats {
+            width: 100%;
+        }
+
+        .arc-stats div {
+            flex: 1;
+            min-width: 0;
+            padding: 0.75rem 0.9rem;
+        }
+
+        .sc-ghost,
+        .s-inner .sc-ghost,
+        .detail-head .sc-ghost {
+            display: none;
+        }
+
+        .s-inner {
+            aspect-ratio: auto;
+            min-height: 210px;
+        }
+
+
+    }
+
+    @media (max-width: 420px) {
+        .ev {
+            flex-wrap: wrap;
+        }
+
+        .ev .actions {
+            width: 100%;
+        }
+
+        .ev .actions .btn {
+            flex: 1;
+        }
+    }
+</style>
+
+{#
+Built by usecases/tournament_archive.build_series (route: GET /tournaments/past).
+`series` — tournament series ("playlists"), most recent activity first:
+{ name, sport ("taekwondo" | "boxing"), location,
+seasons: [ { year, edition?, days: [
+{ label ("Day 1"), date ("Sat 07 Nov"), events: [
+{ id, name ("Kyorugi"), replay (bool), replay_url? } ] } ] } ] }
+Seasons newest first. Falls back to mock data until the route provides it.
+#}
+{% set series = series if series is defined else [
+{"name": "International Ilyo Cup", "sport": "taekwondo", "location": "Košice, Slovakia", "seasons": [
+{"year": 2026, "edition": "18th edition", "days": [
+{"label": "Day 1", "date": "Sat 07 Nov", "events": [
+{"id": 301, "name": "Kyorugi", "replay": true},
+{"id": 302, "name": "Poomsae", "replay": true}]},
+{"label": "Day 2", "date": "Sun 08 Nov", "events": [
+{"id": 303, "name": "Kyorugi", "replay": true},
+{"id": 304, "name": "Poomsae", "replay": true}]}]},
+{"year": 2025, "edition": "17th edition", "days": [
+{"label": "Day 1", "date": "Sat 08 Nov", "events": [
+{"id": 201, "name": "Kyorugi", "replay": true},
+{"id": 202, "name": "Poomsae", "replay": false}]},
+{"label": "Day 2", "date": "Sun 09 Nov", "events": [
+{"id": 203, "name": "Kyorugi", "replay": true}]}]}]},
+{"name": "Black Tiger Cup", "sport": "taekwondo", "location": "Snina, Slovakia", "seasons": [
+{"year": 2026, "days": [
+{"label": "Day 1", "date": "Sat 19 Sep", "events": [
+{"id": 311, "name": "Kyorugi", "replay": true},
+{"id": 312, "name": "Poomsae", "replay": true}]}]}]},
+{"name": "TrueVAR NextGen", "sport": "taekwondo", "location": "Ryong Gym, Bratislava", "seasons": [
+{"year": 2026, "days": [
+{"label": "Day 1", "date": "Sat 12 Sep", "events": [
+{"id": 321, "name": "Poomsae", "replay": true}]}]}]},
+{"name": "Olympic Hopes", "sport": "boxing", "location": "Bratislava, Slovakia", "seasons": [
+{"year": 2026, "days": [
+{"label": "Day 1", "date": "Fri 03 Jul", "events": [{"id": 331, "name": "Prelims", "replay": true}]},
+{"label": "Day 2", "date": "Sat 04 Jul", "events": [{"id": 332, "name": "Semifinals", "replay": true}]},
+{"label": "Day 3", "date": "Sun 05 Jul", "events": [{"id": 333, "name": "Finals", "replay": true}]}]},
+{"year": 2025, "days": [
+{"label": "Day 1", "date": "Sat 05 Jul", "events": [{"id": 231, "name": "Prelims", "replay": false}]},
+{"label": "Day 2", "date": "Sun 06 Jul", "events": [{"id": 232, "name": "Finals", "replay": true}]}]}]},
+{"name": "Korean Ambassador's Cup", "sport": "taekwondo", "location": "Bratislava, Slovakia", "seasons": [
+{"year": 2026, "edition": "with Bratislava Open", "days": [
+{"label": "Day 1", "date": "Sat 06 Jun", "events": [
+{"id": 341, "name": "Kyorugi", "replay": true}]}]}]},
+{"name": "Cassovia Open", "sport": "taekwondo", "location": "Košice, Slovakia", "seasons": [
+{"year": 2026, "days": [
+{"label": "Day 1", "date": "Sat 09 May", "events": [
+{"id": 351, "name": "Kyorugi", "replay": true},
+{"id": 352, "name": "Poomsae", "replay": true}]}]},
+{"year": 2025, "days": [
+{"label": "Day 1", "date": "Sat 10 May", "events": [
+{"id": 251, "name": "Kyorugi", "replay": false}]}]}]},
+{"name": "Star Cup", "sport": "taekwondo", "location": "Košice, Slovakia", "seasons": [
+{"year": 2026, "days": [
+{"label": "Day 1", "date": "Sat 25 Apr", "events": [
+{"id": 361, "name": "Kyorugi", "replay": true}]}]}]},
+{"name": "Majstrovstvá SR", "sport": "taekwondo", "location": "Košice, Slovakia", "seasons": [
+{"year": 2025, "edition": "National championship", "days": [
+{"label": "Day 1", "date": "Sat 06 Dec", "events": [
+{"id": 261, "name": "Kyorugi", "replay": true}]}]}]}
+] %}
+
+{#
+Order: TrueVAR's own tournaments first, then everything else; both
+groups alphabetically. A series counts as TrueVAR when it has
+`truevar: true`, or — if that field isn't set — when its name
+contains "TrueVAR".
+#}
+{% set tv_first = [] %}
+{% set others = [] %}
+{% for s in series | sort(attribute='name', case_sensitive=false) %}
+{% set is_tv = s.truevar if s.truevar is defined else ('truevar' in (s.name | lower)) %}
+{% if is_tv %}{% set _ = tv_first.append(s) %}{% else %}{% set _ = others.append(s) %}{% endif %}
+{% endfor %}
+{% set series = tv_first + others %}
+
+{#
+Header totals:
+series — tournament series (folders)
+tournaments — one per series per year; Day 2, Day 3… of the same
+tournament don't count again
+days — every competition day across all tournaments
+#}
+{% set tot = namespace(tournaments=0, days=0) %}
+{% for s in series %}
+{% set tot.tournaments = tot.tournaments + s.seasons | length %}
+{% for se in s.seasons %}{% set tot.days = tot.days + se.days | length %}{% endfor %}
+{% endfor %}
+
+{% macro play() -%}
+<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <path d="M5 3.2v9.6a.6.6 0 0 0 .9.5l7.6-4.8a.6.6 0 0 0 0-1L5.9 2.7a.6.6 0 0 0-.9.5Z" />
+</svg>
+{%- endmacro %}
+
+<div class="arc">
+
+    <!-- ═══════════════════════════ HEADER ═════════════════════ -->
+    <div class="arc-head">
+        <div>
+            <a href="/" class="arc-back">← Back to tournaments</a>
+            <h1>Tournaments Archive</h1>
+            <p>Every tournament we've run, grouped by series. Open one to see each season, day by day.</p>
+        </div>
+        <div class="panel arc-stats" aria-label="Archive totals">
+            <div><strong>{{ series | length }}</strong><span>series</span></div>
+            <div><strong>{{ tot.tournaments }}</strong><span>tournaments</span></div>
+            <div><strong>{{ tot.days }}</strong><span>days</span></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════ FILTERS ════════════════════ -->
+    <div class="arc-filters">
+        <button type="button" class="chip" data-sport="all" aria-pressed="true">All sports</button>
+        <button type="button" class="chip" data-sport="taekwondo" aria-pressed="false"><i
+                style="background: var(--sc-tkd)"></i>Taekwondo</button>
+        <button type="button" class="chip" data-sport="boxing" aria-pressed="false"><i
+                style="background: var(--sc-box)"></i>Boxing</button>
+        <label class="arc-search">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.8" stroke="currentColor" stroke-width="1.6" />
+                <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
+            <input type="search" id="arcSearch" placeholder="Search series, city, year" aria-label="Search tournaments">
+        </label>
+    </div>
+
+    <!-- ═══════════════════════════ SERIES GRID ════════════════ -->
+    <div class="series-grid" id="seriesGrid">
+        {% for s in series %}
+        {% set c = namespace(events=0, replays=0) %}
+        {% for se in s.seasons %}{% for d in se.days %}{% for e in d.events %}
+        {% set c.events = c.events + 1 %}{% if e.replay %}{% set c.replays = c.replays + 1 %}{% endif %}
+        {% endfor %}{% endfor %}{% endfor %}
+
+        <button type="button" class="s-card sport-{{ s.sport }}" data-idx="{{ loop.index0 }}" data-sport="{{ s.sport }}"
+            data-slug="{{ s.slug | default(s.name | lower | replace(' ', '-')) }}"
+            data-search="{{ (s.name ~ ' ' ~ s.location ~ ' ' ~ s.sport ~ ' ' ~ (s.seasons | map(attribute='year') | join(' '))) | lower }}"
+            aria-expanded="false" aria-controls="seriesDetail">
+            <span class="panel s-inner">
+                <span class="sc-ghost" aria-hidden="true">{{ s.sport }}</span>
+                <span>
+                    {% set is_tv = s.truevar if s.truevar is defined else ('truevar' in (s.name | lower)) %}
+                    <span class="s-pins">
+                        <span class="s-count">
+                            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                                stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+                                <path d="M2.5 4h11M2.5 8h11M2.5 12h7" />
+                            </svg>
+                            {{ c.events }} event{{ 's' if c.events != 1 }}
+                        </span>
+                        {% if is_tv %}
+                        <span class="s-truevar" title="Organised by TrueVAR">
+                            TrueVAR
+                        </span>
+                        {% endif %}
+                    </span>
+                    <span class="s-title">{{ s.name }}</span>
+                    <span class="sc-meta">{{ s.location }}{% if s.seasons | length > 1 %} · {{ s.seasons | length }}
+                        seasons{% endif %}</span>
+                </span>
+                <span class="s-foot">
+                    <span class="sc-chips">{% for se in s.seasons %}<span>{{ se.year }}</span>{% endfor %}</span>
+                </span>
+            </span>
+        </button>
+
+        {# detail content, moved into the panel on click #}
+        <template id="tpl-{{ loop.index0 }}">
+            <div class="detail-head">
+                <div class="season-tabs" role="tablist">
+                    {% for se in s.seasons %}
+                    <button type="button" class="season-tab" role="tab" data-season="{{ loop.index0 }}"
+                        aria-selected="{{ 'true' if loop.first else 'false' }}">{{ se.year }}</button>
+                    {% endfor %}
+                </div>
+                <button type="button" class="close-btn" data-close aria-label="Close">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"
+                        stroke-linecap="round">
+                        <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
+                    </svg>
+                </button>
+            </div>
+
+            {% for se in s.seasons %}
+            <div class="season-panel" data-panel="{{ loop.index0 }}" {% if not loop.first %}hidden{% endif %}>
+                <div class="days">
+                    {% for d in se.days %}
+                    <article class="panel day-card" style="--i: {{ loop.index0 }}">
+                        <header class="day-top">
+                            <span class="day-no">{{ d.label }}</span>
+                            <span class="sc-meta">{{ d.date }}</span>
+                        </header>
+                        {% for e in d.events %}
+                        <div class="ev">
+                            <span class="ev-name">{{ e.name }}</span>
+                            <span class="actions">
+                                <a class="btn btn-secondary btn-sm" href="/tournaments/{{ e.id }}">Results</a>
+                                {% if e.replay %}
+                                <a class="btn btn-primary btn-sm"
+                                    href="{{ e.replay_url or ('/tournaments/' ~ e.id ~ '/replay') }}">{{ play() }} Watch
+                                    replay</a>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </article>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </template>
+        {% endfor %}
+
+        <p class="arc-empty" id="arcEmpty" {% if series %}hidden{% endif %}>
+            {% if series %}No tournaments match your search.{% else %}No past tournaments yet.{% endif %}
+        </p>
+    </div>
+</div>
+
+<script>
+    (function () {
+        var grid = document.getElementById("seriesGrid");
+        var cards = Array.prototype.slice.call(grid.querySelectorAll(".s-card"));
+        var empty = document.getElementById("arcEmpty");
+        var search = document.getElementById("arcSearch");
+        var chips = document.querySelectorAll(".chip[data-sport]");
+        var detail = null, activeCard = null, sport = "all";
+
+        // Panel goes after the last visible card in the clicked card's row.
+        function rowEnd(card) {
+            var top = card.offsetTop, last = card;
+            cards.forEach(function (c) {
+                if (!c.hidden && c.offsetTop === top) last = c;
+            });
+            return last;
+        }
+
+        function place() {
+            if (!detail || !activeCard) return;
+            var end = rowEnd(activeCard);
+            if (end.nextElementSibling !== detail) {
+                // skip over the <template> that follows each card
+                var ref = end.nextElementSibling;
+                if (ref && ref.tagName === "TEMPLATE") ref = ref.nextElementSibling;
+                grid.insertBefore(detail, ref);
+            }
+        }
+
+        function close() {
+            if (detail) detail.remove();
+            if (activeCard) {
+                activeCard.classList.remove("is-active");
+                activeCard.setAttribute("aria-expanded", "false");
+            }
+            detail = activeCard = null;
+        }
+
+        function open(card) {
+            if (activeCard === card) { close(); return; }
+            close();
+            activeCard = card;
+            card.classList.add("is-active");
+            card.setAttribute("aria-expanded", "true");
+
+            detail = document.createElement("section");
+            detail.className = "panel detail";
+            detail.id = "seriesDetail";
+            detail.appendChild(document.getElementById("tpl-" + card.dataset.idx).content.cloneNode(true));
+            place();
+
+            detail.querySelector("[data-close]").addEventListener("click", function () {
+                var c = activeCard; close(); c.focus();
+            });
+            var tabs = detail.querySelectorAll(".season-tab");
+            var panels = detail.querySelectorAll(".season-panel");
+            tabs.forEach(function (t) {
+                t.addEventListener("click", function () {
+                    tabs.forEach(function (x) { x.setAttribute("aria-selected", x === t ? "true" : "false"); });
+                    panels.forEach(function (p) { p.hidden = p.dataset.panel !== t.dataset.season; });
+                });
+            });
+
+            var r = detail.getBoundingClientRect();
+            if (r.top > window.innerHeight * 0.75) {
+                detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            }
+        }
+
+        cards.forEach(function (c) { c.addEventListener("click", function () { open(c); }); });
+        window.addEventListener("resize", place);
+        document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+
+        function filter() {
+            var q = search.value.trim().toLowerCase(), shown = 0;
+            cards.forEach(function (c) {
+                var ok = (sport === "all" || c.dataset.sport === sport) &&
+                    (!q || c.dataset.search.indexOf(q) !== -1);
+                c.hidden = !ok;
+                if (ok) shown++;
+            });
+            if (activeCard && activeCard.hidden) close();
+            place();
+            empty.hidden = shown !== 0;
+        }
+
+        search.addEventListener("input", filter);
+        chips.forEach(function (ch) {
+            ch.addEventListener("click", function () {
+                sport = ch.dataset.sport;
+                chips.forEach(function (x) { x.setAttribute("aria-pressed", x === ch ? "true" : "false"); });
+                filter();
+            });
+        });
+
+        // Deep link: /tournaments/past#international-ilyo-cup opens that series
+        // (exact slug first, then a loose text match like #ilyo).
+        if (location.hash) {
+            var key = decodeURIComponent(location.hash.slice(1)).toLowerCase();
+            var hit = cards.filter(function (c) { return c.dataset.slug === key; })[0] ||
+                cards.filter(function (c) { return c.dataset.search.indexOf(key.replace(/-/g, " ")) !== -1; })[0];
+            if (hit) { open(hit); hit.scrollIntoView({ block: "start" }); }
+        }
+    })();
+</script>{% endblock %}
