@@ -266,7 +266,8 @@ Schedule Board cards either. #}
         <p class="eq-message" id="op-message" role="status" hidden></p>
 
         {# The viewer's own status, at the bottom #}
-        {% if ops.me or not tournament_past %}
+        {# A TRV (viewer) can't be assigned — no "I'm free" #}
+        {% if not me_viewer and (ops.me or not tournament_past) %}
         <div class="op-me">
             {% if ops.me == "selected" %}
             <span class="op-me-state is-selected">✓ You're selected for this tournament</span>

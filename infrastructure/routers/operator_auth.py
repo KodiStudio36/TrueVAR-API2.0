@@ -28,7 +28,16 @@ class OperatorForbiddenError(HTTPException):
 
 # ── Roles & permissions ──────────────────────────────────────────────────
 
-OPERATOR_ROLES = {"TRO", "TAO", "TCO", "TOO", "TOS"}
+OPERATOR_ROLES = {"TRV", "TRO", "TAO", "TCO", "TOO", "TOS"}
+
+# TRV — TrueVAR Registered Viewer: may look at the dashboard and the
+# tournaments, nothing else. Not really an operator: can't be selected
+# for a tournament, can't mark themselves free, has no operator profile.
+VIEWER_ROLES = {"TRV"}
+
+
+def is_viewer(operator: Optional[dict]) -> bool:
+    return bool(operator) and operator.get("role") in VIEWER_ROLES
 
 # Rights a TCO / TOO has on the tournaments they're selected for.
 _COMPETITION_PERMISSIONS = {
@@ -46,7 +55,9 @@ _COMPETITION_PERMISSIONS = {
 # TOS-only permissions nobody else is given: "operator:manage",
 # "tournament:create", "drafts:manage" and "inventory:manage".
 # TRO / TAO: see tournaments, run the venue schedule board — nothing else.
+# TRV: see the dashboard and tournaments — read only.
 ROLE_PERMISSIONS: Dict[str, Optional[set]] = {
+    "TRV": {"dashboard:view", "tournament:view"},
     "TRO": {"dashboard:view", "tournament:view", "schedule_board:manage"},
     "TAO": {"dashboard:view", "tournament:view", "schedule_board:manage"},
     "TCO": set(_COMPETITION_PERMISSIONS),
@@ -277,16 +288,17 @@ def _public_operator(uid: str, data: dict) -> dict:
     }
 
 
-def list_operator_cards(role: Optional[str] = None, exclude_role: Optional[str] = None) -> List[dict]:
+def list_operator_cards(role: Optional[str] = None, exclude_roles: tuple = ()) -> List[dict]:
     """Every operator (active first, then by name) — used by the
     /dashboard/operators page and GET /api/operators. `role` keeps only
-    that role (e.g. the TOOs loaded on demand), `exclude_role` drops one."""
+    that role (e.g. the TOOs / TRVs loaded on demand), `exclude_roles`
+    drops those."""
     q = db.collection("operators")
     if role:
         q = q.where("role", "==", role)
     ops = [_public_operator(d.id, d.to_dict() or {}) for d in q.stream()]
-    if exclude_role:
-        ops = [o for o in ops if o["role"] != exclude_role]
+    if exclude_roles:
+        ops = [o for o in ops if o["role"] not in exclude_roles]
     ops.sort(key=lambda o: (not o["active"], (o["name"] or o["email"] or o["uid"]).lower()))
     return ops
 
@@ -387,7 +399,7 @@ def search_operators_by_email(
     hits = []
     for d in q.stream():
         o = d.to_dict() or {}
-        if o.get("active") is not True or o.get("role") not in OPERATOR_ROLES:
+        if o.get("active") is not True or o.get("role") not in OPERATOR_ROLES or o.get("role") in VIEWER_ROLES:
             continue
         hits.append({"uid": d.id, "name": o.get("name"), "email": o.get("email"),
                      "photoUrl": o.get("photoUrl"), "role": o.get("role")})
@@ -547,7 +559,7 @@ def tournament_operator_meta(tournament_id: str, me_uid: Optional[str]) -> dict:
     """For the Operators card: selected and free-but-not-selected operators
     (sorted by role then name) and the viewer's own status."""
     meta = _ops_meta(tournament_id)
-    order = ["TOS", "TCO", "TOO", "TAO", "TRO"]
+    order = ["TOS", "TCO", "TOO", "TAO", "TRO", "TRV"]
     key = lambda e: (order.index(e.get("role")) if e.get("role") in order else 9, (e.get("name") or "").lower())
     selected_uids = {e.get("uid") for e in meta["selected"]}
     available_uids = {e.get("uid") for e in meta["available"]}
@@ -561,7 +573,9 @@ def tournament_operator_meta(tournament_id: str, me_uid: Optional[str]) -> dict:
 @operator_router.post("/me/availability/{tournament_id}",
                       dependencies=[Depends(require_operator("dashboard:view"))])
 def mark_me_free(tournament_id: str, request: Request):
-    """Any operator: "I'm free" for this tournament."""
+    """Any operator but a TRV: "I'm free" for this tournament."""
+    if is_viewer(request.state.operator):
+        raise OperatorForbiddenError("A TRV (viewer) can't be assigned to tournaments.")
     _tournament_doc(tournament_id)
     uid = request.state.operator.get("uid")
     ref = db.collection("operators").document(uid)
@@ -614,6 +628,8 @@ def select_operators(tournament_id: str, payload: SelectOperatorsRequest):
                                         and (snaps[u].to_dict() or {}).get("active") is True)]
     if inactive:
         raise HTTPException(status_code=400, detail="Only active operators can be selected.")
+    if any((snaps[u].to_dict() or {}).get("role") in VIEWER_ROLES for u in uids):
+        raise HTTPException(status_code=400, detail="A TRV (viewer) can't be assigned to tournaments.")
 
     batch = db.batch()
     for u in uids:
@@ -623,6 +639,8 @@ def select_operators(tournament_id: str, payload: SelectOperatorsRequest):
                      {"selectedTournamentIds": _with_id(op.get("selectedTournamentIds"), tournament_id, True)})
     _write_ops_meta(batch, tournament_id, meta)
     batch.commit()
+    # The selected operators get a push from the notifyOperatorAssigned
+    # Cloud Function (it watches selectedTournamentIds).
     return {"message": f"{len(uids)} operator{'s' if len(uids) != 1 else ''} selected", "selected": uids}
 
 
@@ -669,6 +687,7 @@ def remove_tournament_from_operators(tournament_id: str) -> Dict[str, int]:
 
 ROLE_MEANINGS = {"TOS": "Full access", "TCO": "Runs the competition",
                  "TOO": "Runs assigned tournaments only",
+                 "TRV": "Registered viewer — view only",
                  "TAO": "Schedule board only", "TRO": "Schedule board only"}
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 

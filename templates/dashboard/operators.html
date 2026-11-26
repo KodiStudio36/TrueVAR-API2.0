@@ -43,22 +43,24 @@
 </div>
 {% endmacro %}
 
-{# One section per role (TOS → TRO); revoked operators last, whatever their role.
-TOOs are not rendered — there are many; "Show TOOs" next to the TCOs loads
-them (active and revoked) into their own section. #}
+{# One section per role (TOS → TRV); revoked operators last, whatever their role.
+TOOs and TRVs are not rendered — there are many; "Show TOOs" next to the
+TCOs and "Show TRVs" next to the TROs load them (active and revoked) into
+their own section. #}
 <div id="op-sections">
     {% for role, meaning in groups %}
-    {% if role == "TOO" %}
-    <div id="too-section" hidden>
-        <div class="list-divider"><span>TOO · {{ meaning }} (<span id="too-count">0</span>)</span></div>
-        <div class="op-grid" id="too-grid"></div>
-        <p class="op-group-empty" id="too-empty" hidden>No TOO operators.</p>
+    {% if role in lazy_roles %}
+    <div class="lazy-section" data-role="{{ role }}" hidden>
+        <div class="list-divider"><span>{{ role }} · {{ meaning }} (<span class="lazy-count">0</span>)</span></div>
+        <div class="op-grid lazy-grid"></div>
+        <p class="op-group-empty lazy-empty" hidden>No {{ role }} operators.</p>
     </div>
     {% else %}
     {% set members = operators | selectattr("active") | selectattr("role", "equalto", role) | list %}
-    <div class="list-divider"><span>{{ role }} · {{ meaning }} ({{ members | length }}){% if role == "TCO" %}
-            <button type="button" class="text-link link-button op-divider-action" id="show-too">Show TOOs</button>{%
-            endif %}</span></div>
+    {% set lazy_after = {"TCO": "TOO", "TRO": "TRV"}.get(role) %}
+    <div class="list-divider"><span>{{ role }} · {{ meaning }} ({{ members | length }}){% if lazy_after %}
+            <button type="button" class="text-link link-button op-divider-action show-lazy"
+                data-role="{{ lazy_after }}">Show {{ lazy_after }}s</button>{% endif %}</span></div>
     {% if members %}
     <div class="op-grid">
         {% for o in members %}{{ op_card(o) }}{% endfor %}
@@ -97,6 +99,7 @@ them (active and revoked) into their own section. #}
                 <option value="TAO">TAO — schedule board only</option>
                 <option value="TCO" selected>TCO — runs the competition</option>
                 <option value="TOO">TOO — runs assigned tournaments only</option>
+                <option value="TRV">TRV — registered viewer, view only</option>
                 <option value="TOS">TOS — full access</option>
             </select>
         </label>
@@ -159,10 +162,10 @@ them (active and revoked) into their own section. #}
             } catch (err) { show(err.message, true); }
         });
 
-        // ── TOOs: loaded on demand ────────────────────────────────────
+        // ── TOOs / TRVs: loaded on demand ─────────────────────────────
         const ROLES = {{ roles | tojson }};
         const ME = {{ me | tojson }};
-        function tooCard(o) {
+        function lazyCard(o) {
             const initial = esc((o.name || o.email || "?")[0].toUpperCase());
             const avatar = o.photoUrl
                 ? `<img class="op-avatar" src="${esc(o.photoUrl)}" alt="" referrerpolicy="no-referrer">`
@@ -178,43 +181,49 @@ them (active and revoked) into their own section. #}
                     : `<button type="button" class="text-link link-button op-reactivate">Reactivate as ${esc(o.role)}</button>`;
                 actions = `<div class="op-actions">${actions}</div>`;
             }
+            // A TRV has no operator profile — name without a link.
+            const name = o.role === "TRV"
+                ? `<span class="op-name">${esc(o.name || "Unnamed user")}</span>`
+                : `<a class="op-name" href="/dashboard/operators/${encodeURIComponent(o.uid)}">${esc(o.name || "Unnamed user")}</a>`;
             return `<div class="op-card${o.active ? "" : " is-inactive"}" data-uid="${esc(o.uid)}" data-role="${esc(o.role)}">
                 ${avatar}
-                <a class="op-name" href="/dashboard/operators/${encodeURIComponent(o.uid)}">${esc(o.name || "Unnamed user")}</a>
+                ${name}
                 <div class="op-email">${esc(o.email || o.uid)}</div>
                 <div class="op-meta">
-                    <span class="op-role op-role-too">${esc(o.role)}</span>
+                    <span class="op-role op-role-${esc(o.role.toLowerCase())}">${esc(o.role)}</span>
                     ${o.active ? "" : '<span class="op-state">Revoked</span>'}
                 </div>
                 ${actions}
             </div>`;
         }
-        const showToo = document.getElementById("show-too");
-        const tooSection = document.getElementById("too-section");
-        let tooLoaded = false;
-        showToo?.addEventListener("click", async () => {
-            if (tooLoaded) {
-                tooSection.hidden = !tooSection.hidden;
-                showToo.textContent = tooSection.hidden ? "Show TOOs" : "Hide TOOs";
-                return;
-            }
-            showToo.disabled = true;
-            showToo.textContent = "Loading…";
-            try {
-                const data = await api("GET", "/api/operators?role=TOO");
-                const ops = data.operators;
-                document.getElementById("too-grid").innerHTML = ops.map(tooCard).join("");
-                document.getElementById("too-count").textContent = ops.filter(o => o.active).length;
-                document.getElementById("too-empty").hidden = ops.length > 0;
-                tooSection.hidden = false;
-                tooLoaded = true;
-                showToo.textContent = "Hide TOOs";
-            } catch (err) {
-                showToo.textContent = "Show TOOs";
-                show(err.message, true);
-            } finally {
-                showToo.disabled = false;
-            }
+        document.querySelectorAll(".show-lazy").forEach(btn => {
+            const role = btn.dataset.role;
+            const section = document.querySelector(`.lazy-section[data-role="${role}"]`);
+            let loaded = false;
+            btn.addEventListener("click", async () => {
+                if (loaded) {
+                    section.hidden = !section.hidden;
+                    btn.textContent = `${section.hidden ? "Show" : "Hide"} ${role}s`;
+                    return;
+                }
+                btn.disabled = true;
+                btn.textContent = "Loading…";
+                try {
+                    const data = await api("GET", `/api/operators?role=${encodeURIComponent(role)}`);
+                    const ops = data.operators;
+                    section.querySelector(".lazy-grid").innerHTML = ops.map(lazyCard).join("");
+                    section.querySelector(".lazy-count").textContent = ops.filter(o => o.active).length;
+                    section.querySelector(".lazy-empty").hidden = ops.length > 0;
+                    section.hidden = false;
+                    loaded = true;
+                    btn.textContent = `Hide ${role}s`;
+                } catch (err) {
+                    btn.textContent = `Show ${role}s`;
+                    show(err.message, true);
+                } finally {
+                    btn.disabled = false;
+                }
+            });
         });
 
         document.getElementById("sync-profiles").addEventListener("click", async () => {

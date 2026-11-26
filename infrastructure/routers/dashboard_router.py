@@ -9,6 +9,7 @@ from infrastructure.templates import templates
 from infrastructure.routers.operator_auth import (
     require_operator, list_operator_cards, operator_can, tournament_operator_meta, operator_profile,
     OperatorForbiddenError, register_template_globals, can_view_tournament, UNASSIGNED_PERMISSIONS,
+    is_viewer,
 )
 from usecases.tournament_usecase import GetTournamentUseCase
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
@@ -447,6 +448,7 @@ async def tournament_detail_page(request: Request, tournament_id: str, repo=Depe
     return templates.TemplateResponse(request, "dashboard/tournament_detail.html", {
         "request": request, "tournament": tournament, "scheduled_items": scheduled_items,
         "ops": ops, "me_uid": me_uid, "card_phase": card_phase,
+        "me_viewer": is_viewer(getattr(request.state, "operator", None)),
         "tournament_past": days_left is not None and days_left < 0,
         "summary": _tournament_summary(tournament_id, tournament),
     })
@@ -810,7 +812,11 @@ OPERATOR_GROUPS = [
     ("TOO", "Runs assigned tournaments only"),
     ("TAO", "Schedule board only"),
     ("TRO", "Schedule board only"),
+    ("TRV", "Registered viewer — view only"),
 ]
+
+# Roles not rendered with the page — loaded by their "Show …" button.
+LAZY_OPERATOR_ROLES = ("TOO", "TRV")
 
 
 @router.get("/operators", dependencies=[Depends(require_operator("operator:manage"))])
@@ -820,7 +826,8 @@ async def operators_page(request: Request):
     "Show TOOs" button loads them from /api/operators?role=TOO."""
     return templates.TemplateResponse(request, "dashboard/operators.html", {
         "request": request,
-        "operators": list_operator_cards(exclude_role="TOO"),
+        "operators": list_operator_cards(exclude_roles=LAZY_OPERATOR_ROLES),
+        "lazy_roles": LAZY_OPERATOR_ROLES,
         "roles": [r for r, _ in OPERATOR_GROUPS],
         "groups": OPERATOR_GROUPS,
         "me": request.state.operator.get("uid"),
@@ -837,6 +844,8 @@ async def operator_profile_page(request: Request, uid: str):
     profile = operator_profile(uid)
     if not profile:
         raise HTTPException(status_code=404, detail="Operator not found")
+    if is_viewer(profile):
+        raise OperatorForbiddenError("TRVs (registered viewers) have no operator profile.")
     return templates.TemplateResponse(request, "dashboard/operator_profile.html", {
         "request": request, "p": profile, "is_me": uid == me_uid,
     })

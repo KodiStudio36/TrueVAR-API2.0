@@ -2316,3 +2316,8 @@ a.op-name:hover {
     width: 100%;
     box-sizing: border-box;
 }
+
+.op-role-trv {
+    background: #f1f5f9;
+    color: #64748b;
+}

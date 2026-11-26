@@ -76,7 +76,8 @@
     {% endif %}
 
     <!-- ── OPERATOR CARD (active operators only) ─────────────────────── -->
-    {% if nav.operator and operator_profile is defined %}
+    {# Not for a TRV (registered viewer) — they have no operator profile #}
+    {% if nav.operator and nav.operator.role != "TRV" and operator_profile is defined %}
     {% set op = operator_profile(nav.operator.uid or user.uid) %}
     <div class="panel"
         style="padding: clamp(1.25rem, 5vw, 1.75rem); display: flex; flex-direction: column; justify-content: space-between;">
