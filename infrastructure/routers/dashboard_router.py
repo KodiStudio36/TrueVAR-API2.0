@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from infrastructure.templates import templates
 from infrastructure.routers.operator_auth import (
     require_operator, list_operator_cards, operator_can, tournament_operator_meta, operator_profile,
-    OperatorForbiddenError, register_template_globals,
+    OperatorForbiddenError, register_template_globals, can_view_tournament, UNASSIGNED_PERMISSIONS,
 )
 from usecases.tournament_usecase import GetTournamentUseCase
 from adapters.database.firebase_tournament_repository import FirebaseTournamentRepository
@@ -178,6 +178,25 @@ def _dashboard_entries(tournaments, now: datetime) -> List[dict]:
     return entries
 
 
+def _viewer(request: Request) -> dict:
+    return getattr(request.state, "operator", None) or {}
+
+
+def _visible_entries(request: Request, entries: List[dict]) -> List[dict]:
+    """Only the tournaments the viewer may open (a TOO: the ones they're
+    assigned to; everyone else: all of them)."""
+    me = _viewer(request)
+    return [e for e in entries if can_view_tournament(me, e["id"])]
+
+
+def _calendar_restricted(request: Request) -> bool:
+    """True for a viewer who can't see every tournament (TOO): every
+    calendar week without one of THEIR tournaments is crossed out as "Not
+    allowed" — whether or not other tournaments are in it."""
+    role = _viewer(request).get("role")
+    return role in UNASSIGNED_PERMISSIONS and "tournament:view" not in UNASSIGNED_PERMISSIONS[role]
+
+
 def _discipline_legend(entries: List[dict]) -> List[dict]:
     seen = {}
     for e in entries:
@@ -214,11 +233,15 @@ async def dashboard_page(request: Request, tournament_repo=Depends(get_tournamen
 
     # Mark the tournaments the viewing operator is free / selected for
     # (their own operators doc, already loaded by require_operator).
-    me = getattr(request.state, "operator", None) or {}
+    me = _viewer(request)
     mine_selected = set(me.get("selectedTournamentIds") or [])
     mine_free = set(me.get("availableTournamentIds") or [])
     for e in entries:
         e["me"] = "selected" if e["id"] in mine_selected else ("free" if e["id"] in mine_free else None)
+
+    # TOO: tournaments they're not on are left out everywhere (the calendar
+    # crosses out every week without one of theirs — see dashboard.html).
+    entries = _visible_entries(request, entries)
 
     # The list under the calendar: the next DASHBOARD_LIST_SIZE tournaments
     # from today, soonest first. Past and undated ones are on "View all".
@@ -228,6 +251,7 @@ async def dashboard_page(request: Request, tournament_repo=Depends(get_tournamen
         "request": request,
         "calendar": _build_calendar(entries, now.date()),
         "legend": _discipline_legend(entries),
+        "calendar_restricted": _calendar_restricted(request),
         "tournaments": upcoming[:DASHBOARD_LIST_SIZE],
         "tournaments_me": any(e["me"] for e in entries),
         "pending_drafts": _pending_draft_count(request),
@@ -242,10 +266,11 @@ async def all_tournaments_page(request: Request, tournament_repo=Depends(get_tou
       2. past     — still active (not archived) but dated before today
       3. archived — loaded 10 at a time by the page from
                     /dashboard/tournaments/archived
+    A TOO only gets the tournaments they're assigned to.
     """
     now = datetime.now(CALENDAR_TZ)
     today = now.date()
-    entries = _dashboard_entries(_all_active_tournaments(tournament_repo), now)
+    entries = _visible_entries(request, _dashboard_entries(_all_active_tournaments(tournament_repo), now))
 
     undated = [e for e in entries if e["date"] is None]
     upcoming = undated + sorted((e for e in entries if e["date"] is not None and e["date"] >= today),
@@ -270,7 +295,8 @@ async def archived_tournaments_fragment(request: Request, offset: int = 0, tourn
     for the All tournaments page's "Load more". Sorted here because the
     repository's paginated query doesn't return them by date. X-Has-More /
     X-Next-Offset headers drive the button."""
-    entries = _dashboard_entries(_all_tournaments(tournament_repo, "archived"), datetime.now(CALENDAR_TZ))
+    entries = _visible_entries(request, _dashboard_entries(_all_tournaments(tournament_repo, "archived"),
+                                                           datetime.now(CALENDAR_TZ)))
     entries.sort(key=lambda e: e["date"] or date.min, reverse=True)
     offset = max(offset, 0)
     page = entries[offset:offset + ARCHIVED_PAGE]
@@ -582,7 +608,9 @@ async def schedule_board_control_page(request: Request, tournament_id: str, repo
         active = repo.getTournamentsPaginated(status="active", limit=50, offset=0)
     except Exception:
         active = []
-    candidates = [_schedule_board_tournament(t) for t in active if _field(t, "id") != tournament_id]
+    me = _viewer(request)
+    candidates = [_schedule_board_tournament(t) for t in active
+                  if _field(t, "id") != tournament_id and can_view_tournament(me, _field(t, "id"))]
 
     return templates.TemplateResponse(request, "dashboard/schedule_board_control.html", {
         "request": request,
@@ -779,6 +807,7 @@ def _draft_schedule_plan(doc_id: str, d: dict) -> dict:
 OPERATOR_GROUPS = [
     ("TOS", "Full access"),
     ("TCO", "Runs the competition"),
+    ("TOO", "Runs assigned tournaments only"),
     ("TAO", "Schedule board only"),
     ("TRO", "Schedule board only"),
 ]
@@ -787,10 +816,11 @@ OPERATOR_GROUPS = [
 @router.get("/operators", dependencies=[Depends(require_operator("operator:manage"))])
 async def operators_page(request: Request):
     """TOS only — operator cards + "Add operator" (API: /api/operators in
-    operator_auth.py)."""
+    operator_auth.py). TOOs are many, so they aren't rendered here — the
+    "Show TOOs" button loads them from /api/operators?role=TOO."""
     return templates.TemplateResponse(request, "dashboard/operators.html", {
         "request": request,
-        "operators": list_operator_cards(),
+        "operators": list_operator_cards(exclude_role="TOO"),
         "roles": [r for r, _ in OPERATOR_GROUPS],
         "groups": OPERATOR_GROUPS,
         "me": request.state.operator.get("uid"),

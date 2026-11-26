@@ -28,7 +28,19 @@ class OperatorForbiddenError(HTTPException):
 
 # ── Roles & permissions ──────────────────────────────────────────────────
 
-OPERATOR_ROLES = {"TRO", "TAO", "TCO", "TOS"}
+OPERATOR_ROLES = {"TRO", "TAO", "TCO", "TOO", "TOS"}
+
+# Rights a TCO / TOO has on the tournaments they're selected for.
+_COMPETITION_PERMISSIONS = {
+    "dashboard:view", "tournament:view",
+    "schedule_board:manage",
+    "brackets:manage",
+    "categories:manage",
+    "broadcasts:manage",
+    "matches:manage",
+    "registrations:manage",
+    "weighin:view",
+}
 
 # None = wildcard (all permissions). TOS "can do anything" — including the
 # TOS-only permissions nobody else is given: "operator:manage",
@@ -37,33 +49,77 @@ OPERATOR_ROLES = {"TRO", "TAO", "TCO", "TOS"}
 ROLE_PERMISSIONS: Dict[str, Optional[set]] = {
     "TRO": {"dashboard:view", "tournament:view", "schedule_board:manage"},
     "TAO": {"dashboard:view", "tournament:view", "schedule_board:manage"},
-    "TCO": {
-        "dashboard:view", "tournament:view",
-        "schedule_board:manage",
-        "brackets:manage",
-        "categories:manage",
-        "broadcasts:manage",
-        "matches:manage",
-        "registrations:manage",
-        "weighin:view",
-    },
+    "TCO": set(_COMPETITION_PERMISSIONS),
+    "TOO": set(_COMPETITION_PERMISSIONS),
     "TOS": None,
 }
 
+# Tournament-scoped roles: ROLE_PERMISSIONS above applies only on the
+# tournaments the operator is selected for (operators/{uid}
+# .selectedTournamentIds). Everywhere else they fall back to this set:
+#   TCO → same as TRO / TAO (sees every tournament, schedule board).
+#   TOO → the dashboard shell only; other tournaments are hidden from them
+#         (locked pins in the calendar, 403 on the tournament's pages).
+UNASSIGNED_PERMISSIONS: Dict[str, set] = {
+    "TCO": set(ROLE_PERMISSIONS["TRO"]),
+    "TOO": {"dashboard:view"},
+}
+SCOPED_ROLES = set(UNASSIGNED_PERMISSIONS)
+
 
 def role_has_permission(role: str, permission: str) -> bool:
+    """The role's permission at its best (on an assigned tournament)."""
     perms = ROLE_PERMISSIONS.get(role)
     if perms is None:
         return True  # TOS wildcard
     return permission in perms
 
 
-def operator_can(request, permission: str) -> bool:
+def assigned_tournament_ids(operator: Optional[dict]) -> set:
+    return set((operator or {}).get("selectedTournamentIds") or [])
+
+
+def is_assigned(operator: Optional[dict], tournament_id: Optional[str]) -> bool:
+    return bool(tournament_id) and tournament_id in assigned_tournament_ids(operator)
+
+
+def can_view_tournament(operator: Optional[dict], tournament_id: Optional[str]) -> bool:
+    """False only for a TOO looking at a tournament they're not on."""
+    if not operator:
+        return False
+    return operator_has_permission(operator, "tournament:view", tournament_id)
+
+
+def operator_has_permission(operator: dict, permission: str, tournament_id: Optional[str] = None) -> bool:
+    """The real check. For TCO / TOO the answer depends on the tournament:
+      • tournament given  → full role rights if selected for it, else
+                            UNASSIGNED_PERMISSIONS;
+      • no tournament     → the unassigned set, or the full rights if they
+                            are selected for at least one tournament (routes
+                            like the athlete search aren't tied to one)."""
+    role = operator.get("role")
+    if not role_has_permission(role, permission):
+        return False
+    if role not in SCOPED_ROLES or permission in UNASSIGNED_PERMISSIONS[role]:
+        return True
+    if tournament_id:
+        return is_assigned(operator, tournament_id)
+    return bool(assigned_tournament_ids(operator))
+
+
+def operator_can(request, permission: str, tournament_id: Optional[str] = None) -> bool:
     """For templates: {% if can(request, "brackets:manage") %} … {% endif %}.
     Uses the operator record require_operator already put on request.state,
-    so it costs no extra read. False when there's no operator (hide)."""
-    operator = getattr(getattr(request, "state", None), "operator", None)
-    return bool(operator) and role_has_permission(operator.get("role"), permission)
+    so it costs no extra read. False when there's no operator (hide).
+    The tournament defaults to the one in the URL (/tournaments/{id}/…),
+    so pages of a tournament get the TCO / TOO answer for it."""
+    state = getattr(request, "state", None)
+    operator = getattr(state, "operator", None)
+    if not operator:
+        return False
+    if tournament_id is None:
+        tournament_id = getattr(state, "operator_tournament_id", None)
+    return operator_has_permission(operator, permission, tournament_id)
 
 
 # ── Operator record lookup ────────────────────────────────────────────────
@@ -86,6 +142,23 @@ def get_operator_record(uid: str) -> Optional[dict]:
     return data
 
 
+def _request_tournament_id(request: Request) -> Optional[str]:
+    """The tournament a request is about: the {tournament_id} path param,
+    or — for /api/matches/{sport}/{discipline}/{match_id}/… — the match
+    document's tournamentId (one read, only done for TCO / TOO)."""
+    params = request.path_params or {}
+    tid = params.get("tournament_id")
+    if tid:
+        return tid
+    if {"sport", "discipline", "match_id"} <= set(params):
+        snap = (db.collection("sports").document(params["sport"])
+                .collection("disciplines").document(params["discipline"])
+                .collection("matches").document(params["match_id"]).get())
+        if snap.exists:
+            return (snap.to_dict() or {}).get("tournamentId") or None
+    return None
+
+
 # ── Dependency factory ─────────────────────────────────────────────────────
 
 def require_operator(permission: str):
@@ -95,6 +168,11 @@ def require_operator(permission: str):
     operator at all (-> redirect home on /dashboard, plain 403 on /api).
     Raises OperatorForbiddenError if they ARE an operator but their role
     lacks this permission (-> 403 page on /dashboard, 403 JSON on /api).
+
+    TCO / TOO: checked against the tournament of the request (see
+    operator_has_permission). Any route of a tournament also needs
+    "tournament:view" for it — that's what keeps a TOO out of tournaments
+    they aren't selected for, whatever the route's own permission is.
 
     The record is cached on request.state, so a route with both the
     router-level check and its own stricter check reads Firestore once.
@@ -106,13 +184,32 @@ def require_operator(permission: str):
         operator = getattr(request.state, "operator", None)
         if not operator or operator.get("uid") != user["uid"]:
             operator = get_operator_record(user["uid"])
+            request.state.operator_tournament_id = None
+            request.state.operator_tournament_resolved = False
         if not operator:
             raise OperatorAuthRequiredError()
 
-        if not role_has_permission(operator["role"], permission):
+        role = operator["role"]
+        if not role_has_permission(role, permission):
             raise OperatorForbiddenError(
-                f"Your role ({operator['role']}) does not have '{permission}' access."
+                f"Your role ({role}) does not have '{permission}' access."
             )
+
+        if role in SCOPED_ROLES:
+            if not getattr(request.state, "operator_tournament_resolved", False):
+                request.state.operator_tournament_id = _request_tournament_id(request)
+                request.state.operator_tournament_resolved = True
+            tid = request.state.operator_tournament_id
+            if tid and not operator_has_permission(operator, "tournament:view", tid):
+                raise OperatorForbiddenError(
+                    "You're not allowed to see this tournament — you are not assigned to it."
+                )
+            if not operator_has_permission(operator, permission, tid):
+                raise OperatorForbiddenError(
+                    f"As {role} you can only do this on tournaments you're assigned to."
+                    if tid else
+                    f"As {role} you can only do this once you're assigned to a tournament."
+                )
 
         request.state.operator = operator
         return operator
@@ -180,10 +277,16 @@ def _public_operator(uid: str, data: dict) -> dict:
     }
 
 
-def list_operator_cards() -> List[dict]:
+def list_operator_cards(role: Optional[str] = None, exclude_role: Optional[str] = None) -> List[dict]:
     """Every operator (active first, then by name) — used by the
-    /dashboard/operators page and GET /api/operators."""
-    ops = [_public_operator(d.id, d.to_dict() or {}) for d in db.collection("operators").stream()]
+    /dashboard/operators page and GET /api/operators. `role` keeps only
+    that role (e.g. the TOOs loaded on demand), `exclude_role` drops one."""
+    q = db.collection("operators")
+    if role:
+        q = q.where("role", "==", role)
+    ops = [_public_operator(d.id, d.to_dict() or {}) for d in q.stream()]
+    if exclude_role:
+        ops = [o for o in ops if o["role"] != exclude_role]
     ops.sort(key=lambda o: (not o["active"], (o["name"] or o["email"] or o["uid"]).lower()))
     return ops
 
@@ -263,8 +366,34 @@ def create_operator(payload: CreateOperatorRequest, request: Request):
 
 
 @operator_router.get("", dependencies=MANAGE)
-def list_operators():
-    return {"operators": list_operator_cards()}
+def list_operators(role: Optional[str] = Query(None)):
+    """?role=TOO → only that role (the operators page loads TOOs on demand)."""
+    return {"operators": list_operator_cards(role=_check_role(role) if role else None)}
+
+
+@operator_router.get("/search", dependencies=MANAGE)
+def search_operators_by_email(
+    email: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=25),
+):
+    """Prefix search on ACTIVE operators' email — the tournament page's
+    "Add operator" box (any operator, not only the ones marked free).
+    Filtered in Python so no composite index is needed."""
+    key = email.strip().lower()
+    q = (db.collection("operators")
+         .where("email", ">=", key)
+         .where("email", "<=", key + "\uf8ff")
+         .limit(limit * 3))
+    hits = []
+    for d in q.stream():
+        o = d.to_dict() or {}
+        if o.get("active") is not True or o.get("role") not in OPERATOR_ROLES:
+            continue
+        hits.append({"uid": d.id, "name": o.get("name"), "email": o.get("email"),
+                     "photoUrl": o.get("photoUrl"), "role": o.get("role")})
+        if len(hits) >= limit:
+            break
+    return {"operators": hits}
 
 
 @operator_router.post("/sync-profiles", dependencies=MANAGE)
@@ -330,7 +459,7 @@ def revoke_operator(uid: str, request: Request):
 #
 #   tournaments/{tid}/meta/operators = {
 #       available: [{uid, name, photoUrl, role, at}],   # marked themselves free
-#       selected:  [{uid, name, photoUrl, role, at}],   # picked by a TOS (⊂ available)
+#       selected:  [{uid, name, photoUrl, role, at}],   # picked by a TOS (free or added by email)
 #       updatedAt }
 #   operators/{uid}.availableTournamentIds / .selectedTournamentIds = [tid, …]
 #
@@ -418,7 +547,7 @@ def tournament_operator_meta(tournament_id: str, me_uid: Optional[str]) -> dict:
     """For the Operators card: selected and free-but-not-selected operators
     (sorted by role then name) and the viewer's own status."""
     meta = _ops_meta(tournament_id)
-    order = ["TOS", "TCO", "TAO", "TRO"]
+    order = ["TOS", "TCO", "TOO", "TAO", "TRO"]
     key = lambda e: (order.index(e.get("role")) if e.get("role") in order else 9, (e.get("name") or "").lower())
     selected_uids = {e.get("uid") for e in meta["selected"]}
     available_uids = {e.get("uid") for e in meta["available"]}
@@ -471,26 +600,27 @@ class SelectOperatorsRequest(BaseModel):
 
 @operator_router.post("/selection/{tournament_id}", dependencies=MANAGE)
 def select_operators(tournament_id: str, payload: SelectOperatorsRequest):
-    """TOS: select operators for the tournament — only ones who marked
-    themselves free. Several at once."""
+    """TOS: select operators for the tournament, several at once — any
+    active operator, whether or not they marked themselves free (the
+    page's "Add operator" search finds the others by email)."""
     _tournament_doc(tournament_id)
     uids = list(dict.fromkeys(u.strip() for u in payload.uids if u and u.strip()))
     if not uids:
         raise HTTPException(status_code=400, detail="Choose at least one operator.")
     meta = _ops_meta(tournament_id)
-    free = {e.get("uid") for e in meta["available"]}
-    not_free = [u for u in uids if u not in free]
-    if not_free:
-        raise HTTPException(status_code=400, detail="Only operators who marked themselves free can be selected.")
 
     snaps = {s.id: s for s in db.get_all([db.collection("operators").document(u) for u in uids])}
+    inactive = [u for u in uids if not (snaps.get(u) and snaps[u].exists
+                                        and (snaps[u].to_dict() or {}).get("active") is True)]
+    if inactive:
+        raise HTTPException(status_code=400, detail="Only active operators can be selected.")
+
     batch = db.batch()
     for u in uids:
-        op = (snaps[u].to_dict() or {}) if snaps[u].exists else {}
+        op = snaps[u].to_dict() or {}
         meta["selected"] = _replace(meta["selected"], u, _op_copy(u, op))
-        if snaps[u].exists:
-            batch.update(snaps[u].reference,
-                         {"selectedTournamentIds": _with_id(op.get("selectedTournamentIds"), tournament_id, True)})
+        batch.update(snaps[u].reference,
+                     {"selectedTournamentIds": _with_id(op.get("selectedTournamentIds"), tournament_id, True)})
     _write_ops_meta(batch, tournament_id, meta)
     batch.commit()
     return {"message": f"{len(uids)} operator{'s' if len(uids) != 1 else ''} selected", "selected": uids}
@@ -498,7 +628,8 @@ def select_operators(tournament_id: str, payload: SelectOperatorsRequest):
 
 @operator_router.delete("/selection/{tournament_id}/{uid}", dependencies=MANAGE)
 def unselect_operator(tournament_id: str, uid: str):
-    """TOS: take an operator off the tournament (they stay marked free)."""
+    """TOS: take an operator off the tournament (if they marked themselves
+    free, they stay free)."""
     meta = _ops_meta(tournament_id)
     meta["selected"] = _replace(meta["selected"], uid, None)
     ref = db.collection("operators").document(uid)
@@ -537,6 +668,7 @@ def remove_tournament_from_operators(tournament_id: str) -> Dict[str, int]:
 # ── Operator profile (read model for /dashboard/operators/{uid}) ─────────
 
 ROLE_MEANINGS = {"TOS": "Full access", "TCO": "Runs the competition",
+                 "TOO": "Runs assigned tournaments only",
                  "TAO": "Schedule board only", "TRO": "Schedule board only"}
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 

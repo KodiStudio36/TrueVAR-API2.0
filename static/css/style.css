@@ -2257,3 +2257,62 @@ a.op-name:hover {
     padding-top: 0.9rem;
     border-top: 1px solid #eef1f4;
 }
+/* ── TOO: every calendar week without one of their tournaments is
+   crossed out with "Not allowed" (other tournaments are never shown). ── */
+.tcal-week.is-restricted {
+    background-color: #f8fafc;
+    background-image:
+        linear-gradient(to top right, transparent calc(50% - 1px), #cbd5e1 calc(50% - 1px), #cbd5e1 calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom right, transparent calc(50% - 1px), #cbd5e1 calc(50% - 1px), #cbd5e1 calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+.tcal-restricted {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.tcal-legend-x {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 3px;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+    background-image:
+        linear-gradient(to top right, transparent calc(50% - 1px), #94a3b8 calc(50% - 1px), #94a3b8 calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom right, transparent calc(50% - 1px), #94a3b8 calc(50% - 1px), #94a3b8 calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+.op-role-too {
+    background: #fef6e7;
+    color: #8a5a00;
+}
+
+/* Operators page: TOO section loaded on demand */
+.op-divider-action {
+    margin-left: 0.75rem;
+    font-size: 0.8rem;
+}
+
+/* Tournament page: TOS adds any operator by email */
+.op-add-any {
+    margin-top: 1rem;
+    position: relative;
+}
+
+.op-add-any input {
+    width: 100%;
+    box-sizing: border-box;
+}

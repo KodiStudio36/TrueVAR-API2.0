@@ -43,17 +43,29 @@
 </div>
 {% endmacro %}
 
-{# One section per role (TOS → TRO); revoked operators last, whatever their role. #}
+{# One section per role (TOS → TRO); revoked operators last, whatever their role.
+TOOs are not rendered — there are many; "Show TOOs" next to the TCOs loads
+them (active and revoked) into their own section. #}
 <div id="op-sections">
     {% for role, meaning in groups %}
+    {% if role == "TOO" %}
+    <div id="too-section" hidden>
+        <div class="list-divider"><span>TOO · {{ meaning }} (<span id="too-count">0</span>)</span></div>
+        <div class="op-grid" id="too-grid"></div>
+        <p class="op-group-empty" id="too-empty" hidden>No TOO operators.</p>
+    </div>
+    {% else %}
     {% set members = operators | selectattr("active") | selectattr("role", "equalto", role) | list %}
-    <div class="list-divider"><span>{{ role }} · {{ meaning }} ({{ members | length }})</span></div>
+    <div class="list-divider"><span>{{ role }} · {{ meaning }} ({{ members | length }}){% if role == "TCO" %}
+            <button type="button" class="text-link link-button op-divider-action" id="show-too">Show TOOs</button>{%
+            endif %}</span></div>
     {% if members %}
     <div class="op-grid">
         {% for o in members %}{{ op_card(o) }}{% endfor %}
     </div>
     {% else %}
     <p class="op-group-empty">No {{ role }} operators.</p>
+    {% endif %}
     {% endif %}
     {% endfor %}
 
@@ -84,6 +96,7 @@
                 <option value="TRO">TRO — schedule board only</option>
                 <option value="TAO">TAO — schedule board only</option>
                 <option value="TCO" selected>TCO — runs the competition</option>
+                <option value="TOO">TOO — runs assigned tournaments only</option>
                 <option value="TOS">TOS — full access</option>
             </select>
         </label>
@@ -144,6 +157,64 @@
                     location.reload();
                 }
             } catch (err) { show(err.message, true); }
+        });
+
+        // ── TOOs: loaded on demand ────────────────────────────────────
+        const ROLES = {{ roles | tojson }};
+        const ME = {{ me | tojson }};
+        function tooCard(o) {
+            const initial = esc((o.name || o.email || "?")[0].toUpperCase());
+            const avatar = o.photoUrl
+                ? `<img class="op-avatar" src="${esc(o.photoUrl)}" alt="" referrerpolicy="no-referrer">`
+                : `<span class="op-avatar op-avatar-initial" aria-hidden="true">${initial}</span>`;
+            let actions = "";
+            if (o.uid !== ME) {
+                actions = o.active
+                    ? `<label class="sr-only" for="role-${esc(o.uid)}">Role</label>
+                       <select class="op-role-select" id="role-${esc(o.uid)}">
+                         ${ROLES.map(r => `<option value="${r}" ${r === o.role ? "selected" : ""}>${r}</option>`).join("")}
+                       </select>
+                       <button type="button" class="text-link link-button op-danger op-revoke">Revoke</button>`
+                    : `<button type="button" class="text-link link-button op-reactivate">Reactivate as ${esc(o.role)}</button>`;
+                actions = `<div class="op-actions">${actions}</div>`;
+            }
+            return `<div class="op-card${o.active ? "" : " is-inactive"}" data-uid="${esc(o.uid)}" data-role="${esc(o.role)}">
+                ${avatar}
+                <a class="op-name" href="/dashboard/operators/${encodeURIComponent(o.uid)}">${esc(o.name || "Unnamed user")}</a>
+                <div class="op-email">${esc(o.email || o.uid)}</div>
+                <div class="op-meta">
+                    <span class="op-role op-role-too">${esc(o.role)}</span>
+                    ${o.active ? "" : '<span class="op-state">Revoked</span>'}
+                </div>
+                ${actions}
+            </div>`;
+        }
+        const showToo = document.getElementById("show-too");
+        const tooSection = document.getElementById("too-section");
+        let tooLoaded = false;
+        showToo?.addEventListener("click", async () => {
+            if (tooLoaded) {
+                tooSection.hidden = !tooSection.hidden;
+                showToo.textContent = tooSection.hidden ? "Show TOOs" : "Hide TOOs";
+                return;
+            }
+            showToo.disabled = true;
+            showToo.textContent = "Loading…";
+            try {
+                const data = await api("GET", "/api/operators?role=TOO");
+                const ops = data.operators;
+                document.getElementById("too-grid").innerHTML = ops.map(tooCard).join("");
+                document.getElementById("too-count").textContent = ops.filter(o => o.active).length;
+                document.getElementById("too-empty").hidden = ops.length > 0;
+                tooSection.hidden = false;
+                tooLoaded = true;
+                showToo.textContent = "Hide TOOs";
+            } catch (err) {
+                showToo.textContent = "Show TOOs";
+                show(err.message, true);
+            } finally {
+                showToo.disabled = false;
+            }
         });
 
         document.getElementById("sync-profiles").addEventListener("click", async () => {

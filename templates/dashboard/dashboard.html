@@ -16,9 +16,12 @@
     <div class="tcal-row" role="row">
         <div class="tcal-month" role="rowheader">{{ month.label }}</div>
         {% for week in month.weeks %}
-        <div class="tcal-week{% if not week.pins %} is-empty{% endif %}{% if week.isCurrent %} is-current{% endif %}{% if week.isPast %} is-past{% endif %}{% if loop.index > 2 %} tips-left{% endif %}"
+        <div class="tcal-week{% if not week.pins %} is-empty{% if calendar_restricted %} is-restricted{% endif %}{% endif %}{% if week.isCurrent %} is-current{% endif %}{% if week.isPast %} is-past{% endif %}{% if loop.index > 2 %} tips-left{% endif %}"
             role="cell">
             <span class="tcal-range">{{ week.range }}</span>
+            {% if calendar_restricted and not week.pins %}
+            <span class="tcal-restricted">Not allowed</span>
+            {% endif %}
             {% if week.pins %}
             <div class="tcal-pins">
                 {% for t in week.pins %}
@@ -61,7 +64,7 @@
     {% endfor %}
 </div>
 
-{% if legend %}
+{% if legend or calendar_restricted %}
 <ul class="tcal-legend" aria-label="Discipline colours">
     {% for d in legend %}
     <li><span class="tcal-legend-dot" style="background: {{ d.color }};"></span>{{ d.label }}</li>
@@ -69,6 +72,9 @@
     {% if tournaments_me %}
     <li class="tcal-legend-me"><span class="tcal-legend-badge">✓</span>You're free</li>
     <li class="tcal-legend-me"><span class="tcal-legend-badge is-selected">★</span>You're selected</li>
+    {% endif %}
+    {% if calendar_restricted %}
+    <li class="tcal-legend-me"><span class="tcal-legend-x" aria-hidden="true"></span>Not allowed — only your tournaments are shown</li>
     {% endif %}
 </ul>
 {% endif %}

@@ -252,6 +252,17 @@ Schedule Board cards either. #}
         </div>
         {% endif %}
 
+        {# TOS: add ANY active operator (not only the free ones) — search by email #}
+        {% if can_operators %}
+        <div class="op-add-any">
+            <label class="op-field">Add operator by email
+                <input type="search" id="op-search" placeholder="name@example.com" autocomplete="off"
+                    data-selected="{{ ops.selected | map(attribute='uid') | join(',') }}">
+            </label>
+            <ul id="op-search-results" class="op-results" aria-label="Matching operators"></ul>
+        </div>
+        {% endif %}
+
         <p class="eq-message" id="op-message" role="status" hidden></p>
 
         {# The viewer's own status, at the bottom #}
@@ -1818,11 +1829,55 @@ JAVASCRIPT
             catch (err) { addBtn.disabled = false; show(err.message, true); }
         });
 
+        // TOS: search every active operator by email, click one to add them
+        const search = document.getElementById("op-search");
+        const results = document.getElementById("op-search-results");
+        if (search) {
+            const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+            const taken = new Set((search.dataset.selected || "").split(",").filter(Boolean));
+            let timer = null, seq = 0;
+            const row = o => {
+                const on = taken.has(o.uid);
+                const avatar = o.photoUrl
+                    ? `<img class="op-result-avatar" src="${esc(o.photoUrl)}" alt="" referrerpolicy="no-referrer">`
+                    : `<span class="op-result-avatar op-avatar-initial">${esc((o.name || o.email || "?")[0].toUpperCase())}</span>`;
+                return `<li><button type="button" class="op-result" data-uid="${esc(o.uid)}" ${on ? "disabled" : ""}>
+                    ${avatar}
+                    <span><strong>${esc(o.name || "Unnamed user")}</strong><br><small>${esc(o.email)}</small></span>
+                    <em>${on ? "already selected" : esc(o.role)}</em>
+                </button></li>`;
+            };
+            search.addEventListener("input", () => {
+                clearTimeout(timer);
+                const q = search.value.trim();
+                if (!q) { results.innerHTML = ""; return; }
+                timer = setTimeout(async () => {
+                    const mine = ++seq;
+                    try {
+                        const data = await api("GET", `/api/operators/search?email=${encodeURIComponent(q)}`);
+                        if (mine !== seq) return;
+                        results.innerHTML = data.operators.length
+                            ? data.operators.map(row).join("")
+                            : '<li class="op-results-empty">No operator with that email.</li>';
+                    } catch (err) {
+                        results.innerHTML = `<li class="op-results-empty">${esc(err.message)}</li>`;
+                    }
+                }, 250);
+            });
+            results.addEventListener("click", async (e) => {
+                const btn = e.target.closest(".op-result");
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                try { await api("POST", `/api/operators/selection/${encodeURIComponent(TID)}`, { uids: [btn.dataset.uid] }); reload(); }
+                catch (err) { btn.disabled = false; show(err.message, true); }
+            });
+        }
+
         card.addEventListener("click", async (e) => {
             const btn = e.target.closest(".op-unselect");
             if (!btn) return;
             const pin = btn.closest(".apin");
-            if (!confirm(`Remove ${pin.dataset.name} from this tournament? They stay marked as free.`)) return;
+            if (!confirm(`Remove ${pin.dataset.name} from this tournament?`)) return;
             btn.disabled = true;
             try { await api("DELETE", `/api/operators/selection/${encodeURIComponent(TID)}/${encodeURIComponent(pin.dataset.uid)}`); reload(); }
             catch (err) { btn.disabled = false; show(err.message, true); }
