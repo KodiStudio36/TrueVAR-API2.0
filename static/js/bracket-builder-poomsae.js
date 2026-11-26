@@ -482,7 +482,7 @@ function renderResolvedSystems() {
             </div>`)
         .join("");
 
-    // Seed placement only matters if something is single elimination.
+    // Seeding only matters if something is single elimination.
     document.getElementById("placementFieldWrap").classList.toggle("hidden", !resolved.some(r => r.key === "single_elimination"));
 }
 
@@ -821,7 +821,6 @@ async function generateEverything() {
     if (!ensureReadyToGenerate()) return;
     await loadPoomsaeDraw(); // fresh — the draw may have been redone in another tab
 
-    const placementFn = PLACEMENT_STRATEGIES[document.getElementById("placementSelect").value];
 
     const { skippedSingleEntryCount, totalConflicts } = await buildAllBrackets({
         categories: flatCategories.slice().sort(categorySortKey),
@@ -829,7 +828,7 @@ async function generateEverything() {
         systemKey: cat => POOMSAE_SYSTEMS[resolveSystem(cat).key].system,
         allowSingleEntry: (cat, system) => system === "cut_off", // a solo performance needs no opponent
         build: (cat, seeded, system) => {
-            if (system === "single_elimination") return generateSingleElimination(cat.code, seeded, placementFn);
+            if (system === "single_elimination") return generateSingleElimination(cat.code, seeded, WT_PLACEMENT);
             if (system === "round_robin") return generateRoundRobin(cat.code, seeded);
             return generateCutOff(cat.code, seeded, POOMSAE_SYSTEMS[resolveSystem(cat).key].structure);
         },

@@ -1,0 +1,1768 @@
+{% extends "dashboard/base.html" %}
+{#
+Marketing · Results Studio — social-media result images for ONE tournament.
+
+Reads what 🏅 Compute Results (live queue) already wrote:
+tournaments/{id}/results/{categoryCode}
+{ placements: { entryId: { placement, name, clubId, clubName,
+country, alone } }, status, system }
+tournaments/{id}/brackets categoryCode → categoryLabel
+Nothing is written. Slides are built in the page (TrueVAR branding: serif
+titles, navy, hatch, outlined sport word) and exported as PNGs
+(html-to-image), one by one or all at once as a ZIP.
+
+Formats: 4:5 feed post 1080×1350, 1:1 1080×1080, 9:16 story 1080×1920.
+?demo=1 shows sample data (for trying it out before results exist).
+#}
+{% block content %}
+
+{% macro iso_utc(dt) -%}
+{%- if dt and dt.isoformat is defined -%}{{ dt.isoformat() ~ ("" if dt.tzinfo else "Z") }}
+{%- elif dt -%}{{ dt }}{%- endif -%}
+{%- endmacro %}
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link crossorigin="anonymous"
+    href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=Inter:wght@500;600;700&family=IBM+Plex+Mono:wght@600&family=Big+Shoulders+Display:wght@900&display=swap"
+    rel="stylesheet">
+
+<div class="mk-wrap">
+
+    <div class="mk-head">
+        <div>
+            <a href="/dashboard/tournaments/{{ tournament.id }}" class="mk-back">&larr; {{ tournament.title }}</a>
+            <span class="mk-eyebrow">Marketing</span>
+            <h1 class="mk-title">Social Media Results</h1>
+            <p class="mk-sub">Carousel images from the computed results — cover, medal table and podiums per
+                category. Run 🏅 Compute Results in the live queue first; reload this page after a new run.</p>
+        </div>
+        <div class="mk-status" id="mk-status"><span class="mk-status-dot"></span><span id="mk-status-text">Loading
+                results…</span></div>
+    </div>
+
+    <div class="mk-layout">
+
+        {# ── CONTROLS ─────────────────────────────────────────────── #}
+        <aside class="mk-panel mk-controls" id="mk-controls">
+
+            <div class="mk-group">
+                <span class="mk-label">Format</span>
+                <div class="mk-seg" data-name="format">
+                    <button type="button" data-value="portrait" aria-pressed="true">Post 4:5</button>
+                    <button type="button" data-value="square" aria-pressed="false">Square 1:1</button>
+                    <button type="button" data-value="story" aria-pressed="false">Story 9:16</button>
+                </div>
+            </div>
+
+            <div class="mk-group">
+                <span class="mk-label">Slides</span>
+                <label class="mk-check"><input type="checkbox" id="mk-inc-cover" checked> Cover</label>
+                <label class="mk-check"><input type="checkbox" id="mk-inc-medals" checked> Medal table</label>
+                <label class="mk-check"><input type="checkbox" id="mk-inc-results" checked> Category podiums</label>
+            </div>
+
+            <div class="mk-group">
+                <span class="mk-label">Age divisions</span>
+                <div id="mk-divisions" class="mk-divisions"><span class="mk-hint">—</span></div>
+            </div>
+
+            <div class="mk-group">
+                <span class="mk-label">Medal table</span>
+                <div class="mk-seg" data-name="medalBy">
+                    <button type="button" data-value="country" aria-pressed="true">Countries</button>
+                    <button type="button" data-value="club" aria-pressed="false">Clubs</button>
+                </div>
+                <label class="mk-field">Rows per slide
+                    <select id="mk-medal-rows">
+                        <option value="auto" selected>Auto</option>
+                        <option value="10">10</option>
+                        <option value="15">15</option>
+                        <option value="20">20</option>
+                    </select>
+                </label>
+                <label class="mk-check"><input type="checkbox" id="mk-medal-all"> All rows (more slides)</label>
+            </div>
+
+            <div class="mk-group">
+                <span class="mk-label">Podiums</span>
+                <label class="mk-field">Categories per slide
+                    <select id="mk-per-slide">
+                        <option value="auto" selected>Auto</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                    </select>
+                </label>
+                <label class="mk-field">Names
+                    <select id="mk-names">
+                        <option value="full" selected>Full — Andrej Bohony</option>
+                        <option value="initials">Initials — A. Bohony</option>
+                    </select>
+                </label>
+                <label class="mk-field">Next to the name
+                    <select id="mk-show">
+                        <option value="club" selected>Club</option>
+                        <option value="country">Country code</option>
+                        <option value="both">Club + country</option>
+                    </select>
+                </label>
+                <label class="mk-check"><input type="checkbox" id="mk-only-complete" checked> Finished categories
+                    only</label>
+                <label class="mk-check"><input type="checkbox" id="mk-skip-alone" checked> Skip categories with one
+                    athlete</label>
+            </div>
+
+            <div class="mk-group">
+                <span class="mk-label">Text</span>
+                <label class="mk-field">Title <input type="text" id="mk-t-title"></label>
+                <label class="mk-field">Headline on the cover <input type="text" id="mk-t-headline"></label>
+                <label class="mk-field">Top line <input type="text" id="mk-t-kicker"></label>
+                <label class="mk-field">Footer <input type="text" id="mk-t-footer"></label>
+            </div>
+        </aside>
+
+        {# ── PREVIEW ──────────────────────────────────────────────── #}
+        <section class="mk-main">
+            <div class="mk-panel mk-toolbar">
+                <div>
+                    <strong id="mk-count">0 slides</strong>
+                    <span class="mk-hint" id="mk-size"></span>
+                </div>
+                <div class="mk-toolbar-actions">
+                    <button type="button" class="btn btn-ghost" id="mk-copy-caption">Copy caption</button>
+                    <button type="button" class="btn btn-primary" id="mk-download-all" disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <path d="M7 10l5 5 5-5" />
+                            <path d="M12 15V3" />
+                        </svg>
+                        Download all (ZIP)
+                    </button>
+                </div>
+            </div>
+
+            <details class="mk-panel mk-caption">
+                <summary>Post caption</summary>
+                <textarea id="mk-caption" rows="7" spellcheck="false"></textarea>
+            </details>
+
+            <div class="mk-slides" id="mk-slides">
+                <div class="mk-empty" id="mk-empty">Loading…</div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{# Lightbox: one slide, large #}
+<div class="mk-lightbox hidden" id="mk-lightbox" role="dialog" aria-modal="true" aria-label="Slide preview">
+    <button type="button" class="mk-lb-btn mk-lb-close" data-lb="close" aria-label="Close">&times;</button>
+    <button type="button" class="mk-lb-btn mk-lb-prev" data-lb="prev" aria-label="Previous slide">&lsaquo;</button>
+    <div class="mk-lb-stage" id="mk-lb-stage"></div>
+    <button type="button" class="mk-lb-btn mk-lb-next" data-lb="next" aria-label="Next slide">&rsaquo;</button>
+    <div class="mk-lb-bar">
+        <span id="mk-lb-pos"></span>
+        <button type="button" class="btn btn-primary btn-sm" data-lb="download">Download PNG</button>
+    </div>
+</div>
+
+<style>
+    /* ═══ STUDIO UI (dashboard look) ═════════════════════════════════ */
+    .mk-wrap {
+        --mk-surface: #fff;
+        --mk-border: #e2e8f0;
+        --mk-muted: #64748b;
+        --mk-text: #0f172a;
+        --mk-accent: #4f46e5;
+        max-width: 1280px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        color: var(--mk-text);
+    }
+
+    .mk-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .mk-back {
+        display: block;
+        font-size: .85rem;
+        color: var(--mk-muted);
+        text-decoration: none;
+        margin-bottom: .6rem;
+    }
+
+    .mk-back:hover {
+        color: var(--mk-text);
+    }
+
+    .mk-eyebrow {
+        display: block;
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--mk-muted);
+        margin-bottom: .25rem;
+    }
+
+    .mk-title {
+        margin: 0;
+        font-size: 1.6rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+
+    .mk-sub {
+        margin: .35rem 0 0;
+        color: var(--mk-muted);
+        font-size: .9rem;
+        max-width: 62ch;
+    }
+
+    .mk-status {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .3rem .75rem;
+        border-radius: 99px;
+        font-size: .78rem;
+        font-weight: 700;
+        background: #f1f5f9;
+        color: var(--mk-muted);
+    }
+
+    .mk-status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+
+    .mk-status.is-ok {
+        background: #dcfce7;
+        color: #16a34a;
+    }
+
+    .mk-status.is-warn {
+        background: #fef3c7;
+        color: #b45309;
+    }
+
+    .mk-status.is-err {
+        background: #fef2f2;
+        color: #dc2626;
+    }
+
+    .mk-layout {
+        display: grid;
+        grid-template-columns: 290px minmax(0, 1fr);
+        gap: 1.25rem;
+        align-items: start;
+    }
+
+    .mk-panel {
+        background: var(--mk-surface);
+        border: 1px solid var(--mk-border);
+        border-radius: 14px;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .04);
+    }
+
+    .mk-controls {
+        position: sticky;
+        top: 1rem;
+        padding: 1.1rem 1.15rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.1rem;
+        max-height: calc(100vh - 2rem);
+        overflow-y: auto;
+    }
+
+    .mk-group {
+        display: flex;
+        flex-direction: column;
+        gap: .45rem;
+    }
+
+    .mk-group+.mk-group {
+        border-top: 1px solid var(--mk-border);
+        padding-top: 1rem;
+    }
+
+    .mk-label {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .07em;
+        color: var(--mk-muted);
+    }
+
+    .mk-hint {
+        font-size: .8rem;
+        color: var(--mk-muted);
+    }
+
+    .mk-seg {
+        display: flex;
+        border: 1px solid var(--mk-border);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .mk-seg button {
+        flex: 1;
+        font: inherit;
+        font-size: .8rem;
+        font-weight: 600;
+        padding: .45rem .4rem;
+        border: none;
+        background: #fff;
+        color: var(--mk-muted);
+        cursor: pointer;
+    }
+
+    .mk-seg button+button {
+        border-left: 1px solid var(--mk-border);
+    }
+
+    .mk-seg button[aria-pressed="true"] {
+        background: var(--mk-text);
+        color: #fff;
+    }
+
+    .mk-check {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        font-size: .88rem;
+        cursor: pointer;
+    }
+
+    .mk-check input {
+        width: 15px;
+        height: 15px;
+        accent-color: var(--mk-accent);
+    }
+
+    .mk-check small {
+        color: var(--mk-muted);
+        margin-left: auto;
+    }
+
+    .mk-field {
+        display: flex;
+        flex-direction: column;
+        gap: .25rem;
+        font-size: .78rem;
+        font-weight: 600;
+        color: var(--mk-muted);
+    }
+
+    .mk-field input,
+    .mk-field select {
+        font: inherit;
+        font-size: .88rem;
+        font-weight: 500;
+        color: var(--mk-text);
+        padding: .45rem .6rem;
+        border: 1px solid var(--mk-border);
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .mk-field input:focus,
+    .mk-field select:focus {
+        outline: none;
+        border-color: var(--mk-accent);
+        box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
+    }
+
+    .mk-divisions {
+        display: flex;
+        flex-direction: column;
+        gap: .35rem;
+    }
+
+    .mk-main {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        min-width: 0;
+    }
+
+    .mk-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        padding: .8rem 1rem;
+    }
+
+    .mk-toolbar strong {
+        margin-right: .5rem;
+    }
+
+    .mk-toolbar-actions {
+        display: flex;
+        gap: .5rem;
+        flex-wrap: wrap;
+    }
+
+    .mk-caption {
+        padding: .7rem 1rem;
+    }
+
+    .mk-caption summary {
+        cursor: pointer;
+        font-weight: 600;
+        font-size: .9rem;
+    }
+
+    .mk-caption textarea {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: .7rem;
+        font: inherit;
+        font-size: .85rem;
+        line-height: 1.5;
+        padding: .6rem .7rem;
+        border: 1px solid var(--mk-border);
+        border-radius: 8px;
+        resize: vertical;
+    }
+
+    .mk-slides {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+        gap: 1rem;
+    }
+
+    .mk-empty {
+        grid-column: 1 / -1;
+        padding: 3rem 1rem;
+        text-align: center;
+        color: var(--mk-muted);
+        background: #fff;
+        border: 1px dashed var(--mk-border);
+        border-radius: 14px;
+    }
+
+    .mk-thumb {
+        display: flex;
+        flex-direction: column;
+        gap: .45rem;
+    }
+
+    .mk-thumb-frame {
+        position: relative;
+        overflow: hidden;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .12), 0 8px 24px -12px rgba(15, 23, 42, .3);
+        cursor: zoom-in;
+        background: #f2f3f5;
+    }
+
+    .mk-scale {
+        transform-origin: top left;
+        position: absolute;
+        top: 0;
+        left: 0;
+    }
+
+    .mk-thumb-foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: .78rem;
+        color: var(--mk-muted);
+    }
+
+    .mk-thumb-foot button {
+        font: inherit;
+        font-size: .78rem;
+        font-weight: 600;
+        background: none;
+        border: none;
+        color: var(--mk-accent);
+        cursor: pointer;
+        padding: .15rem .2rem;
+    }
+
+    .mk-thumb-foot button:hover {
+        text-decoration: underline;
+    }
+
+    .mk-lightbox {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        background: rgba(15, 23, 42, .82);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .mk-lb-stage {
+        position: relative;
+        overflow: hidden;
+        border-radius: 6px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+    }
+
+    .mk-lb-btn {
+        position: absolute;
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(255, 255, 255, .14);
+        color: #fff;
+        font-size: 1.8rem;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    .mk-lb-btn:hover {
+        background: rgba(255, 255, 255, .26);
+    }
+
+    .mk-lb-close {
+        top: 1rem;
+        right: 1rem;
+    }
+
+    .mk-lb-prev {
+        left: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+
+    .mk-lb-next {
+        right: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+
+    .mk-lb-bar {
+        position: absolute;
+        bottom: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        color: #fff;
+        font-size: .85rem;
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    @media (max-width: 900px) {
+        .mk-layout {
+            grid-template-columns: 1fr;
+        }
+
+        .mk-controls {
+            position: static;
+            max-height: none;
+        }
+    }
+
+    /* ═══ SLIDES (TrueVAR website branding) ══════════════════════════
+       Drawn at full export size (1080 wide) and scaled down for the
+       preview. Everything inside is px so the PNG is pixel-exact. */
+    .sl {
+        --ink: #16181d;
+        --text: #262a31;
+        --muted: #52565f;
+        --line: #d6d9de;
+        --paper: #f2f3f5;
+        --accent: #1c3d6b;
+        --accent-soft: #eaf0f8;
+        --ghost: rgba(28, 61, 107, .16);
+        --hatch: rgba(22, 24, 29, .065);
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        box-sizing: border-box;
+        width: 1080px;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: 'Inter', Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        padding: 56px 64px 0;
+    }
+
+    .sl * {
+        box-sizing: border-box;
+    }
+
+    .sl--boxing {
+        --accent: #b3262f;
+        --accent-soft: #fbeaeb;
+        --ghost: rgba(179, 38, 47, .16);
+    }
+
+    .sl--portrait {
+        height: 1350px;
+    }
+
+    .sl--square {
+        height: 1080px;
+        padding-top: 48px;
+    }
+
+    .sl--square .sl-ghost {
+        font-size: 130px;
+    }
+
+    .sl--story {
+        height: 1920px;
+        padding-top: 150px;
+    }
+
+    /* hatch band behind the top-right */
+    .sl-hatch {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        right: 0;
+        width: 62%;
+        height: 46%;
+        background: repeating-linear-gradient(118deg, var(--hatch) 0 2px, transparent 2px 24px);
+        -webkit-mask-image: linear-gradient(225deg, #000 20%, transparent 75%);
+        mask-image: linear-gradient(225deg, #000 20%, transparent 75%);
+    }
+
+    /* outlined sport word, bottom-right, like the website cards */
+    .sl-ghost {
+        position: absolute;
+        z-index: -1;
+        left: 16rem;
+        bottom: 8rem;
+        font-family: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
+        font-weight: 900;
+        font-size: 19rem;
+        line-height: .8;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: transparent;
+        -webkit-text-stroke: 3px var(--ghost);
+    }
+
+    .sl-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        height: 64px;
+        flex-shrink: 0;
+    }
+
+    .sl-logo {
+        height: 58px;
+        width: auto;
+        display: block;
+    }
+
+    .sl-wordmark {
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 700;
+        font-size: 44px;
+        color: var(--ink);
+    }
+
+    .sl-pager {
+        font-family: 'IBM Plex Mono', monospace;
+        font-weight: 600;
+        font-size: 24px;
+        letter-spacing: 2px;
+        color: var(--muted);
+    }
+
+    .sl-kicker {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--accent);
+    }
+
+    .sl-kicker::before {
+        content: "";
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+    }
+
+    .sl-h {
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 700;
+        color: var(--ink);
+        margin: 0;
+        letter-spacing: -.5px;
+    }
+
+    .sl-foot {
+        flex-shrink: 0;
+        height: 92px;
+        margin: 0 -64px;
+        padding: 0 64px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: 'IBM Plex Mono', monospace;
+        font-weight: 600;
+        font-size: 20px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--muted);
+        border-top: 2px solid var(--line);
+        background: rgba(242, 243, 245, .82);
+    }
+
+    .sl-foot b {
+        color: var(--accent);
+        font-weight: 600;
+    }
+
+    /* ── cover ── */
+    .sl-cover-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0;
+        padding-bottom: 40px;
+    }
+
+    .sl-cover-title {
+        line-height: 1.02;
+        margin: 10px 0 0;
+    }
+
+    .sl-rule {
+        width: 150px;
+        height: 10px;
+        border-radius: 5px;
+        background: var(--accent);
+        margin: 52px 0 40px;
+    }
+
+    .sl-cover-headline {
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-weight: 700;
+        font-size: 124px;
+        line-height: 1;
+        color: var(--accent);
+        letter-spacing: -1px;
+    }
+
+    .sl-stats {
+        display: flex;
+        margin-top: 56px;
+        align-self: flex-start;
+        background: repeating-linear-gradient(118deg, var(--line) 0 2px, transparent 2px 22px), #fff;
+        border: 2px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+    }
+
+    .sl-stats div {
+        padding: 22px 34px 20px;
+        min-width: 170px;
+    }
+
+    .sl-stats div+div {
+        border-left: 2px solid var(--line);
+    }
+
+    .sl-stats strong {
+        display: block;
+        font-family: 'Source Serif 4', Georgia, serif;
+        font-size: 64px;
+        line-height: 1;
+        color: var(--ink);
+    }
+
+    .sl-stats span {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--muted);
+    }
+
+    .sl-swipe {
+        position: absolute;
+        right: 64px;
+        bottom: 132px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--ink);
+    }
+
+    .sl-swipe span {
+        width: 76px;
+        height: 76px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* ── section header on table / podium slides ── */
+    .sl-section {
+        padding: 46px 0 30px;
+        flex-shrink: 0;
+    }
+
+    .sl-section .sl-h {
+        font-size: 66px;
+        line-height: 1.05;
+        margin-top: 16px;
+    }
+
+    .sl--square .sl-section {
+        padding: 30px 0 22px;
+    }
+
+    .sl--square .sl-section .sl-h {
+        font-size: 56px;
+    }
+
+    .sl-body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        padding-bottom: 30px;
+    }
+
+    .sl-card {
+        background: #fff;
+        border: 2px solid var(--line);
+        border-radius: 22px;
+        box-shadow: 0 2px 6px rgba(16, 20, 30, .05);
+        overflow: hidden;
+    }
+
+    /* ── medal table ── */
+    .sl-table {
+        align-self: stretch;
+    }
+
+    .sl-tr {
+        height: 66px;
+        display: grid;
+        grid-template-columns: 46px minmax(0, 1fr) 62px 62px 62px 82px;
+        align-items: center;
+        padding: 0 22px 0 24px;
+        font-size: 28px;
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .sl-tr+.sl-tr {
+        border-top: 1px solid #e8eaee;
+    }
+
+    .sl-tr--head {
+        height: 60px;
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--muted);
+        background: #f7f8fa;
+    }
+
+    .sl-tr--lead {
+        background: var(--accent-soft);
+    }
+
+    .sl-tr .c {
+        text-align: center;
+    }
+
+    .sl-tr .t {
+        text-align: center;
+        font-weight: 700;
+        color: var(--ink);
+    }
+
+    .sl-tr .r {
+        font-family: 'IBM Plex Mono', monospace;
+        color: var(--muted);
+        font-size: 24px;
+    }
+
+    .sl-tr .zero {
+        color: #b4b9c2;
+    }
+
+    .sl-tr-name {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 0;
+        padding-right: 10px;
+    }
+
+    .sl-tr-name span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sl-dot {
+        display: inline-block;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        vertical-align: -3px;
+    }
+
+    /* ── podium panels ── */
+    .sl-cat {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sl-cat-head {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 22px 30px 18px;
+        border-bottom: 2px solid #eceef1;
+    }
+
+    .sl-cat-head::before {
+        content: "";
+        width: 8px;
+        height: 40px;
+        border-radius: 4px;
+        background: var(--accent);
+        flex-shrink: 0;
+    }
+
+    .sl-cat-head .sl-h {
+        font-size: 42px;
+        line-height: 1.1;
+    }
+
+    .sl-rows {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sl-row {
+        height: 76px;
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        padding: 0 30px;
+    }
+
+    .sl--square .sl-row {
+        height: 64px;
+    }
+
+    .sl-row+.sl-row {
+        border-top: 1px solid #eef0f3;
+    }
+
+    /* "Name · Club" on one line, like the public results page */
+    .sl-who {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+    }
+
+    /* the name is never cut — only the club is; a name too long for the
+       row gets a smaller font instead (fitNames) */
+    .sl-name {
+        flex: 0 0 auto;
+        font-size: 32px;
+        font-weight: 700;
+        color: var(--ink);
+        white-space: nowrap;
+    }
+
+    .sl-club {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sl-club::before {
+        content: "· ";
+        color: #a3a8b1;
+    }
+
+    .sl-code {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 22px;
+        color: var(--muted);
+        letter-spacing: 1px;
+    }
+
+    .sl--square .sl-name {
+        font-size: 28px;
+    }
+
+    .sl--square .sl-tr {
+        height: 58px;
+    }
+
+    .sl--square .sl-cat-head {
+        padding: 16px 28px 14px;
+    }
+
+    .sl--square .sl-cat-head .sl-h {
+        font-size: 36px;
+    }
+
+    /* place badge — same pills as the results on the public tournament page */
+    .sl-medal {
+        flex-shrink: 0;
+        width: 84px;
+        height: 46px;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        font-weight: 700;
+    }
+
+    .sl-medal--1 {
+        background: #fdf1c7;
+        color: #a16207;
+    }
+
+    .sl-medal--2 {
+        background: #e6eaf0;
+        color: #475569;
+    }
+
+    .sl-medal--3 {
+        background: #fde4d0;
+        color: #c2410c;
+    }
+
+    .sl-dot--1 {
+        background: #e7b008;
+    }
+
+    .sl-dot--2 {
+        background: #94a3b8;
+    }
+
+    .sl-dot--3 {
+        background: #ea7a2f;
+    }
+
+    .sl-flag {
+        flex-shrink: 0;
+        width: 54px;
+        height: 36px;
+        border-radius: 5px;
+        object-fit: cover;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, .12);
+    }
+
+    .sl-flag--text {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    .sl-flag--none {
+        visibility: hidden;
+    }
+</style>
+
+<script>
+    const TOURNAMENT_ID = {{ tournament.id | string | tojson }};
+    const SPORT = {{ tournament.sport | default ('', true) | string | tojson }};
+    const DISCIPLINE = {{ tournament.discipline | default ('', true) | string | tojson }};
+    const TOURNAMENT_TITLE = {{ tournament.title | default ('', true) | string | tojson }};
+    const TOURNAMENT_LOCATION = {{ tournament.location | default ('', true) | string | tojson }};
+    const TOURNAMENT_DATE = {{ iso_utc(tournament.dateTime) | tojson }};
+    const LOGO_URL = "/static/assets/logos/truevar_logo.png";
+    const PUBLIC_URL = window.location.origin + "/tournaments/" + encodeURIComponent(TOURNAMENT_ID);
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="/static/js/truevar-lib.js"></script>
+{% raw %}
+<script>
+    "use strict";
+
+    // ═══ CONSTANTS ════════════════════════════════════════════════════
+    const FORMATS = {
+        portrait: { w: 1080, h: 1350, label: "1080 × 1350 · Instagram / Facebook post", perSlide: 2, medalRows: 15 },
+        square: { w: 1080, h: 1080, label: "1080 × 1080 · square post", perSlide: 1, medalRows: 10 },
+        story: { w: 1080, h: 1920, label: "1080 × 1920 · story / reel cover", perSlide: 3, medalRows: 22 },
+    };
+
+    // Age divisions in the order they're shown. A category code holds its
+    // age code as one "_"-separated part (same rule as the live queue).
+    const DIVISION_ORDER = [
+        "pupils_1", "pupils_2", "pupils", "children", "younger_cadets", "cadets", "under_17", "juniors",
+        "over_17", "seniors_under_30", "seniors", "seniors_over_30", "seniors_under_40", "seniors_under_50",
+        "seniors_over_50", "veterans",
+    ];
+    const DIVISION_MATCH = DIVISION_ORDER.slice().sort((a, b) => b.length - a.length);
+
+    const TRANSPARENT_PX = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+    const DEMO = new URLSearchParams(location.search).has("demo");
+
+    // ═══ STATE ════════════════════════════════════════════════════════
+    const state = {
+        format: "portrait",
+        medalBy: "country",
+        divisions: new Set(),
+        text: { title: "", headline: "", kicker: "", footer: "" },
+    };
+    let categories = [];   // [{code, label, division, status, alone, podium: [{place, name, club, a2, a3}]}]
+    let slides = [];       // [{kind, ...}] — see buildSlides()
+    let slideEls = [];     // rendered .sl nodes, same order
+    let fontCss = null;    // embedded font CSS, computed once for export
+
+    // ═══ HELPERS ══════════════════════════════════════════════════════
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    function divisionOf(code) {
+        const wrapped = `_${code}_`;
+        return DIVISION_MATCH.find(d => wrapped.includes(`_${d}_`)) || "other";
+    }
+
+    function divisionLabel(d) {
+        if (d === "other") return "Other";
+        return d.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ").replace(/\b(\d+)\b/, "$1");
+    }
+
+    function divisionRank(d) {
+        const i = DIVISION_ORDER.indexOf(d);
+        return i < 0 ? 999 : i;
+    }
+
+    // Country as stored (alpha-3 on athlete docs, sometimes alpha-2).
+    function countryCodes(raw) {
+        const c = String(raw || "").trim().toUpperCase();
+        const lib = window.TrueVAR;
+        if (c.length === 3) return { a3: c, a2: lib ? lib.toAlpha2(c) : null };
+        if (c.length === 2) return { a2: c, a3: (lib && lib.toAlpha3(c)) || c };
+        return { a2: null, a3: null };
+    }
+
+    function countryName(a3) {
+        return (window.TrueVAR && TrueVAR.countryName(a3)) || a3 || "—";
+    }
+
+    // "18th International Ilyo Cup 2026 Kyorugi Day 2" → title / day / discipline
+    function splitTitle(title) {
+        const day = (title.match(/\bday\s*(\d+)\b/i) || [])[1] || null;
+        const disc = (title.match(/\b(kyorugi|poomsae)\b/i) || [])[1] || null;
+        const clean = title.replace(/\bday\s*\d+\b/i, "").replace(/\b(kyorugi|poomsae)\b/i, "")
+            .replace(/\s{2,}/g, " ").replace(/[\s·\-–]+$/, "").trim();
+        return { title: clean || title, day, discipline: disc };
+    }
+
+    function formatDate(iso) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        if (isNaN(d)) return "";
+        return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Bratislava" }).format(d);
+    }
+
+    function setStatus(kind, text) {
+        $("mk-status").className = "mk-status" + (kind ? " is-" + kind : "");
+        $("mk-status-text").textContent = text;
+    }
+
+    function slug(s) {
+        return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase() || "slide";
+    }
+
+    // ═══ DATA ═════════════════════════════════════════════════════════
+    async function loadData() {
+        if (DEMO) return demoData();
+        const res = await fetch("/api/firebase-client-config");
+        const config = await res.json();
+        if (!config.projectId) throw new Error("Firebase isn't configured.");
+        if (!firebase.apps.length) firebase.initializeApp(config);
+        const t = firebase.firestore().collection("tournaments").doc(TOURNAMENT_ID);
+        const [resultsSnap, bracketsSnap] = await Promise.all([t.collection("results").get(), t.collection("brackets").get()]);
+
+        const labels = {};
+        bracketsSnap.forEach(doc => {
+            const d = doc.data() || {};
+            if (d.categoryCode) labels[d.categoryCode] = d.categoryLabel || d.categoryCode;
+        });
+
+        const out = [];
+        resultsSnap.forEach(doc => {
+            const d = doc.data() || {};
+            const code = d.categoryCode || doc.id;
+            out.push(categoryFrom(code, labels[code] || d.categoryLabel || code, d));
+        });
+        return out;
+    }
+
+    function categoryFrom(code, label, doc) {
+        const all = Object.values(doc.placements || {}).filter(p => p && p.placement != null);
+        const podium = all
+            .filter(p => Number(p.placement) >= 1 && Number(p.placement) <= 3)
+            .map(p => ({ place: Number(p.placement), name: p.name || "—", club: p.clubName || "", ...countryCodes(p.country) }))
+            .sort((a, b) => a.place - b.place || a.name.localeCompare(b.name));
+        return {
+            code,
+            label: String(label).replace(/^\s*(kyorugi|poomsae)\s*[·:\-–]\s*/i, ""),
+            division: divisionOf(code),
+            status: doc.status || "",
+            alone: all.length <= 1 || all.some(p => p.alone),
+            podium,
+        };
+    }
+
+    function demoData() {
+        const clubs = [
+            ["TK Ryong Bratislava", "SVK"], ["Taekwondo Košice", "SVK"], ["Hwarang Praha", "CZE"], ["ASK Wien", "AUT"],
+            ["Budapest TKD", "HUN"], ["KS Kraków", "POL"], ["Taekwondo Roma", "ITA"], ["Black Tiger Snina", "SVK"],
+            ["Zagreb Dojang", "HRV"], ["TKD Ljubljana", "SVN"],
+        ];
+        const first = ["Adam", "Martin", "Tomáš", "Lukas", "Marek", "Jakub", "Dávid", "Peter", "Filip", "Samuel", "Nina", "Ema", "Sofia", "Laura", "Klára", "Anna"];
+        const last = ["Horváth", "Novák", "Kováč", "Bauer", "Nagy", "Kowalski", "Rossi", "Varga", "Molnár", "Kralj", "Dvořák", "Šimko", "Tóth"];
+        let seed = 7;
+        const rnd = (n) => { seed = (seed * 9301 + 49297) % 233280; return Math.floor(seed / 233280 * n); };
+        const person = () => { const c = clubs[rnd(clubs.length)]; return { name: `${first[rnd(first.length)]} ${last[rnd(last.length)].toUpperCase()}`, clubName: c[0], country: c[1] }; };
+        const cats = [
+            ["cadets_male_m33", "Cadets Male -33 kg"], ["cadets_male_m37", "Cadets Male -37 kg"], ["cadets_female_f29", "Cadets Female -29 kg"],
+            ["juniors_male_m45", "Juniors Male -45 kg"], ["juniors_male_m48", "Juniors Male -48 kg"], ["juniors_male_m51", "Juniors Male -51 kg"],
+            ["juniors_female_f42", "Juniors Female -42 kg"], ["juniors_female_f46", "Juniors Female -46 kg"],
+            ["seniors_male_m58", "Seniors Male -58 kg"], ["seniors_male_m68", "Seniors Male -68 kg"], ["seniors_female_f49", "Seniors Female -49 kg"],
+            ["seniors_female_f57", "Seniors Female -57 kg"],
+        ];
+        return cats.map(([code, label], i) => {
+            const n = i === 10 ? 1 : 4;
+            const places = [1, 2, 3, 3].slice(0, n);
+            const placements = {};
+            places.forEach((p, j) => { placements["e" + i + j] = { placement: p, ...person(), alone: n === 1 }; });
+            return categoryFrom(code, label, { status: i === 11 ? "partial" : "complete", placements });
+        });
+    }
+
+    // ═══ FILTER + SLIDE LIST ══════════════════════════════════════════
+    function selectedCategories() {
+        return categories
+            .filter(c => state.divisions.has(c.division))
+            .filter(c => !$("mk-only-complete").checked || c.status === "complete")
+            .filter(c => !$("mk-skip-alone").checked || !c.alone)
+            .filter(c => c.podium.length)
+            .sort((a, b) => divisionRank(a.division) - divisionRank(b.division) || a.label.localeCompare(b.label, undefined, { numeric: true }));
+    }
+
+    function medalRows(cats) {
+        const byCountry = state.medalBy === "country";
+        const rows = new Map();
+        cats.forEach(c => c.podium.forEach(p => {
+            const key = byCountry ? (p.a3 || "—") : (p.club || "—");
+            if (!rows.has(key)) rows.set(key, { key, name: byCountry ? countryName(p.a3) : (p.club || "—"), a2s: {}, g: 0, s: 0, b: 0 });
+            const r = rows.get(key);
+            if (p.place === 1) r.g++; else if (p.place === 2) r.s++; else r.b++;
+            if (p.a2) r.a2s[p.a2] = (r.a2s[p.a2] || 0) + 1;
+        }));
+        const list = [...rows.values()].map(r => {
+            const a2 = Object.entries(r.a2s).sort((x, y) => y[1] - x[1])[0];
+            return { ...r, a2: a2 ? a2[0] : null, a3: byCountry ? r.key : null, total: r.g + r.s + r.b };
+        });
+        list.sort((a, b) => b.g - a.g || b.s - a.s || b.b - a.b || a.name.localeCompare(b.name));
+        list.forEach((r, i) => {
+            const p = list[i - 1];
+            r.rank = p && p.g === r.g && p.s === r.s && p.b === r.b ? p.rank : i + 1;
+        });
+        return list;
+    }
+
+    function chunk(list, n) {
+        const out = [];
+        for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n));
+        return out;
+    }
+
+    function buildSlides() {
+        const fmt = FORMATS[state.format];
+        const cats = selectedCategories();
+        const list = [];
+        const divisions = [...new Set(cats.map(c => c.division))];
+
+        if ($("mk-inc-cover").checked) {
+            const people = cats.reduce((n, c) => n + c.podium.length, 0);
+            const nations = new Set(cats.flatMap(c => c.podium.map(p => p.a3).filter(Boolean)));
+            const clubs = new Set(cats.flatMap(c => c.podium.map(p => p.club).filter(Boolean)));
+            list.push({
+                kind: "cover",
+                stats: [
+                    [cats.length, cats.length === 1 ? "category" : "categories"],
+                    [people, "medals"],
+                    nations.size > 1 ? [nations.size, "countries"] : [clubs.size, "clubs"],
+                ],
+            });
+        }
+
+        if ($("mk-inc-medals").checked && cats.length) {
+            const rows = medalRows(cats);
+            const per = $("mk-medal-rows").value === "auto" ? fmt.medalRows : Number($("mk-medal-rows").value);
+            const pages = $("mk-medal-all").checked ? chunk(rows, per) : [rows.slice(0, per)];
+            pages.forEach((page, i) => list.push({
+                kind: "medals", rows: page, totalRows: rows.length, per,
+                part: pages.length > 1 ? `${i + 1}/${pages.length}` : null,
+                scope: divisions.length === 1 ? divisionLabel(divisions[0]) : "All divisions",
+            }));
+        }
+
+        if ($("mk-inc-results").checked) {
+            const per = $("mk-per-slide").value === "auto" ? fmt.perSlide : Number($("mk-per-slide").value);
+            divisions.forEach(d => {
+                chunk(cats.filter(c => c.division === d), per).forEach(group => list.push({ kind: "results", division: d, cats: group, per }));
+            });
+        }
+        return list;
+    }
+
+    // ═══ SLIDE MARKUP ═════════════════════════════════════════════════
+    function flagHtml(a2, a3) {
+        if (a2) return `<img class="sl-flag" crossorigin="anonymous" src="https://flagcdn.com/w80/${esc(a2.toLowerCase())}.png" alt="" data-code="${esc(a3 || a2)}">`;
+        if (a3) return `<span class="sl-flag sl-flag--text">${esc(a3)}</span>`;
+        return `<span class="sl-flag sl-flag--none"></span>`;
+    }
+
+    function topHtml(i, n) {
+        return `<div class="sl-top">
+            <img class="sl-logo" src="${LOGO_URL}" alt="TrueVAR">
+            <span class="sl-pager">${String(i + 1).padStart(2, "0")} / ${String(n).padStart(2, "0")}</span>
+        </div>`;
+    }
+
+    function footHtml(right) {
+        return `<div class="sl-foot"><span>${esc(state.text.footer)}</span><b>${esc(right)}</b></div>`;
+    }
+
+    function titleSize(text) {
+        const n = text.length;
+        if (state.format === "square") return n <= 18 ? 108 : n <= 30 ? 92 : 76;
+        return n <= 16 ? 140 : n <= 26 ? 122 : n <= 40 ? 104 : 88;
+    }
+
+    function coverHtml(s) {
+        const t = state.text;
+        return `
+            <div class="sl-hatch"></div>
+            <div class="sl-cover-body">
+                <div class="sl-kicker">${esc(t.kicker)}</div>
+                <h1 class="sl-h sl-cover-title" style="font-size:${titleSize(t.title)}px">${esc(t.title)}</h1>
+                <div class="sl-rule"></div>
+                <div class="sl-cover-headline" style="${state.format === "square" ? "font-size:100px" : ""}">${esc(t.headline)}</div>
+                <div class="sl-stats">${s.stats.map(([n, l]) => `<div><strong>${n}</strong><span>${esc(l)}</span></div>`).join("")}</div>
+            </div>
+            <div class="sl-swipe">Swipe <span><svg width="34" height="34" viewBox="0 0 16 16" fill="none"><path d="M3 8h9.5M8.5 3.5L13 8l-4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>`;
+    }
+
+    function sectionHtml(kicker, title) {
+        return `<div class="sl-section"><div class="sl-kicker">${esc(kicker)}</div><h2 class="sl-h">${esc(title)}</h2></div>`;
+    }
+
+    function medalsHtml(s) {
+        const byCountry = state.medalBy === "country";
+        const num = (v) => `<span class="c${v ? "" : " zero"}">${v}</span>`;
+        const head = `<div class="sl-tr sl-tr--head">
+            <span>#</span><span>${byCountry ? "Country" : "Club"}</span>
+            <span class="c"><i class="sl-dot sl-dot--1"></i></span><span class="c"><i class="sl-dot sl-dot--2"></i></span><span class="c"><i class="sl-dot sl-dot--3"></i></span><span class="c">Total</span>
+        </div>`;
+        const rows = s.rows.map(r => `<div class="sl-tr${r.rank === 1 ? " sl-tr--lead" : ""}">
+            <span class="r">${r.rank}</span>
+            <span class="sl-tr-name">${flagHtml(r.a2, byCountry ? r.a3 : null)}<span>${esc(r.name)}</span></span>
+            ${num(r.g)}${num(r.s)}${num(r.b)}<span class="t">${r.total}</span>
+        </div>`).join("");
+        const what = byCountry ? "countries" : "clubs";
+        const kicker = `${s.scope} · ${s.part ? `${what} ${s.part}` : s.totalRows > s.rows.length ? `top ${s.rows.length} ${what}` : `${s.totalRows} ${what}`}`;
+        return `${sectionHtml(kicker, "Medal count")}
+            <div class="sl-body"><div class="sl-card sl-table">${head}${rows}</div></div>`;
+    }
+
+    function clubHtml(p) {
+        return $("mk-show").value !== "country" && p.club ? `<span class="sl-club">${esc(p.club)}</span>` : "";
+    }
+
+    function codeHtml(p) {
+        return $("mk-show").value !== "club" && p.a3 ? `<span class="sl-code">${esc(p.a3)}</span>` : "";
+    }
+
+    // "Andrej Bohony" → "A. Bohony", "Tsz Ing Liu" → "T. I. Liu",
+    // "Jean-Paul Moreau" → "J.-P. Moreau". The surname is the token in
+    // CAPITALS when exactly one is ("BOHONY Andrej" → "A. BOHONY"),
+    // otherwise the last one. Pairs/teams ("A / B") per person.
+    function initialsName(full) {
+        return String(full || "").split(/\s*\/\s*/).map(one => {
+            const parts = one.trim().split(/\s+/).filter(Boolean);
+            if (parts.length < 2) return one.trim();
+            const isCaps = w => /\p{Lu}/u.test(w) && w === w.toUpperCase();
+            const caps = parts.filter(isCaps);
+            const surname = caps.length === 1 && parts.length > caps.length ? caps[0] : parts[parts.length - 1];
+            const given = parts.filter(w => w !== surname);
+            const ini = given.map(w => w.split("-").map(x => x[0].toUpperCase() + ".").join("-")).join(" ");
+            return `${ini} ${surname}`;
+        }).join(" / ");
+    }
+
+    function displayName(full) {
+        return $("mk-names").value === "initials" ? initialsName(full) : full;
+    }
+
+    function resultsHtml(s) {
+        const cards = s.cats.map(c => `<div class="sl-card sl-cat">
+            <div class="sl-cat-head"><h3 class="sl-h">${esc(c.label)}</h3></div>
+            <div class="sl-rows">${c.podium.map(p => `<div class="sl-row">
+                <span class="sl-medal sl-medal--${p.place}">${["", "1st", "2nd", "3rd"][p.place]}</span>
+                ${flagHtml(p.a2, p.a3)}
+                <span class="sl-who"><span class="sl-name">${esc(displayName(p.name))}</span>${clubHtml(p)}</span>
+                ${codeHtml(p)}
+            </div>`).join("")}</div>
+        </div>`).join("");
+        return `${sectionHtml(state.text.title, `${divisionLabel(s.division)} results`)}<div class="sl-body">${cards}</div>`;
+    }
+
+    function slideHtml(s, i, n) {
+        const inner = s.kind === "cover" ? coverHtml(s) : s.kind === "medals" ? medalsHtml(s) : resultsHtml(s);
+        const right = s.kind === "cover" ? "Results" : s.kind === "medals" ? "Medal count" : `${divisionLabel(s.division)} results`;
+        return `<span class="sl-ghost">${esc(SPORT || DISCIPLINE || "")}</span>${topHtml(i, n)}${inner}${footHtml(right)}`;
+    }
+
+    function slideName(s, i) {
+        const part = s.kind === "cover" ? "cover" : s.kind === "medals" ? "medal_count" : `${s.division}_results`;
+        return `${slug(state.text.title)}_${String(i + 1).padStart(2, "0")}_${part}.png`;
+    }
+
+    // ═══ RENDER ═══════════════════════════════════════════════════════
+    function wireImageFallbacks(root) {
+        root.querySelectorAll("img.sl-flag").forEach(img => {
+            img.onerror = () => {
+                const span = document.createElement("span");
+                span.className = "sl-flag sl-flag--text";
+                span.textContent = img.dataset.code || "";
+                img.replaceWith(span);
+            };
+        });
+        root.querySelectorAll("img.sl-logo").forEach(img => {
+            img.onerror = () => {
+                const span = document.createElement("span");
+                span.className = "sl-wordmark";
+                span.textContent = "TrueVAR";
+                img.replaceWith(span);
+            };
+        });
+    }
+
+    function render() {
+        const fmt = FORMATS[state.format];
+        slides = buildSlides();
+        const wrap = $("mk-slides");
+        wrap.innerHTML = "";
+        slideEls = [];
+
+        $("mk-count").textContent = `${slides.length} slide${slides.length === 1 ? "" : "s"}`;
+        $("mk-size").textContent = fmt.label;
+        $("mk-download-all").disabled = !slides.length;
+        $("mk-caption").value = buildCaption();
+
+        if (!slides.length) {
+            wrap.innerHTML = `<div class="mk-empty">${categories.length
+                ? "Nothing to show with these settings — tick a division, or untick “Finished categories only”."
+                : "No computed results for this tournament yet. Open the live queue and run 🏅 Compute Results."}</div>`;
+            return;
+        }
+
+        slides.forEach((s, i) => {
+            const el = document.createElement("div");
+            el.className = `sl sl--${state.format}${SPORT.toLowerCase() === "boxing" ? " sl--boxing" : ""}`;
+            el.innerHTML = slideHtml(s, i, slides.length);
+            wireImageFallbacks(el);
+            slideEls.push(el);
+
+            const thumb = document.createElement("div");
+            thumb.className = "mk-thumb";
+            thumb.innerHTML = `<div class="mk-thumb-frame"><div class="mk-scale"></div></div>
+                <div class="mk-thumb-foot"><span>${i + 1}. ${esc(s.kind === "cover" ? "Cover" : s.kind === "medals" ? "Medal count" : divisionLabel(s.division))}</span>
+                <button type="button" data-dl="${i}">PNG</button></div>`;
+            thumb.querySelector(".mk-scale").appendChild(el);
+            thumb.querySelector(".mk-thumb-frame").addEventListener("click", () => openLightbox(i));
+            thumb.querySelector("[data-dl]").addEventListener("click", (e) => downloadOne(i, e.currentTarget));
+            wrap.appendChild(thumb);
+            fitNames(el);
+        });
+        fitThumbs();
+    }
+
+    // Shrinks a name's font (down to 20px) until it fits its row whole.
+    function fitNames(root) {
+        root.querySelectorAll(".sl-who").forEach(who => {
+            const name = who.querySelector(".sl-name");
+            if (!name) return;
+            name.style.fontSize = "";
+            const clubEl = who.querySelector(".sl-club");
+            if (clubEl) clubEl.style.display = "";
+            let size = parseFloat(getComputedStyle(name).fontSize);
+            while (name.scrollWidth > who.clientWidth && size > 20) {
+                size -= 1;
+                name.style.fontSize = size + "px";
+            }
+            // no room left for a readable club → leave it out entirely
+            const club = who.querySelector(".sl-club");
+            if (club) club.style.display = club.clientWidth < 70 ? "none" : "";
+        });
+    }
+
+    function fitThumbs() {
+        const fmt = FORMATS[state.format];
+        document.querySelectorAll(".mk-thumb-frame").forEach(frame => {
+            const scale = frame.clientWidth / fmt.w;
+            frame.style.height = Math.round(fmt.h * scale) + "px";
+            frame.querySelector(".mk-scale").style.transform = `scale(${scale})`;
+        });
+    }
+
+    let renderTimer = null;
+    function scheduleRender() {
+        clearTimeout(renderTimer);
+        renderTimer = setTimeout(render, 120);
+    }
+
+    // ═══ CAPTION ══════════════════════════════════════════════════════
+    function buildCaption() {
+        const cats = selectedCategories();
+        if (!cats.length) return "";
+        const rows = medalRows(cats);
+        const lead = rows[0];
+        const what = state.medalBy === "country" ? "countries" : "clubs";
+        const tags = ["#TrueVAR", "#" + (SPORT || "sport").replace(/\s+/g, ""), "#results"]
+            .concat(state.text.title.split(/\s+/).filter(w => /^[A-Za-zÀ-ž]{4,}$/.test(w)).slice(0, 2).map(w => "#" + w));
+        return [
+            `🏅 ${state.text.headline} — ${state.text.title}`,
+            state.text.kicker ? `📍 ${state.text.kicker}` : "",
+            "",
+            `${cats.length} categories, ${rows.reduce((n, r) => n + r.total, 0)} medals across ${rows.length} ${what}.`,
+            lead ? `Top of the table: ${lead.name} with ${lead.g} 🥇 ${lead.s} 🥈 ${lead.b} 🥉.` : "",
+            "",
+            "Swipe for every podium 👉",
+            `Full results & replays: ${PUBLIC_URL}`,
+            "",
+            [...new Set(tags)].join(" "),
+        ].filter((l, i, a) => l !== "" || a[i - 1] !== "").join("\n");
+    }
+
+    // ═══ EXPORT ═══════════════════════════════════════════════════════
+    async function slideBlob(i) {
+        const fmt = FORMATS[state.format];
+        const el = slideEls[i];
+        await document.fonts.ready;
+        if (fontCss === null) {
+            try { fontCss = await htmlToImage.getFontEmbedCSS(el); }
+            catch (err) { console.warn("Fonts not embedded", err); fontCss = ""; }
+        }
+        return htmlToImage.toBlob(el, {
+            width: fmt.w, height: fmt.h, pixelRatio: 1, fontEmbedCSS: fontCss,
+            imagePlaceholder: TRANSPARENT_PX, cacheBust: false,
+        });
+    }
+
+    function saveBlob(blob, name) {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    }
+
+    async function withBusy(btn, label, fn) {
+        const html = btn ? btn.innerHTML : "";
+        if (btn) { btn.disabled = true; btn.textContent = label; }
+        try { await fn(); }
+        catch (err) { console.error(err); alert("Export failed: " + (err && err.message || err)); }
+        finally { if (btn) { btn.disabled = false; btn.innerHTML = html; } }
+    }
+
+    function downloadOne(i, btn) {
+        return withBusy(btn, "…", async () => saveBlob(await slideBlob(i), slideName(slides[i], i)));
+    }
+
+    function downloadAll() {
+        const btn = $("mk-download-all");
+        return withBusy(btn, "Building…", async () => {
+            const zip = new JSZip();
+            for (let i = 0; i < slides.length; i++) {
+                btn.textContent = `Building ${i + 1}/${slides.length}…`;
+                zip.file(slideName(slides[i], i), await slideBlob(i));
+            }
+            zip.file("caption.txt", $("mk-caption").value);
+            const blob = await zip.generateAsync({ type: "blob" });
+            saveBlob(blob, `${slug(state.text.title)}_results_${state.format}.zip`);
+        });
+    }
+
+    // ═══ LIGHTBOX ═════════════════════════════════════════════════════
+    let lbIndex = -1;
+    function openLightbox(i) {
+        lbIndex = i;
+        $("mk-lightbox").classList.remove("hidden");
+        showLightbox();
+    }
+    function closeLightbox() {
+        $("mk-lightbox").classList.add("hidden");
+        $("mk-lb-stage").innerHTML = "";
+        lbIndex = -1;
+    }
+    function showLightbox() {
+        const fmt = FORMATS[state.format];
+        const stage = $("mk-lb-stage");
+        const scale = Math.min((window.innerHeight - 140) / fmt.h, (window.innerWidth - 160) / fmt.w);
+        stage.style.width = Math.round(fmt.w * scale) + "px";
+        stage.style.height = Math.round(fmt.h * scale) + "px";
+        const clone = slideEls[lbIndex].cloneNode(true);
+        wireImageFallbacks(clone);
+        const holder = document.createElement("div");
+        holder.className = "mk-scale";
+        holder.style.transform = `scale(${scale})`;
+        holder.appendChild(clone);
+        stage.innerHTML = "";
+        stage.appendChild(holder);
+        $("mk-lb-pos").textContent = `${lbIndex + 1} / ${slides.length}`;
+    }
+    $("mk-lightbox").addEventListener("click", (e) => {
+        const act = e.target.closest("[data-lb]") && e.target.closest("[data-lb]").dataset.lb;
+        if (act === "close" || e.target.id === "mk-lightbox") closeLightbox();
+        else if (act === "prev") { lbIndex = (lbIndex - 1 + slides.length) % slides.length; showLightbox(); }
+        else if (act === "next") { lbIndex = (lbIndex + 1) % slides.length; showLightbox(); }
+        else if (act === "download") downloadOne(lbIndex, e.target.closest("button"));
+    });
+    document.addEventListener("keydown", (e) => {
+        if (lbIndex < 0) return;
+        if (e.key === "Escape") closeLightbox();
+        if (e.key === "ArrowLeft") { lbIndex = (lbIndex - 1 + slides.length) % slides.length; showLightbox(); }
+        if (e.key === "ArrowRight") { lbIndex = (lbIndex + 1) % slides.length; showLightbox(); }
+    });
+
+    // ═══ CONTROLS ═════════════════════════════════════════════════════
+    function renderDivisionChecks() {
+        const counts = {};
+        categories.forEach(c => { counts[c.division] = (counts[c.division] || 0) + 1; });
+        const divs = Object.keys(counts).sort((a, b) => divisionRank(a) - divisionRank(b));
+        state.divisions = new Set(divs);
+        $("mk-divisions").innerHTML = divs.length
+            ? divs.map(d => `<label class="mk-check"><input type="checkbox" data-div="${esc(d)}" checked> ${esc(divisionLabel(d))} <small>${counts[d]}</small></label>`).join("")
+            : `<span class="mk-hint">No results yet.</span>`;
+        $("mk-divisions").querySelectorAll("[data-div]").forEach(cb => cb.addEventListener("change", () => {
+            if (cb.checked) state.divisions.add(cb.dataset.div); else state.divisions.delete(cb.dataset.div);
+            scheduleRender();
+        }));
+    }
+
+    function initTextDefaults() {
+        const parts = splitTitle(TOURNAMENT_TITLE || "Tournament");
+        const date = formatDate(TOURNAMENT_DATE);
+        state.text.title = parts.title;
+        state.text.headline = parts.day ? `Day ${parts.day} results` : "Results";
+        state.text.kicker = [parts.discipline || DISCIPLINE, TOURNAMENT_LOCATION, date].filter(Boolean).join(" · ");
+        state.text.footer = [parts.title, date].filter(Boolean).join(" · ");
+        [["mk-t-title", "title"], ["mk-t-headline", "headline"], ["mk-t-kicker", "kicker"], ["mk-t-footer", "footer"]].forEach(([id, key]) => {
+            $(id).value = state.text[key];
+            $(id).addEventListener("input", () => { state.text[key] = $(id).value; scheduleRender(); });
+        });
+    }
+
+    function initControls() {
+        document.querySelectorAll(".mk-seg").forEach(seg => {
+            seg.addEventListener("click", (e) => {
+                const btn = e.target.closest("button");
+                if (!btn) return;
+                seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b === btn ? "true" : "false"));
+                state[seg.dataset.name] = btn.dataset.value;
+                scheduleRender();
+            });
+        });
+        ["mk-inc-cover", "mk-inc-medals", "mk-inc-results", "mk-medal-rows", "mk-medal-all", "mk-per-slide",
+            "mk-show", "mk-names", "mk-only-complete", "mk-skip-alone"].forEach(id => $(id).addEventListener("change", scheduleRender));
+        $("mk-download-all").addEventListener("click", downloadAll);
+        $("mk-copy-caption").addEventListener("click", async (e) => {
+            try { await navigator.clipboard.writeText($("mk-caption").value); e.target.textContent = "Copied ✓"; }
+            catch { $("mk-caption").select(); document.execCommand("copy"); e.target.textContent = "Copied ✓"; }
+            setTimeout(() => { e.target.textContent = "Copy caption"; }, 1500);
+        });
+        window.addEventListener("resize", () => { fitThumbs(); if (lbIndex >= 0) showLightbox(); });
+    }
+
+    // ═══ START ════════════════════════════════════════════════════════
+    (async function start() {
+        initControls();
+        initTextDefaults();
+        try {
+            categories = await loadData();
+            const done = categories.filter(c => c.status === "complete").length;
+            if (!categories.length) setStatus("warn", "No results computed yet");
+            else setStatus(done === categories.length ? "ok" : "warn",
+                `${done} of ${categories.length} categories finished${DEMO ? " · sample data" : ""}`);
+        } catch (err) {
+            console.error(err);
+            setStatus("err", "Couldn't load results");
+            categories = [];
+        }
+        renderDivisionChecks();
+        await document.fonts.ready;
+        render();
+    })();
+</script>
+{% endraw %}
+{% endblock %}

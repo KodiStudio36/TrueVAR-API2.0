@@ -100,11 +100,24 @@ async function loadPopulatedCategories() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// ORDERING STRATEGIES — rank entries 1..N. Registry: add more here.
+// SEEDING STRATEGIES — rank entries 1..N (seed 1 first). Registry: add
+// more here (e.g. a ranking). The draw itself is ALWAYS the WT seed →
+// line table (BracketCore.placeWT); only the seeding differs.
+//   (entries, { system }) -> entries in seed order
 // ══════════════════════════════════════════════════════════════════
 const ORDERING_STRATEGIES = {
+    // Sort by country / club / name, deal onto the WT lines so club-mates
+    // don't meet in round 1 or 2; search if the deal still has a clash.
+    // Only elimination brackets have a draw to spread — cut-off and round
+    // robin keep registration order.
+    club_spread: (entries, ctx) => (ctx && ctx.system === "single_elimination")
+        ? BracketCore.clubSpreadSeeding(entries).seeded
+        : entries.slice(),
     registration_order: (entries) => entries.slice(),
 };
+
+// Every new elimination bracket is drawn with this placement.
+const WT_PLACEMENT_KEY = "wt";
 
 // ══════════════════════════════════════════════════════════════════
 // PLACEMENT STRATEGIES + SINGLE ELIMINATION — live in bracket-core.js,
@@ -113,6 +126,21 @@ const ORDERING_STRATEGIES = {
 // strategies to BracketCore.PLACEMENT_STRATEGIES, not here.
 // ══════════════════════════════════════════════════════════════════
 const { sameClub, cornerFromEntry, generateSingleElimination, PLACEMENT_STRATEGIES } = BracketCore;
+const WT_PLACEMENT = PLACEMENT_STRATEGIES[WT_PLACEMENT_KEY];
+
+// Same-club pairs that meet in round 2 if both win (not counted when
+// round 2 is already the final). Feeds the hard-lock checker.
+function round2ClubMeetings(bracket) {
+    if (!bracket.rounds || bracket.rounds.length < 3) return [];
+    const r1 = bracket.rounds[0], out = [];
+    const people = m => m.status === "walkover"
+        ? [m.winnerCorner].filter(p => p && p.entryId)
+        : [m.blue, m.red].filter(p => p && p.entryId);
+    for (let i = 0; i + 1 < r1.length; i += 2) {
+        people(r1[i]).forEach(a => people(r1[i + 1]).forEach(b => { if (sameClub(a, b)) out.push([a, b]); }));
+    }
+    return out;
+}
 
 // ══════════════════════════════════════════════════════════════════
 // COURT ORDERING (KYORUGI) — HARD LOCKS #1 and #3
@@ -203,8 +231,7 @@ async function loadEntriesForCategory(cat) {
 // -> { skippedSingleEntryCount, totalConflicts }
 async function buildAllBrackets({ categories, systemKey, build, decorateMatch, extraBracketFields, allowSingleEntry }) {
     const orderingKey = document.getElementById("orderingSelect").value;
-    const placementKey = document.getElementById("placementSelect").value;
-    const orderingFn = ORDERING_STRATEGIES[orderingKey];
+    const orderingFn = ORDERING_STRATEGIES[orderingKey] || ORDERING_STRATEGIES.club_spread;
 
     generatedBrackets = [];
     generatedMatches = [];
@@ -218,7 +245,7 @@ async function buildAllBrackets({ categories, systemKey, build, decorateMatch, e
         const soloOk = typeof allowSingleEntry === "function" ? allowSingleEntry(cat, system) : !!allowSingleEntry;
         if (!soloOk && entries.length < 2) { skippedSingleEntryCount++; continue; }
 
-        const seeded = orderingFn(entries);
+        const seeded = orderingFn(entries, { system, category: cat });
         seeded.forEach((e, i) => { e.seed = i + 1; });
 
         const built = build(cat, seeded, system);
@@ -235,7 +262,7 @@ async function buildAllBrackets({ categories, systemKey, build, decorateMatch, e
             discipline: TOURNAMENT_DISCIPLINE, format: system === "cut_off" ? "solo" : "duel",
             system,
             orderingStrategy: orderingKey,
-            placementStrategy: system === "single_elimination" ? placementKey : null,
+            placementStrategy: system === "single_elimination" ? WT_PLACEMENT_KEY : null,
             entries: seeded.map(e => ({
                 entryId: e.entryId, athleteIds: e.athleteIds, clubId: e.clubId, clubName: e.clubName,
                 country: e.country, name: e.name, seed: e.seed, associationIds: e.associationIds || [],
@@ -245,6 +272,7 @@ async function buildAllBrackets({ categories, systemKey, build, decorateMatch, e
             entrySlotIndex: built.entrySlotIndex,
             minClubClashes: built.minClubClashes ?? null,
             minClashProven: built.minClashProven ?? null,
+            minRound2Clashes: built.minRound2Clashes ?? null,
             ageMin: cat.ageMin,
             ...(extraBracketFields ? extraBracketFields(cat, system) : {}),
         });
@@ -271,7 +299,7 @@ function showGenerationResults(summaryParts, lockReport) {
 // (generator, drag, or future code). Push is blocked unless report.ok.
 // ══════════════════════════════════════════════════════════════════
 function validateHardLocks() {
-    const report = { restGap: [], restGapRelaxed: [], firstRound: [], categoryCourt: [], dependency: [], notes: [], ok: true };
+    const report = { restGap: [], restGapRelaxed: [], firstRound: [], secondRound: [], categoryCourt: [], dependency: [], notes: [], ok: true };
     if (generatedBrackets.length === 0) return report;
 
     const labelOf = {};
@@ -293,18 +321,29 @@ function validateHardLocks() {
     // Discipline-specific locks (kyorugi: bracket order + rest gap).
     disciplineHardLockChecks(report, labelOf);
 
-    // LOCK #2 — same-club round-1 pairs vs. the proven minimum
+    // LOCK #2 — same-club pairs in round 1, and in round 2 (if both win),
+    // vs. the best club-spread draw for the same athletes.
     generatedBrackets.filter(b => b.system === "single_elimination").forEach(b => {
         const clashes = b.rounds[0].filter(m => m.status !== "walkover" && sameClub(m.blue, m.red));
         const min = b.minClubClashes ?? 0;
         if (clashes.length > min) {
-            report.firstRound.push(`${b.categoryLabel}: ${clashes.length} same-club first-round pair(s), only ${min} unavoidable — use "Club spread" placement`);
+            report.firstRound.push(`${b.categoryLabel}: ${clashes.length} same-club first-round pair(s), only ${min} unavoidable — use "Club spread" seeding`);
         } else if (clashes.length > 0) {
             report.notes.push(`${b.categoryLabel}: ${clashes.length} same-club first-round pair(s), mathematically unavoidable${b.minClashProven ? "" : " (best found — search limit reached)"}`);
         }
+
+        // Round 2 only counts once round 1 is as good as it gets.
+        if (clashes.length > min) return;
+        const r2 = round2ClubMeetings(b).length;
+        const min2 = b.minRound2Clashes ?? 0;
+        if (r2 > min2) {
+            report.secondRound.push(`${b.categoryLabel}: ${r2} same-club pair(s) can meet in round 2, best draw has ${min2} — use "Club spread" seeding`);
+        } else if (r2 > 0) {
+            report.notes.push(`${b.categoryLabel}: ${r2} same-club pair(s) can meet in round 2 — too many club-mates for the draw size, best draw found`);
+        }
     });
 
-    report.ok = [report.restGap, report.firstRound, report.categoryCourt, report.dependency].every(l => l.length === 0);
+    report.ok = [report.restGap, report.firstRound, report.secondRound, report.categoryCourt, report.dependency].every(l => l.length === 0);
     return report;
 }
 
@@ -344,6 +383,7 @@ function renderHardLockReport(report) {
         </div>
         ${row("Rest gap — min fights between the same athlete's matches", report.restGap, HAS_REST_GAP_LOCK, report.restGapRelaxed)}
         ${row("First round — no same-club pair when avoidable", report.firstRound, anyElim)}
+        ${row("Second round — club-mates can't meet when avoidable", report.secondRound, anyElim)}
         ${row("One category → one court", report.categoryCourt, true)}
         ${row("Bracket order — every match after its feeders", report.dependency, HAS_REST_GAP_LOCK)}
         ${notes}

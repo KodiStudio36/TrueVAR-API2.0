@@ -847,3 +847,20 @@ async def stream_keys_page(request: Request):
     return templates.TemplateResponse(request, "dashboard/stream_keys.html", {
         "request": request, "keys": keys,
     })
+
+
+@router.get("/tournaments/{tournament_id}/marketing/results")
+async def marketing_results_page(
+    tournament_id: str,
+    request: Request,
+    tournament_repo=Depends(get_tournament_repo),
+    # + the operator/permission dependency your live-queue route uses
+):
+    tournament = GetTournamentUseCase(tournament_repo).execute(tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+ 
+    return templates.TemplateResponse(request, "dashboard/marketing_results.html", {
+        "request": request,
+        "tournament": tournament,
+    })

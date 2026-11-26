@@ -894,11 +894,10 @@ async function generateEverything() {
         return;
     }
 
-    const placementFn = PLACEMENT_STRATEGIES[document.getElementById("placementSelect").value];
     const { skippedSingleEntryCount, totalConflicts } = await buildAllBrackets({
         categories: flatCategories,
         systemKey: "single_elimination",
-        build: (cat, seeded) => generateSingleElimination(cat.code, seeded, placementFn),
+        build: (cat, seeded) => generateSingleElimination(cat.code, seeded, WT_PLACEMENT),
         decorateMatch: (m, cat) => {
             const vestInfo = vestInfoFor(cat);
             m.pssSize = vestInfo ? vestInfo.pssSize : null;

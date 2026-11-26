@@ -65,17 +65,12 @@ dashboard router). Shared JS: /static/js/bracket-builder-common.js.
         </div>
         <div class="bb-generate-controls">
             {% block generate_fields_before %}{% endblock %}
-            <label class="bb-field">
-                <span>Seed ordering</span>
+            <label class="bb-field" id="placementFieldWrap"
+                title="Brackets are always drawn with the WT seed table (seed 1 top line, seed 2 bottom line, byes to the top seeds). This only decides who gets which seed.">
+                <span>Seeding</span>
                 <select id="orderingSelect">
-                    <option value="registration_order">Registration order</option>
-                </select>
-            </label>
-            <label class="bb-field" id="placementFieldWrap">
-                <span>Seed placement</span>
-                <select id="placementSelect">
-                    <option value="club_country_spread">Club spread (hard lock) + country tie-break</option>
-                    <option value="standard">Standard (seed order only — checker flags avoidable club pairs)</option>
+                    <option value="club_spread">Club spread — no club-mates in rounds 1–2 when avoidable</option>
+                    <option value="registration_order">Registration order (checker flags avoidable club pairs)</option>
                 </select>
             </label>
             {% block generate_fields_after %}{% endblock %}
@@ -83,8 +78,8 @@ dashboard router). Shared JS: /static/js/bracket-builder-common.js.
                 Ordering</button>
         </div>
         <p class="text-muted" style="font-size: 0.8rem; margin-top: 0.6rem;">
-            Each dropdown is a registry — new algorithms slot in without touching the pipeline around them
-            (ORDERING_STRATEGIES in bracket-builder-common.js, PLACEMENT_STRATEGIES in bracket-core.js).
+            Elimination brackets are always drawn with the WT seed table; the seeding is a registry — new
+            seedings (e.g. by ranking) slot into ORDERING_STRATEGIES in bracket-builder-common.js.
         </p>
         <div id="generateSummary" class="bb-generate-summary"></div>
     </div>
